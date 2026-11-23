@@ -546,7 +546,8 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public void resetEngagementMovement() {
         jumpUsedThisTurn = 0;
-        optionalAirReturns = new ArrayList<>();
+        airAttackOpponent = null;
+        airPasses = new ArrayList<>();
         reservedAirReturns = new ArrayList<>();
         mpSpentThisTurn = 0;
         overranThisTurn = false;
@@ -632,29 +633,35 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         }
     }
 
-    private List<Integer> optionalAirReturns = new ArrayList<>();
+    private Integer airAttackOpponent;
+    private List<Integer> airPasses = new ArrayList<>();
     private List<Integer> reservedAirReturns = new ArrayList<>();
 
-    public void permitAirReturnChoice(int attacker) {
-        if (optionalAirReturns == null) {
-            optionalAirReturns = new ArrayList<>();
-        }
-        if (!optionalAirReturns.contains(attacker)) {
-            optionalAirReturns.add(attacker);
-        }
+    public boolean mayAttackAirOpponent(int id) {
+        return !reservedAirReturn(id) && ((airAttackOpponent == null) || (airAttackOpponent == id));
     }
 
-    public boolean reserveAirReturn(int attacker) {
-        if (!isEngagedWith(attacker) || (optionalAirReturns == null) || !optionalAirReturns.contains(attacker)) {
-            return false;
-        }
+    public void commitAirAttack(int id) {
+        airAttackOpponent = id;
+    }
+
+    public void declineAirReturn(int attacker, boolean pass) {
         if (reservedAirReturns == null) {
             reservedAirReturns = new ArrayList<>();
         }
         if (!reservedAirReturns.contains(attacker)) {
             reservedAirReturns.add(attacker);
         }
-        return true;
+        if (airPasses == null) {
+            airPasses = new ArrayList<>();
+        }
+        if (pass && !airPasses.contains(attacker)) {
+            airPasses.add(attacker);
+        }
+    }
+
+    public boolean passesAirOpponent(int attacker) {
+        return (airPasses != null) && airPasses.contains(attacker);
     }
 
     public boolean reservedAirReturn(int attacker) {
@@ -719,7 +726,8 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     public boolean isEligibleForPhase(GamePhase phase) {
         // A sprinting Formation may not make attacks (IO:BF p.199)
         return !isDone && !isEmbarked() && !(phase.isFiring() && (sprintedThisTurn || !canAttackAfterEngagement())) && switch (phase) {
-            case MOVEMENT -> isDeployed && getEngagedOpponents().isEmpty();
+            case MOVEMENT -> isDeployed && (getEngagedOpponents().isEmpty()
+                  || (isOnRadarMap() && getEngagedOpponents().stream().allMatch(this::passesAirOpponent)));
             case PREMOVEMENT, PRE_FIRING -> isHidden;
             default -> isDeployed;
         };

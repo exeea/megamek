@@ -38,13 +38,18 @@ import java.util.List;
 import java.util.function.IntSupplier;
 
 import megamek.common.Player;
+import megamek.common.Team;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.board.BoardLocation;
 import megamek.common.compute.Compute;
 import megamek.common.strategicBattleSystems.SBFEngagementOrders;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.AirDefense;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.AirResponse;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.EndPair;
 import megamek.common.strategicBattleSystems.SBFEngagementOrders.Exchange;
 import megamek.common.strategicBattleSystems.SBFEngagementOrders.Order;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 
@@ -92,7 +97,8 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                     }
                     return null;
                 }
-                Boolean contest = movementOutcome(mover, other, ownChoice, otherChoice, traveled.getLastPosition());
+                Boolean contest = movementOutcome(mover, other, ownChoice, otherChoice, traveled.getLastPosition(),
+                      route, i);
                 if (contest == null) {
                     orders.awaitOrders(route, other.getId());
                     return null;
@@ -114,6 +120,114 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
             }
         }
         return route;
+    }
+
+    /** Air-to-Air Engagements, IO:BF pp. 176–177. There is no extra Thrust cost to leave a hostile zone. */
+    Boolean airContact(SBFFormation mover, SBFFormation opponent, SBFMovePath route) {
+        SBFEngagementOrders orders = manager.getGame().engagementOrders();
+        if (manager.getGame().usesDoubleBlind()) {
+            // Same-zone airborne Squadrons always see each other, including an encounter during transit (IO:BF p. 177).
+            var visibility = manager.getGame().visibilityHelper();
+            visibility.setVisibility(mover.getOwnerId(), opponent.getId(),
+                  visibility.getObservedVisibility(mover.getOwnerId(), opponent.getId()).bestOf(SBFVisibilityStatus.EYES_ON_TARGET));
+            visibility.setVisibility(opponent.getOwnerId(), mover.getId(),
+                  visibility.getObservedVisibility(opponent.getOwnerId(), mover.getId()).bestOf(SBFVisibilityStatus.EYES_ON_TARGET));
+        }
+        if (mover.isEngagedWith(opponent.getId())) {
+            return !mover.passesAirOpponent(opponent.getId());
+        }
+        if (orders.alreadyDeclined(mover.getId(), opponent.getId())) {
+            return false;
+        }
+        AirDefense defense = orders.airDefense();
+        if (defense == null) {
+            Order own = mover.mayAttackAirOpponent(opponent.getId()) ? intent(mover, opponent) : Order.AVOID;
+            Order other = opponent.mayAttackAirOpponent(mover.getId()) ? intent(opponent, mover) : Order.AVOID;
+            if (!airOrder(own) || !airOrder(other)) {
+                orders.awaitOrders(route, opponent.getId());
+                if (!airOrder(own)) {
+                    prompt(mover, opponent);
+                }
+                if (!airOrder(other)) {
+                    prompt(opponent, mover);
+                }
+                return null;
+            }
+            SBFFormation winner;
+            boolean engage;
+            if (orders.isWinnerPair(mover.getId(), opponent.getId())) {
+                winner = orders.decisionWinner() == mover.getId() ? mover : opponent;
+                Boolean chosen = orders.takeDecision();
+                if (chosen == null) {
+                    orders.awaitOrders(route, opponent.getId());
+                    return null;
+                }
+                engage = chosen;
+            } else {
+                winner = (own == Order.AVOID) && (other == Order.AVOID) ? null : rollWinner(mover, opponent, 0, 0);
+                Order choice = winner == mover ? own : other;
+                if ((winner != null) && (choice == Order.ASK)) {
+                    SBFFormation loser = winner == mover ? opponent : mover;
+                    orders.awaitOrders(route, opponent.getId());
+                    orders.awaitWinner(winner.getId(), loser.getId());
+                    promptWinner(winner, loser);
+                    return null;
+                }
+                engage = (winner != null) && choice.seeksEngagement();
+            }
+            if (!engage) {
+                orders.decline(mover.getId(), opponent.getId());
+                return false;
+            }
+            SBFFormation defender = winner == mover ? opponent : mover;
+            defense = new AirDefense(winner.getId(), defender.getId(), null);
+            orders.setAirDefense(defense);
+        }
+        SBFFormation attacker = defense.attacker() == mover.getId() ? mover : opponent;
+        SBFFormation defender = attacker == mover ? opponent : mover;
+        if (defense.response() == null) {
+            orders.awaitOrders(route, opponent.getId());
+            promptAirDefense(defender, attacker);
+            return null;
+        }
+        attacker.commitAirAttack(defender.getId());
+        if (defense.response() == AirResponse.RETURN) {
+            defender.commitAirAttack(attacker.getId());
+        } else {
+            defender.declineAirReturn(attacker.getId(), defense.response() == AirResponse.PASS);
+        }
+        setEngaged(mover, opponent, true);
+        orders.setAirDefense(null);
+        if (!opponent.passesAirOpponent(mover.getId())) {
+            opponent.setDone(true);
+        }
+        manager.sendUnitUpdate(opponent);
+        return !mover.passesAirOpponent(opponent.getId());
+    }
+
+    private void promptAirDefense(SBFFormation defender, SBFFormation attacker) {
+        manager.sendServerChat(defender.getOwnerId(), "Air engagement: choose /sbfaero return, reserve, or pass followed by "
+              + defender.getId() + " " + attacker.getId() + ". Reserve saves your attack, pass also allows movement.");
+    }
+
+    boolean airResponse(int player, int own, int other, AirResponse choice) {
+        SBFGame game = manager.getGame();
+        SBFEngagementOrders orders = game.engagementOrders();
+        AirDefense defense = orders.airDefense();
+        SBFFormation defender = game.getFormation(own).orElse(null);
+        if (!game.getPhase().isMovement() || (orders.pendingMove() == null) || (defense == null)
+              || (defense.defender() != own) || (defense.attacker() != other) || (defense.response() != null)
+              || (defender == null) || (defender.getOwnerId() != player)
+              || ((choice == AirResponse.RETURN) && !defender.mayAttackAirOpponent(other))) {
+            return false;
+        }
+        orders.setAirDefense(new AirDefense(other, own, choice));
+        resume(own);
+        return true;
+    }
+
+    private boolean airOrder(Order order) {
+        return (order == Order.ENGAGE) || (order == Order.AVOID) || (order == Order.ASK);
     }
 
     private int transportCostThrough(SBFMovePath route, int step) {
@@ -159,7 +273,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     }
 
     private Boolean movementOutcome(SBFFormation first, SBFFormation second, Order ownOrder, Order otherOrder,
-          BoardLocation contact) {
+          BoardLocation contact, SBFMovePath route, int step) {
         SBFEngagementOrders orders = manager.getGame().engagementOrders();
         if ((ownOrder == Order.OVERRUN) || (ownOrder == Order.EVADE)) {
             Exchange exchange = orders.exchange();
@@ -172,7 +286,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                     second.setForcedOpponent(first.getId());
                 }
             }
-            if (!new SBFContactDamage(manager, dice).resolve(first, second, contact)) {
+            if (!new SBFContactDamage(manager, dice).resolve(first, second, contact, route, step)) {
                 return null;
             }
             if (ownOrder == Order.OVERRUN) {
@@ -212,6 +326,19 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     void remind(int playerId) {
         SBFGame game = manager.getGame();
         SBFEngagementOrders orders = game.engagementOrders();
+        if (game.getPhase().isEnd() && !orders.remainingEnds().isEmpty()) {
+            if (orders.decisionWinner() != Player.PLAYER_NONE) {
+                SBFFormation winner = game.getFormation(orders.decisionWinner()).orElseThrow();
+                if (winner.getOwnerId() == playerId) {
+                    EndPair pair = orders.selectedEnd();
+                    int other = pair.first() == winner.getId() ? pair.second() : pair.first();
+                    promptWinner(winner, game.getFormation(other).orElseThrow());
+                }
+            } else if (playerId == initiativeWinner()) {
+                promptOrder(playerId, winnerPairs(playerId));
+            }
+            return;
+        }
         if (orders.pendingMove() == null) {
             return;
         }
@@ -222,6 +349,13 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         SBFFormation mover = game.getFormation(orders.pendingMove().getEntityId()).orElse(null);
         SBFFormation other = game.getFormation(orders.contactId()).orElse(null);
         if ((mover != null) && (other != null)) {
+            if (orders.airDefense() != null) {
+                SBFFormation defender = orders.airDefense().defender() == mover.getId() ? mover : other;
+                if (defender.getOwnerId() == playerId) {
+                    promptAirDefense(defender, defender == mover ? other : mover);
+                }
+                return;
+            }
             if (orders.isWinnerPair(mover.getId(), other.getId())) {
                 SBFFormation winner = orders.decisionWinner() == mover.getId() ? mover : other;
                 if (winner.getOwnerId() == playerId) {
@@ -245,15 +379,15 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     private void prompt(SBFFormation side, SBFFormation other) {
         manager.sendServerChat(side.getOwnerId(), "Movement is waiting for your engagement order. Use /sbfengage "
               + side.getId() + " engage " + other.getId() + " or /sbfengage " + side.getId() + " avoid "
-              + other.getId() + ". Use ask to choose after winning, force to pin the opponent, or declare overrun "
-              + "or evade while moving through the hex.");
+              + other.getId() + ". Use ask to choose after winning."
+              + (side.isOnRadarMap() ? "" : " Ground orders also include force, overrun and evade."));
     }
 
     private SBFFormation rollWinner(SBFFormation first, SBFFormation second, int firstModifier, int secondModifier) {
         first.setForcedOpponent(null);
         second.setForcedOpponent(null);
-        int firstTarget = first.getTactics() + firstModifier;
-        int secondTarget = second.getTactics() + secondModifier;
+        int firstTarget = first.getTactics() + firstModifier + atmosphereModifier(first, second) + moraleModifier(first);
+        int secondTarget = second.getTactics() + secondModifier + atmosphereModifier(second, first) + moraleModifier(second);
         while (true) {
             int firstRoll = dice.getAsInt();
             int secondRoll = dice.getAsInt();
@@ -284,6 +418,31 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         }
     }
 
+    /** Engagement Control Roll Modifiers Table (IO:BF p. 168), including attempts to break off at End. */
+    private int moraleModifier(SBFFormation formation) {
+        return switch (formation.moraleStatus()) {
+            case SHAKEN -> 1;
+            case BROKEN -> 2;
+            case ROUTED -> 3;
+            default -> 0;
+        };
+    }
+
+    private int atmosphereModifier(SBFFormation squadron, SBFFormation other) {
+        if (!squadron.isOnRadarMap() || !other.isOnRadarMap()) {
+            return 0;
+        }
+        SBFGame game = manager.getGame();
+        if (game.getPhase().isEnd()) {
+            if (game.combatOrders().isBehind(squadron, other)) {
+                return 0;
+            } else if (game.combatOrders().isBehind(other, squadron)) {
+                return 4;
+            }
+        }
+        return 2;
+    }
+
     private void notifyBoth(SBFFormation first, SBFFormation second, String text) {
         manager.sendServerChat(first.getOwnerId(), text);
         manager.sendServerChat(second.getOwnerId(), text);
@@ -302,24 +461,114 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         for (SBFFormation first : game.getActiveFormations()) {
             for (int opponentId : first.getEngagedOpponents()) {
                 SBFFormation second = game.getFormation(opponentId).orElse(null);
-                if ((second == null) || (first.getPosition() == null)
-                      || !first.getPosition().equals(second.getPosition())) {
+                boolean sameLocation = (second != null) && (first.isOnRadarMap()
+                      ? first.getRadarZone() == second.getRadarZone()
+                      : ((first.getPosition() != null) && first.getPosition().equals(second.getPosition())));
+                if (!sameLocation) {
                     first.setEngagedWith(opponentId, false);
                 } else if (first.getId() < opponentId) {
-                    boolean firstContinues = continuesAtEnd(first, second);
-                    boolean secondContinues = continuesAtEnd(second, first);
-                    boolean keep = firstContinues;
-                    if (firstContinues != secondContinues) {
-                        SBFFormation winner = rollWinner(first, second, 0, 0);
-                        keep = (winner != null) && (winner == first ? firstContinues : secondContinues);
-                    }
-                    setEngaged(first, second, keep);
-                    if (!keep) {
-                        orders.decline(first.getId(), second.getId());
-                    }
+                    orders.remainingEnds().add(new EndPair(first.getId(), opponentId));
                 }
             }
         }
+        resolveEnds();
+    }
+
+    private int initiativeWinner() {
+        SBFGame game = manager.getGame();
+        Team highest = game.getTeams().stream().filter(team -> !team.nonObserverPlayers().isEmpty())
+              .max(Comparator.comparing(Team::getInitiative)).orElse(null);
+        List<Player> winningPlayers = highest == null ? game.getPlayersList() : highest.nonObserverPlayers();
+        return winningPlayers.stream().filter(player -> !player.isObserver())
+              .max(Comparator.comparing((Player player) -> winnerPairs(player.getId()).size() > 1)
+                    .thenComparing(Player::getInitiative))
+              .map(Player::getId).orElse(Player.PLAYER_NONE);
+    }
+
+    private List<EndPair> winnerPairs(int playerId) {
+        SBFGame game = manager.getGame();
+        return game.engagementOrders().remainingEnds().stream()
+              .filter(pair -> game.getFormation(pair.first()).orElseThrow().getOwnerId() == playerId
+                    || game.getFormation(pair.second()).orElseThrow().getOwnerId() == playerId)
+              .toList();
+    }
+
+    private void promptOrder(int playerId, List<EndPair> candidates) {
+        manager.sendServerChat(playerId, "You won initiative. Select the next ending engagement using "
+              + "/sbfengage <your formation ID> next <opponent ID>. Remaining pairs " + candidates + ".");
+    }
+
+    void chooseEnd(int player, int own, int opponent) {
+        SBFGame game = manager.getGame();
+        if (!game.getPhase().isEnd() || (player != initiativeWinner())
+              || game.getFormation(own).filter(formation -> formation.getOwnerId() == player).isEmpty()
+              || (game.engagementOrders().selectedEnd() != null)) {
+            manager.sendServerChat(player, "There is no engagement order for you to select.");
+            return;
+        }
+        EndPair chosen = winnerPairs(player).stream().filter(pair -> pair.matches(own, opponent)).findFirst().orElse(null);
+        if (chosen == null) {
+            manager.sendServerChat(player, "Choose one of your remaining engagement pairs.");
+            return;
+        }
+        game.engagementOrders().selectEnd(chosen);
+        resumeEnds();
+    }
+
+    private void resolveEnds() {
+        SBFGame game = manager.getGame();
+        SBFEngagementOrders orders = game.engagementOrders();
+        while (!orders.remainingEnds().isEmpty()) {
+            EndPair pair = orders.selectedEnd();
+            if (pair == null) {
+                int player = initiativeWinner();
+                List<EndPair> candidates = winnerPairs(player);
+                if (candidates.size() > 1) {
+                    promptOrder(player, candidates);
+                    return;
+                }
+                pair = candidates.isEmpty() ? orders.remainingEnds().getFirst() : candidates.getFirst();
+                orders.selectEnd(pair);
+            }
+            SBFFormation first = game.getFormation(pair.first()).orElseThrow();
+            SBFFormation second = game.getFormation(pair.second()).orElseThrow();
+            Boolean keep;
+            if (orders.isWinnerPair(first.getId(), second.getId())) {
+                keep = orders.takeDecision();
+                if (keep == null) {
+                    return;
+                }
+            } else {
+                boolean firstContinues = continuesAtEnd(first, second);
+                boolean secondContinues = continuesAtEnd(second, first);
+                keep = firstContinues;
+                if (firstContinues != secondContinues) {
+                    SBFFormation winner = rollWinner(first, second, 0, 0);
+                    SBFFormation other = winner == first ? second : first;
+                    if ((winner != null) && (intent(winner, other) == Order.ASK)) {
+                        orders.awaitWinner(winner.getId(), other.getId());
+                        promptWinner(winner, other);
+                        return;
+                    }
+                    keep = (winner != null) && (winner == first ? firstContinues : secondContinues);
+                }
+            }
+            setEngaged(first, second, keep);
+            if (!keep) {
+                orders.decline(first.getId(), second.getId());
+            }
+            orders.remainingEnds().remove(pair);
+            orders.selectEnd(null);
+        }
+    }
+
+    private void resumeEnds() {
+        resolveEnds();
+        manager.entityAllUpdate();
+        if (manager.getGame().engagementOrders().remainingEnds().isEmpty()) {
+            manager.endCurrentPhase();
+        }
+        manager.sendPendingPackets();
     }
 
     private boolean continuesAtEnd(SBFFormation side, SBFFormation other) {
@@ -347,6 +596,10 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
             manager.sendServerChat(playerId, "Choose a current engagement opponent or omit the opponent ID.");
             return;
         }
+        if (side.isOnRadarMap() && !airOrder(order)) {
+            manager.sendServerChat(playerId, "Air-to-air orders are engage, avoid or ask.");
+            return;
+        }
         if ((order != Order.AVOID) && (side.isMoraleRestricted() || side.mustWithdraw() || side.wasOverrunThisTurn())) {
             manager.sendServerChat(playerId, "This formation's morale or withdrawal requires it to avoid engagement.");
             return;
@@ -355,12 +608,18 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
             new SBFContactDamage(manager, dice).remind(playerId, orders.exchange());
             return;
         }
-        if (pendingPair && orders.isWinnerPair(formationId, opponentId)) {
+        boolean endDecision = game.getPhase().isEnd() && (orders.selectedEnd() != null)
+              && orders.selectedEnd().matches(formationId, opponentId);
+        if ((pendingPair || endDecision) && orders.isWinnerPair(formationId, opponentId)) {
             if ((formationId != orders.decisionWinner()) || ((order != Order.ENGAGE) && (order != Order.AVOID))) {
                 manager.sendServerChat(playerId, "The winner chooses engage or avoid for this contact.");
                 return;
             }
             orders.decide(order == Order.ENGAGE);
+            if (endDecision) {
+                resumeEnds();
+                return;
+            }
         } else {
             orders.order(formationId, opponentId, order);
             manager.sendServerChat(playerId, "Formation " + formationId + " recorded " + order
@@ -384,9 +643,14 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         if (pending != null && game.getPhase().isMovement()
               && ((formationId == pending.getEntityId()) || (formationId == orders.contactId()))) {
             SBFFormation mover = game.getFormation(pending.getEntityId()).orElse(null);
-            if ((mover != null) && (game.getTurn() != null) && game.getTurn().isValid(mover.getOwnerId(), mover, game)) {
+            if ((mover != null) && (game.getTurn() != null) && (pending.radarFlight() != null
+                  ? game.getTurn().playerId() == mover.getOwnerId() : game.getTurn().isValid(mover.getOwnerId(), mover, game))) {
                 orders.clearPendingMove();
-                manager.movementProcessor.resumeMovement(pending, mover);
+                if (pending.radarFlight() != null) {
+                    new SBFAerospace(manager).fly(mover, pending);
+                } else {
+                    manager.movementProcessor.resumeMovement(pending, mover);
+                }
                 manager.sendPendingPackets();
             }
         }

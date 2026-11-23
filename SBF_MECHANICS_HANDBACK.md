@@ -121,3 +121,21 @@ Independent reviews above are rules and source reviews. The integrated test run 
 “Losing Contact”, p. 198, applies in “an Urban hex” and at the end of Movement. SBFDetectionHelper uses the actual traversed destination and the detection tables for each recheck. A modified 6 changes an identified contact to a Blip, or removes an existing Blip. With shared vision the side retains its best identification while an allied sensor remains in range. Shared-team tracking and the hardened-urban entry cap passed independent rechecks. Where several observers track the formation, a side retains contact if one observer passes its applicable checks; the text does not specify how to combine multiple observers.
 
 Integrated verification at this checkpoint passed 217 of 218 tests. The failure concerned damage-triggered aerospace withdrawal and is under correction. The ground server scenario exercised deployment through the first End Phase. A follow-up regression now exercises actual adjacent movement and reciprocal attacks.
+
+### Deployment, movement order and aerospace review
+
+“Deployment”, p. 163, authorizes initial placement and first-turn entry by agreement. A scenario can author `deploymentround: 1` without initial coordinates. The ordinary deployment phase uses that Formation's scheduled round and legal zone. The separate setup roll and shared home-edge choices passed independent review. The text does not specify an entry MP surcharge. “Unequal Number of Formations”, p. 164, excludes “Undetected Formations” from initiative counts. SBFVisibilityHelper freezes detection at the beginning of Movement. SBFInitiativeHelper weights only located ground formations and SBFGameManager lets an undetected mover act without consuming an ordinary slot. The rule leaves the timing of uncounted moves open. Owners can move them during their ordinary turn or finish them after counted movement. The latter opportunity is offered uniformly to avoid advertising how many hidden units exist. This interpretation and the ping-to-located test passed an independent source review.
+
+“Movement” and “Air-to-Air Engagements”, pp. 175–177, use SBFAerospace, SBFRadarZone and SBFEngagementControl. A second reviewer passed the opposite radar entry zones, large-craft exclusions, interrupted Central routes and defender decisions. “Air-to-Ground Combat”, pp. 177–179, uses SBFAirGroundRun. Independent review found and rechecked partial-contact targeting, submerged targets, visibility from a flight path, fire-control and VTOL/WiGE modifiers. Crash loss of a COM now feeds morale before resolution and requires recheck. The radar topology has been inspected in text; the printed diagram has not been visually verified.
+
+“Transporting Infantry”, p. 167, “Forced Withdrawal”, p. 172, and “Morale”, pp. 172–174, share the movement and casualty state. The independently rechecked direct-fire LOS function now also governs candidate withdrawal hexes and rally. Allied command loss affects allied owners. Separate checks passed indirect-fire spotting from eligible airborne Squadrons (pp. 169, 196) and persistent bomb damage causes through simultaneous allocation and salvage (p. 174).
+
+| Advanced aerospace section | Current status | Code evidence |
+| --- | --- | --- |
+| Capital Radar Map and sectors, pp. 180–181 | MISSING | SBFRadarZone represents the atmospheric map. |
+| Landing, taxi, lift-off control, transport and time scale, pp. 182–183 | MISSING | SBFAerospace implements forced lift-off for standard p. 173 only. |
+| Atmosphere/space interface, movement rates, station keeping, stacking, fuel and departure, pp. 184–185 | MISSING | SBFAerospace.fly adjudicates atmospheric zones. |
+| Engagement Maps, p. 186 | MISSING | SBFEngagementControl has no capital engagement map. |
+| Firing arcs, capital attack limits, damage and breakoff, pp. 187–189 | MISSING | Standard Squadron combat is implemented in SBFToHitData and SBFCombatDamage. |
+| Orbit-to-surface and surface-to-orbit capital fire and space bombing, pp. 190–191 | MISSING | SBFAirGroundRun handles the atmospheric ground map. |
+| High-speed attacks, boarding, docking and hyperspace jumps, pp. 192–194 | MISSING | No live capital map or action resolver. |

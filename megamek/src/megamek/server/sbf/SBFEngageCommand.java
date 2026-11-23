@@ -69,6 +69,10 @@ class SBFEngageCommand extends ServerCommand {
         try {
             int own = Integer.parseInt(args[1]);
             int opponent = args.length == 4 ? Integer.parseInt(args[3]) : Player.PLAYER_NONE;
+            if (args[2].equalsIgnoreCase("next") && (args.length == 4)) {
+                new SBFEngagementControl(manager).chooseEnd(connId, own, opponent);
+                return;
+            }
             Order order = Order.valueOf(args[2].toUpperCase(Locale.ROOT));
             new SBFEngagementControl(manager).submitOrder(connId, own, opponent, order);
         } catch (IllegalArgumentException ex) {

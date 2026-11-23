@@ -94,6 +94,21 @@ public class SBFEngagementOrders implements Serializable {
         this.exchange = exchange;
     }
 
+    public enum AirResponse { RETURN, RESERVE, PASS }
+
+    /** Defender's election is made when a new air engagement is initiated (IO:BF p. 177). */
+    public record AirDefense(int attacker, int defender, AirResponse response) implements Serializable { }
+
+    private AirDefense airDefense;
+
+    public AirDefense airDefense() {
+        return airDefense;
+    }
+
+    public void setAirDefense(AirDefense defense) {
+        airDefense = defense;
+    }
+
     public enum Order {
         ENGAGE, AVOID, ASK, FORCE, OVERRUN, EVADE;
 
@@ -121,6 +136,7 @@ public class SBFEngagementOrders implements Serializable {
     public void finishMovement() {
         lastResolvedStep = 0;
         exchange = null;
+        airDefense = null;
         clearPendingMove();
         clearDecision();
     }

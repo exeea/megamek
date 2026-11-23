@@ -40,6 +40,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.contains;
 
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -65,6 +68,8 @@ import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
 import megamek.server.Server;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class SBFEngagementControlTest {
     private final SBFGame game = new SBFGame();
@@ -136,6 +141,16 @@ class SBFEngagementControlTest {
         assertTrue(defender.isEngagedWith(mover.getId()));
         assertTrue(defender.isDone());
         assertFalse(mover.isEligibleForPhase(GamePhase.MOVEMENT));
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "SHAKEN,5", "BROKEN,6", "ROUTED,7" })
+    void moraleModifiesTheOpposedTargetEvenWhenRestrictedToAvoid(SBFFormation.MoraleStatus status, int tn) {
+        mover.setMoraleStatus(status);
+        defender.setTactics(5);
+        orders(false, true);
+        assertEquals(hex(1), rolls(5, 6).resolveMovement(mover, route).getLastPosition());
+        verify(manager).sendServerChat(eq(1), contains("10 rolled 5 against " + tn));
     }
 
     @Test
@@ -218,6 +233,43 @@ class SBFEngagementControlTest {
         assertTrue(defender.canAttackAfterEngagement());
     }
 
+    @Test
+    void jumpAppliesAtDeclarationWhileTheHostileContactIsStillPending() {
+        mover.setJumpMove(2);
+        route.setJumpUsed(2);
+        assertTrue(new SBFMovementProcessor(manager).processMovement(route, mover));
+        assertNull(game.engagementOrders().intent(mover.getId(), defender.getId()));
+        assertFalse(mover.isDone());
+        assertEquals(2, mover.getJumpUsedThisTurn());
+        mover.resetEngagementMovement();
+        assertEquals(0, mover.getJumpUsedThisTurn());
+    }
+
+    @Test
+    void successfulEvadeFiresOnlyTheChosenFreeShotAndAppliesDamageImmediately() {
+        SBFUnit target = combatUnit(mover, 2, 1);
+        combatUnit(defender, 2, 1);
+        game.engagementOrders().order(mover.getId(), defender.getId(), Order.EVADE);
+        game.engagementOrders().order(defender.getId(), mover.getId(), Order.ENGAGE);
+        SBFEngagementControl control = rolls(6, 4, 12);
+        assertNull(control.resolveMovement(mover, route));
+        control.selectUnit(2, defender.getId(), mover.getId(), true, 1);
+        assertEquals(hex(2), control.resolveMovement(mover, route).getLastPosition());
+        assertEquals(17, target.getCurrentArmor());
+        assertTrue(game.getPendingHits().isEmpty());
+    }
+
+    @Test
+    void specialEngagementNeedsEnoughMoveToExitIncludingHostileSurcharge() {
+        mover.setMovement(2);
+        combatUnit(mover, 8, 1);
+        game.engagementOrders().order(mover.getId(), defender.getId(), Order.OVERRUN);
+        game.engagementOrders().order(defender.getId(), mover.getId(), Order.AVOID);
+        assertNull(rolls().resolveMovement(mover, route));
+        assertFalse(mover.hasOverrunThisTurn());
+        assertNull(game.engagementOrders().exchange());
+    }
+
     private SBFUnit combatUnit(SBFFormation side, int shortDamage, int mediumDamage) {
         SBFUnit unit = new SBFUnit();
         unit.setType(SBFElementType.BM);
@@ -249,6 +301,49 @@ class SBFEngagementControlTest {
         assertFalse(mover.isEngagedWith(defender.getId()));
         assertFalse(defender.isEngagedWith(mover.getId()));
         assertTrue(game.engagementOrders().alreadyDeclined(mover.getId(), defender.getId()));
+    }
+
+    @Test
+    void endPhaseWaitsForAWinningOwnersPostRollChoice() {
+        game.setPhase(GamePhase.END);
+        mover.setPosition(hex(1));
+        mover.setEngagedWith(defender.getId(), true);
+        defender.setEngagedWith(mover.getId(), true);
+        game.engagementOrders().order(mover.getId(), defender.getId(), Order.ASK);
+        game.engagementOrders().order(defender.getId(), mover.getId(), Order.AVOID);
+        SBFEngagementControl control = rolls(9, 4);
+        control.endEngagements();
+        assertTrue(game.isCurrentPhasePlayable());
+        assertEquals(mover.getId(), game.engagementOrders().decisionWinner());
+        control.submitOrder(1, mover.getId(), defender.getId(), false);
+        assertFalse(mover.isEngagedWith(defender.getId()));
+        assertFalse(game.isCurrentPhasePlayable());
+    }
+
+    @Test
+    void initiativeWinnerSelectsWhichOfTwoEngagementsEndsFirst() {
+        game.setPhase(GamePhase.END);
+        mover.setPosition(hex(1));
+        SBFFormation secondDefender = formation(3, 1);
+        game.setupTeams();
+        game.getTeamForPlayer(game.getPlayer(1)).getInitiative().addRoll(20, "");
+        game.getTeamForPlayer(game.getPlayer(2)).getInitiative().addRoll(-20, "");
+        game.getTeamForPlayer(game.getPlayer(3)).getInitiative().addRoll(-20, "");
+        for (SBFFormation enemy : List.of(defender, secondDefender)) {
+            mover.setEngagedWith(enemy.getId(), true);
+            enemy.setEngagedWith(mover.getId(), true);
+            game.engagementOrders().order(enemy.getId(), mover.getId(), Order.AVOID);
+        }
+        game.engagementOrders().order(mover.getId(), Player.PLAYER_NONE, Order.ASK);
+        SBFEngagementControl control = rolls(9, 4, 4, 8);
+        control.endEngagements();
+        assertEquals(2, game.engagementOrders().remainingEnds().size());
+        control.chooseEnd(2, defender.getId(), mover.getId());
+        assertNull(game.engagementOrders().selectedEnd());
+        control.chooseEnd(1, mover.getId(), secondDefender.getId());
+        assertTrue(game.engagementOrders().selectedEnd().matches(mover.getId(), secondDefender.getId()));
+        control.submitOrder(1, mover.getId(), secondDefender.getId(), false);
+        assertTrue(game.engagementOrders().remainingEnds().isEmpty());
     }
 
     private void orders(boolean own, boolean other) {
