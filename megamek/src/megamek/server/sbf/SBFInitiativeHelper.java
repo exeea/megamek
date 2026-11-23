@@ -33,8 +33,8 @@
 
 package megamek.server.sbf;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +46,6 @@ import megamek.common.enums.GamePhase;
 import megamek.common.game.AbstractGame;
 import megamek.common.game.InGameObject;
 import megamek.common.planetaryConditions.PlanetaryConditions;
-import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFInitiativeRollReportEntry;
 import megamek.common.strategicBattleSystems.SBFPlayerNameReportEntry;
@@ -76,79 +75,43 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                   .map(p -> new SBFPlayerTurn(p.getId()))
                   .collect(Collectors.toList());
 
-        } else if (phase.isFiring()) {
-            turns = game().getInGameObjects()
-                  .stream()
-                  .filter(unit -> unit instanceof SBFFormation)
-                  .filter(unit -> ((SBFFormation) unit).isDeployed()) //TODO roll into eligible!!! may be off board
-                  .filter(unit -> ((SBFFormation) unit).isEligibleForPhase(phase))
-                  .map(InGameObject::getOwnerId)
-                  .map(SBFFormationTurn::new)
-                  .collect(Collectors.toList());
-
-            turns.sort(Comparator.comparing(t -> game().getPlayer(t.playerId()).getInitiative()));
-
         } else {
-            // As a fallback, provide unsorted turns
-            turns = game().getInGameObjects()
-                  .stream()
-                  .filter(unit -> unit instanceof SBFFormation)
-                  .filter(unit -> ((SBFFormation) unit).isDeployed())
-                  .filter(unit -> ((SBFFormation) unit).isEligibleForPhase(phase))
-                  .map(InGameObject::getOwnerId)
-                  .map(SBFFormationTurn::new)
-                  .collect(Collectors.toList());
-
-            // Now, assemble formations and sort by initiative and relative formation count
-            Map<Integer, Long> unitCountsByPlayer = game().getInGameObjects()
-                  .stream()
-                  .filter(unit -> unit instanceof SBFFormation)
-                  .filter(unit -> ((SBFFormation) unit).isDeployed())
-                  .filter(unit -> ((SBFFormation) unit).isEligibleForPhase(phase))
-                  .collect(Collectors.groupingBy(InGameObject::getOwnerId,
-                        Collectors.counting()));
-
-            if (!unitCountsByPlayer.isEmpty()) {
-                final long lowestUnitCount = Collections.min(unitCountsByPlayer.values());
-
-                int playerWithLowestUnitCount = unitCountsByPlayer.entrySet()
-                      .stream()
-                      .filter(e -> e.getValue() == lowestUnitCount)
-                      .map(Map.Entry::getKey)
-                      .findAny()
-                      .orElse(Player.PLAYER_NONE);
-
-                List<Integer> playersByInitiative = new ArrayList<>(unitCountsByPlayer.keySet());
-                playersByInitiative.sort(Comparator.comparing(id -> game().getPlayer(id).getInitiative()));
-
-                if ((playerWithLowestUnitCount != Player.PLAYER_NONE) && (lowestUnitCount > 0)) {
-                    List<SBFTurn> sortedTurns = new ArrayList<>();
-
-                    for (long initCycle = 0; initCycle < lowestUnitCount; initCycle++) {
-                        long currentLowestUnitCount = Collections.min(unitCountsByPlayer.values());
-
-                        for (int playerId : playersByInitiative) {
-                            long unitsToMove = unitCountsByPlayer.get(playerId) / currentLowestUnitCount;
-                            long remainingUnits = unitCountsByPlayer.get(playerId);
-                            unitsToMove = Math.min(unitsToMove, remainingUnits);
-
-                            for (long i = 0; i < unitsToMove; i++) {
-                                sortedTurns.add(new SBFFormationTurn(playerId));
-                            }
-
-                            unitCountsByPlayer.put(playerId, remainingUnits - unitsToMove);
-                        }
-                    }
-                    // When here, sorting has been successful; replace the unsorted turns
-                    turns.clear();
-                    turns.addAll(sortedTurns);
-                }
-            }
+            turns = formationTurns(phase);
         }
 
         game().setTurns(turns);
         game().resetTurnIndex();
         send(packetHelper().createTurnListPacket());
+    }
+
+    /** IO:BF, “Unequal Number of Formations” and “Combat Phase”, p. 164. */
+    List<SBFTurn> formationTurns(GamePhase phase) {
+        Map<Integer, List<SBFFormationTurn>> byOwner = game().getActiveFormations().stream()
+              .filter(f -> f.isDeployed() && f.isEligibleForPhase(phase))
+              .map(f -> new SBFFormationTurn(f.getOwnerId()))
+              .collect(Collectors.groupingBy(SBFFormationTurn::playerId));
+        List<ArrayDeque<SBFTurn>> sides = new ArrayList<>();
+        for (Team team : game().getTeams().stream().sorted(Comparator.comparing(Team::getInitiative)).toList()) {
+            ArrayDeque<SBFTurn> side = new ArrayDeque<>();
+            team.nonObserverPlayers().stream().sorted(Comparator.comparing(Player::getInitiative))
+                  .forEach(player -> side.addAll(byOwner.getOrDefault(player.getId(), List.of())));
+            if (!side.isEmpty()) {
+                sides.add(side);
+            }
+        }
+
+        List<SBFTurn> turns = new ArrayList<>();
+        while (!sides.isEmpty()) {
+            int smallestSide = sides.stream().mapToInt(ArrayDeque::size).min().orElseThrow();
+            for (var side : sides) {
+                int groupSize = phase.isFiring() ? side.size() : side.size() / smallestSide;
+                for (int i = 0; i < groupSize; i++) {
+                    turns.add(side.removeFirst());
+                }
+            }
+            sides.removeIf(ArrayDeque::isEmpty);
+        }
+        return turns;
     }
 
     void writeInitiativeReport() {

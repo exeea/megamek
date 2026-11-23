@@ -42,3 +42,7 @@ This initial ledger precedes implementation. Subsequent entries distinguish veri
 ### Phase sequence and reconnect
 
 IO:BF “Playing the Game”, pp. 163–164, and “Detection and Reconnaissance Phase”, p. 195. The optional phase is “after the Initiative Phase”. Each phase completion now makes one transition. Reconnaissance no longer re-enters deployment or starts multiple movement phases, and a targeting report waits for its normal acknowledgement. A reconnect sends the current turn (including the last one) only to its recipient and cannot consume a turn or phase. Pending report packets retain their contents when the next phase clears its work list. Regression coverage: SBFPhaseEndManagerTest and SBFGameManagerPendingPacketTest.
+
+### Ground initiative and turn order
+
+IO:BF “Initiative Phase”, p. 163, and “Unequal Number of Formations” and “Combat Phase”, p. 164. Unequal sides are “moved in proportion”. SBFInitiativeHelper now uses the Team initiative already rolled and reported by the server. Allied owners contribute to the same side’s movement count when team initiative is enabled. The losing side declares all combat actions first. SBFInitiativeHelperTest reverses the individual and side rolls and checks both phase orders. Advanced reconnaissance’s undetected-formation exception remains open.
