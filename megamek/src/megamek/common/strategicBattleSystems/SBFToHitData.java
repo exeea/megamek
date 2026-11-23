@@ -41,9 +41,11 @@ import java.util.stream.Stream;
 
 import megamek.common.Hex;
 import megamek.common.actions.EntityAction;
-import megamek.common.actions.sbf.SBFAttackAction;
+import megamek.common.actions.sbf.SBFArtilleryAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.actions.sbf.SBFStandardUnitAttack.WeaponMode;
 import megamek.common.alphaStrike.ASRange;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.game.InGameObject;
 import megamek.common.rolls.TargetRoll;
@@ -77,31 +79,118 @@ public class SBFToHitData extends TargetRoll {
         //noinspection OptionalGetWithoutIsPresent
         SBFFormation attackingFormation = game.getFormation(attack.getEntityId()).get();
         SBFToHitData toHit = new SBFToHitData(attackingFormation.getSkill(), "Skill");
+        if (attackingFormation.ambushedIn(game.getCurrentRound())) {
+            toHit.addModifier(2, "attacked from hiding");
+        }
         SBFUnit firingUnit = attackingFormation.getUnits().get(attack.getUnitNumber());
+        if (attackingFormation.isOnRadarMap()
+              && game.combatOrders().spottedTarget(attackingFormation.getId()).isPresent()) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "aerospace squadron is spotting");
+        }
+        if (!attackingFormation.canAttackAfterEngagement()) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "cannot fire after evading");
+        }
         if (!firingUnit.canFire()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "targeting systems destroyed");
         }
-        if (firingUnit.getTargetingCrits() > 0) {
-            toHit.addModifier(firingUnit.getTargetingCrits(), "targeting damage");
-        }
         SBFFormation target = game.getFormation(attack.getTargetId()).orElseThrow();
-        Optional<ASRange> range = standardAttackRange(attackingFormation, target);
+        if (attackingFormation.inHighDrop() || (target.inHighDrop() && !attackingFormation.isOnRadarMap())) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "high-altitude drop");
+        }
+        boolean airToAir = attackingFormation.isOnRadarMap() && target.isOnRadarMap();
+        if (target.isOnRadarMap()) {
+            processDefensiveMovement(toHit, target);
+        }
+        if (firingUnit.getTargetingCrits() > 0) {
+            toHit.addModifier(((airToAir || target.isOnRadarMap()) ? 2 : 1) * firingUnit.getTargetingCrits(), "targeting damage");
+        }
+        Optional<ASRange> range = standardAttackRange(game, attackingFormation, target);
+        if (attack.getWeaponMode() == WeaponMode.TAG) {
+            if (!firingUnit.hasSUA(BattleForceSUA.TAG) || !attackingFormation.occupiesGroundHex() || !target.occupiesGroundHex()
+                  || !game.onSameBoard(attackingFormation, target)
+                  || (attackingFormation.getPosition().coords().distance(target.getPosition().coords()) > 1)) {
+                return new SBFToHitData(TargetRoll.IMPOSSIBLE, "TAG designation requires a target within one hex");
+            }
+            range = Optional.of(ASRange.LONG);
+        }
         if (range.isEmpty()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "target outside standard attack range");
+        }
+        toHit.range = range.get();
+        switch (toHit.range) {
+            case SHORT -> { }
+            case MEDIUM -> toHit.addModifier(1, "medium range");
+            case LONG -> toHit.addModifier(2, "long range");
+            case EXTREME -> toHit.addModifier(3, "extreme range");
+            default -> { }
+        }
+        int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
+              .filter(a -> a.getEntityId() == attackingFormation.getId()).count();
+        if (artillery > 0) {
+            toHit.addModifier(artillery, "artillery attacks this turn");
+        }
+        if (!attackingFormation.isOnRadarMap() && target.isOnRadarMap()) {
+            if ((attack.getWeaponMode() != WeaponMode.STANDARD) || firingUnit.isUnderwater(game, attackingFormation)) {
+                return new SBFToHitData(TargetRoll.IMPOSSIBLE, "ground-to-air weapon unavailable");
+            }
+            processGroundToAir(toHit, attackingFormation, firingUnit, target);
+            return toHit;
+        }
+        if (airToAir) {
+            if (!attackingFormation.mayAttackAirOpponent(target.getId())) {
+                return new SBFToHitData(TargetRoll.IMPOSSIBLE, "squadron committed its attack elsewhere");
+            }
+            if (attack.getWeaponMode() != WeaponMode.STANDARD) {
+                return new SBFToHitData(TargetRoll.IMPOSSIBLE, "air-to-air weapon required");
+            }
+            if (game.combatOrders().isBehind(attackingFormation, target)) {
+                toHit.addModifier(-2, "tailing target");
+            }
+            aerospaceFireControl(toHit, firingUnit);
+            if (target.getUnits().stream().flatMap(unit -> unit.getElements().stream()).anyMatch(AlphaStrikeElement::isDropShip)) {
+                toHit.addModifier(-2, "airborne DropShip");
+            } else if (target.getUnits().stream().flatMap(unit -> unit.getElements().stream()).anyMatch(AlphaStrikeElement::isSmallCraft)) {
+                toHit.addModifier(-1, "small craft");
+            }
+            return toHit;
         }
         // IO:BF pp. 169, 173: engaged Formations must fire within an engagement; restricted morale requires one.
         if ((attackingFormation.isMoraleRestricted() || !attackingFormation.getEngagedOpponents().isEmpty())
               && !attackingFormation.isEngagedWith(target.getId())) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "attack requires an engagement with target");
         }
-        if (isTerrainLosBlocked(game, attackingFormation, target)) {
-            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "line of sight blocked by terrain");
+        boolean indirect = attack.getWeaponMode() == WeaponMode.INDIRECT;
+        boolean torpedo = attack.getWeaponMode() == WeaponMode.TORPEDO;
+        boolean submerged = firingUnit.isUnderwater(game, attackingFormation);
+        boolean sameHex = attackingFormation.getPosition().equals(target.getPosition());
+        if (indirect) {
+            var spotter = game.getFormation(attack.getSpotterId()).orElse(null);
+            if (!firingUnit.hasSUA(BattleForceSUA.IF) || sameHex || submerged || (spotter == null)
+                  || (!spotter.isOnRadarMap() && !target.getPosition().equals(spotter.getPosition()))
+                  || !game.combatOrders().spottedTarget(attack.getSpotterId()).filter(id -> id == target.getId()).isPresent()
+                  || game.areHostile(spotter, game.getPlayer(attackingFormation.getOwnerId()))) {
+                return new SBFToHitData(TargetRoll.IMPOSSIBLE, "indirect fire requires IF and a friendly spotter");
+            }
+            toHit.addModifier(1, "indirect fire");
+        } else if (!game.combatOrders().hasLineOfSight(game, attackingFormation.getPosition(), target.getPosition(), true)) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "line of sight blocked");
         }
-        toHit.range = range.get();
-        if (toHit.range == ASRange.EXTREME) {
-            toHit.addModifier(3, "extreme range");
-        } else {
-            toHit.addModifier(2, "long range");
+        if (torpedo && (!firingUnit.hasSUA(BattleForceSUA.TOR) || !sameHex
+              || target.getUnits().stream().noneMatch(unit -> unit.isUnderwater(game, target)))) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "torpedo attack requires TOR and an underwater target");
+        }
+        if (submerged && (!sameHex || (!torpedo && ((range.get() == ASRange.SHORT)
+              || (firingUnit.getCurrentDamage().getDamage(range.get()).damage == 0))))) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "underwater range");
+        }
+        if (torpedo && (attack.weaponDamage(game, attackingFormation, firingUnit, range.get()) == 0)) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "no torpedoes at this range");
+        }
+        if (submerged || torpedo) {
+            toHit.addModifier(1, "underwater");
+        }
+        if (game.combatOrders().spottedTarget(attackingFormation.getId()).isPresent()) {
+            toHit.addModifier(1, "spotting");
         }
         if (firingUnit.hasSUA(BattleForceSUA.BFC)) {
             toHit.addModifier(1, "basic fire control");
@@ -109,34 +198,92 @@ public class SBFToHitData extends TargetRoll {
         if (firingUnit.hasSUA(BattleForceSUA.DRO)) {
             toHit.addModifier(1, "drone");
         }
+        if (attackingFormation.getEngagementAttackModifier() != 0) {
+            toHit.addModifier(attackingFormation.getEngagementAttackModifier(), "failed evasion");
+        }
+        if (attackingFormation.dismountedIn(game.getCurrentRound())) {
+            toHit.addModifier(attackingFormation.airDropMovementCost() == 3 ? 2 : 1, "dismounted this turn");
+        }
+        if (firingUnit.hasSUA(BattleForceSUA.SHLD)) {
+            toHit.addModifier(1, "shields");
+        }
         processTargetTerrain(toHit, game.getHex(target.getPosition()));
-        processTMM(toHit, game, attack);
-        processSprinting(toHit, game, attack);
-        processJUMP(toHit, game, attack);
-        processMorale(toHit, game, attack);
+        processGroundTarget(toHit, target, toHit.range, false);
+        if (attackingFormation.getJumpUsedThisTurn() > 0) {
+            toHit.addModifier(attackingFormation.getJumpUsedThisTurn(), "attacker JUMP");
+        }
+        switch (target.moraleStatus()) {
+            case SHAKEN -> toHit.addModifier(-1, "shaken");
+            case BROKEN -> toHit.addModifier(-2, "broken");
+            case ROUTED -> toHit.addModifier(-3, "routed");
+            default -> toHit.doNothing();
+        }
         processDeclarations(toHit, attackingFormation, game, attack, declarations);
         return toHit;
     }
 
-    /** The automatic adjacent-hex terrain block in the Line of Sight Determination Table (IO:BF p. 169). */
-    public static boolean isTerrainLosBlocked(SBFGame game, SBFFormation attacker, SBFFormation target) {
-        return game.onSameBoard(attacker, target)
-              && (attacker.getPosition().coords().distance(target.getPosition().coords()) == 1)
-              && isLosCover(game.getHex(attacker.getPosition())) && isLosCover(game.getHex(target.getPosition()));
+    /** IO:BF p. 267: a BA Unit's range modifiers differ from those of other STL-equipped Units. */
+    private static int stealthModifier(SBFFormation formation, SBFUnit unit, ASRange range) {
+        boolean mimetic = unit.hasMimeticArmor();
+        if ((!mimetic && !unit.hasSUA(BattleForceSUA.STL)) || unit.isType(SBFElementType.CI)
+              || (mimetic && (formation.getMpSpentThisTurn() >= formation.getMovement() / 4))) {
+            return 0;
+        }
+        if (unit.isType(SBFElementType.BA)) {
+            return ((range == ASRange.SHORT) || (range == ASRange.MEDIUM)) ? 1 : 2;
+        }
+        return range == ASRange.SHORT ? 0 : 1;
     }
 
     public static boolean isLosCover(Hex hex) {
-        return (hex != null) && (hex.containsTerrain(Terrains.WOODS) || hex.containsTerrain(Terrains.RUBBLE)
+        return (hex != null) && ((woodsCover(hex) > 0) || hex.containsTerrain(Terrains.RUBBLE)
               || hex.containsTerrain(Terrains.BUILDING));
     }
 
+    /** Aerospace To-Hit Modifiers table, IO:BF p. 177. */
+    /** Ground-to-air target and firing system modifiers, including Air Defense Arrow IV (IO:BF pp. 178, 206). */
+    public static void processGroundToAir(SBFToHitData toHit, SBFFormation attackingFormation, SBFUnit firingUnit,
+          SBFFormation target) {
+        toHit.addModifier(2, "airborne aerospace target");
+        if (target.getUnits().stream().flatMap(unit -> unit.getElements().stream())
+              .anyMatch(AlphaStrikeElement::isDropShip)) {
+            toHit.addModifier(-2, "airborne DropShip");
+        }
+        if (attackingFormation.isAerospace() && attackingFormation.getUnits().stream()
+              .flatMap(unit -> unit.getElements().stream()).anyMatch(AlphaStrikeElement::isDropShip)) {
+            toHit.addModifier(-2, "grounded DropShip");
+        }
+        if (target.getUnits().stream().flatMap(unit -> unit.getElements().stream())
+              .anyMatch(AlphaStrikeElement::isSmallCraft)) {
+            toHit.addModifier(-1, "small craft");
+        }
+        aerospaceFireControl(toHit, firingUnit);
+    }
+
+    public static void aerospaceFireControl(SBFToHitData toHit, SBFUnit firingUnit) {
+        if (firingUnit.hasSUA(BattleForceSUA.DRO)) {
+            toHit.addModifier(1, "drone");
+        }
+        if (firingUnit.hasSUA(BattleForceSUA.BFC)) {
+            toHit.addModifier(1, "basic fire control");
+        } else if (!firingUnit.hasSUA(BattleForceSUA.AFC)
+              && firingUnit.getElements().stream().anyMatch(AlphaStrikeElement::isSupportVehicle)) {
+            toHit.addModifier(2, "no fire control");
+        }
+    }
+
+    /** Artillery smoke counts as heavy woods for LOS and accuracy (IO:BF p. 206). */
+    private static int woodsCover(Hex hex) {
+        return hex.containsTerrain(Terrains.SMOKE) ? 2 : Math.clamp(hex.terrainLevel(Terrains.WOODS), 0, 2);
+    }
+
     /** IO:BF p. 170: target terrain modifiers also apply within the same hex. */
-    private static void processTargetTerrain(SBFToHitData toHit, Hex hex) {
+    public static void processTargetTerrain(SBFToHitData toHit, Hex hex) {
         if (hex == null) {
             return;
         }
-        if (hex.containsTerrain(Terrains.WOODS)) {
-            toHit.addModifier(Math.min(2, hex.terrainLevel(Terrains.WOODS)), "target woods");
+        if (woodsCover(hex) > 0) {
+            toHit.addModifier(woodsCover(hex), "target woods");
         }
         if (hex.containsTerrain(Terrains.BUILDING)) {
             toHit.addModifier(hex.terrainLevel(Terrains.BUILDING) > 2 ? 2 : 1, "target urban terrain");
@@ -146,13 +293,40 @@ public class SBFToHitData extends TargetRoll {
     /**
      * Returns the range of a standard attack between the two Formations (IO:BF p.169-170): Long Range in the same or
      * an adjacent hex, Extreme Range two hexes away; empty when the target is farther, on another board or either has
-     * no position. In the same hex an opposed Maneuver Roll would choose the range; it is not implemented, and Long
-     * Range is the rule's result when it is not made.
+     * no position. Engaged Formations use the winner's chosen range once both sides have maneuvered.
      */
-    public static Optional<ASRange> standardAttackRange(SBFFormation attacker, SBFFormation target) {
+    public static Optional<ASRange> standardAttackRange(SBFGame game, SBFFormation attacker, SBFFormation target) {
+        if (attacker.isOnRadarMap() || target.isOnRadarMap()) {
+            if (!attacker.isOnRadarMap() && (target.getRadarZone() == SBFRadarZone.CENTRAL)
+                  && (attacker.getPosition() != null) && (target.getPosition() != null)
+                  && attacker.getPosition().isSameBoardAs(target.getPosition())) {
+                // Ground-to-Air, IO:BF p. 178: one hex from any part of the flight path is Short.
+                if (target.getGroundFlightPath().stream().anyMatch(hex ->
+                      hex.coords().distance(attacker.getPosition().coords()) <= 1)) {
+                    return Optional.of(ASRange.SHORT);
+                }
+                int distance = attacker.getPosition().coords().distance(target.getPosition().coords());
+                return distance == 2 ? Optional.of(ASRange.MEDIUM)
+                      : distance <= 4 ? Optional.of(ASRange.LONG) : Optional.empty();
+            }
+            if (attacker.isOnRadarMap() && target.isOnRadarMap() && attacker.isEngagedWith(target.getId())
+                  && SBFCombatOrders.sameEngagementArea(game, attacker, target)) {
+                return game.combatOrders().maneuver(attacker.getId(), target.getId()).map(SBFCombatOrders.Maneuver::range);
+            }
+            return Optional.empty();
+        }
         if ((attacker.getPosition() == null) || (target.getPosition() == null)
               || !attacker.getPosition().isSameBoardAs(target.getPosition())) {
             return Optional.empty();
+        }
+        if (attacker.isEngagedWith(target.getId()) && attacker.getPosition().equals(target.getPosition())) {
+            return game.combatOrders().maneuver(attacker.getId(), target.getId()).map(m -> {
+                if ((m.range() == ASRange.SHORT) && (target.getMovementMode() == SBFMovementMode.VTOL)
+                      && (m.winner() != target.getId())) {
+                    return ASRange.MEDIUM;
+                }
+                return m.range();
+            });
         }
         return switch (attacker.getPosition().coords().distance(target.getPosition().coords())) {
             case 0, 1 -> Optional.of(ASRange.LONG);
@@ -161,44 +335,39 @@ public class SBFToHitData extends TargetRoll {
         };
     }
 
-    private static void processTMM(SBFToHitData toHit, SBFGame game, SBFStandardUnitAttack attack) {
-        //noinspection OptionalGetWithoutIsPresent
-        SBFFormation target = game.getFormation(attack.getTargetId()).get();
-        if (target.getTmm() > 0) {
+    /** IO:BF pp. 198–199. These modifiers apply to attacks aimed at a Formation. */
+    public static void processDefensiveMovement(SBFToHitData toHit, SBFFormation target) {
+        if (target.evasiveModifier() > 0) {
+            toHit.addModifier(target.evasiveModifier(), "evasive movement");
+        }
+        if (target.isHullDown()) {
+            toHit.addModifier(1, "hull down");
+        }
+    }
+
+    /** Target type and movement apply to both direct weapon and direct artillery fire (IO:BF pp. 170, 203). */
+    public static void processGroundTarget(SBFToHitData toHit, SBFFormation target, ASRange range, boolean artillery) {
+        processDefensiveMovement(toHit, target);
+        if (target.isAerospace() && target.isDeployed() && !target.isOnRadarMap()) {
+            toHit.addModifier(-4, "grounded aerospace");
+        } else if (target.airDropMovementCost() > 0) {
+            toHit.addModifier(3, "air-dropped this turn");
+        } else if ((target.getTmm() > 0) && (!target.isHullDown() || target.getMpSpentThisTurn() > 0)
+              && (!artillery || (target.getMovement() > 0))) {
             toHit.addModifier(target.getTmm(), "TMM");
         }
-    }
-
-    /** Attacks against sprinting units receive an additional -1 to-hit modifier (IO:BF p.199). */
-    private static void processSprinting(SBFToHitData toHit, SBFGame game, SBFStandardUnitAttack attack) {
-        //noinspection OptionalGetWithoutIsPresent
-        SBFFormation target = game.getFormation(attack.getTargetId()).get();
         if (target.hasSprintedThisTurn()) {
             toHit.addModifier(-1, "target sprinted");
-        }
-    }
-
-    private static void processJUMP(SBFToHitData toHit, SBFGame game, SBFStandardUnitAttack attack) {
-        //noinspection OptionalGetWithoutIsPresent
-        SBFFormation attacker = game.getFormation(attack.getEntityId()).get();
-        //noinspection OptionalGetWithoutIsPresent
-        SBFFormation target = game.getFormation(attack.getTargetId()).get();
-        if (attacker.getJumpUsedThisTurn() > 0) {
-            toHit.addModifier(attacker.getJumpUsedThisTurn(), "attacker JUMP");
         }
         if (target.getJumpUsedThisTurn() > 0) {
             toHit.addModifier(target.getJumpUsedThisTurn(), "target JUMP");
         }
-    }
-
-    private static void processMorale(SBFToHitData toHit, SBFGame game, SBFStandardUnitAttack attack) {
-        //noinspection OptionalGetWithoutIsPresent
-        SBFFormation target = game.getFormation(attack.getTargetId()).get();
-        switch (target.moraleStatus()) {
-            case SHAKEN -> toHit.addModifier(-1, "shaken");
-            case BROKEN -> toHit.addModifier(-2, "broken");
-            case ROUTED -> toHit.addModifier(-3, "routed");
-            default -> toHit.doNothing();
+        if (target.getEngagementDefenseModifier() != 0) {
+            toHit.addModifier(target.getEngagementDefenseModifier(), "target evaded");
+        }
+        int stealth = target.getUnits().stream().mapToInt(unit -> stealthModifier(target, unit, range)).min().orElse(0);
+        if (stealth != 0) {
+            toHit.addModifier(stealth, "target stealth");
         }
     }
 
@@ -228,8 +397,14 @@ public class SBFToHitData extends TargetRoll {
                 withheld++;
             }
         }
-        if (withheld > 0) {
-            toHit.addModifier(-Math.min(2, withheld), "withheld fire");
+        long declaredSlots = Stream.concat(attacks.stream(), Stream.of(attack))
+              .filter(a -> a.getWeaponMode() != WeaponMode.TORPEDO).map(SBFStandardUnitAttack::getUnitNumber)
+              .distinct().count();
+        long unusedSlots = game.combatOrders().standardAttackLimit(attacker) - declaredSlots;
+        if (unusedSlots < 0) {
+            toHit.addModifier(TargetRoll.IMPOSSIBLE, "outmaneuvered attack limit");
+        } else if ((withheld > 0) && (unusedSlots > 0)) {
+            toHit.addModifier(-(int) Math.min(2, Math.min(unusedSlots, withheld)), "withheld fire");
         }
     }
 
@@ -246,8 +421,8 @@ public class SBFToHitData extends TargetRoll {
     public static List<Integer> targetsOfFormation(InGameObject unit, SBFGame game) {
         return game.getActionsVector().stream()
               .filter(a -> a.getEntityId() == unit.getId())
-              .filter(a -> a instanceof SBFAttackAction)
-              .map(a -> ((SBFAttackAction) a).getTargetId())
+              .filter(SBFStandardUnitAttack.class::isInstance)
+              .map(a -> ((SBFStandardUnitAttack) a).getTargetId())
               .distinct()
               .toList();
     }

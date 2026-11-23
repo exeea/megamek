@@ -104,7 +104,9 @@ public final class SBFCombatOrders implements Serializable {
 
     public static boolean sameEngagementArea(SBFGame game, SBFFormation first, SBFFormation second) {
         if (first.isOnRadarMap() || second.isOnRadarMap()) {
-            return first.isOnRadarMap() && second.isOnRadarMap() && (first.getRadarZone() == second.getRadarZone());
+            // A defender may pass through the contested zone. Resolve the attack at the recorded encounter (p. 177).
+            return first.isOnRadarMap() && second.isOnRadarMap() && ((first.getRadarZone() == second.getRadarZone())
+                  || first.passesAirOpponent(second.getId()) || second.passesAirOpponent(first.getId()));
         }
         return game.onSameBoard(first, second) && first.getPosition().equals(second.getPosition());
     }

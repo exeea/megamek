@@ -34,16 +34,21 @@
 package megamek.common.strategicBattleSystems;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
+import megamek.client.ui.clientGUI.calculationReport.DummyCalculationReport;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.TargetRollModifier;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASDamageVector;
 import megamek.common.alphaStrike.ASRange;
+import megamek.common.alphaStrike.ASUnitType;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
@@ -140,6 +145,23 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void outmaneuveredFormationCanOnlyWithholdItsRemainingLegalShots() {
+        for (int i = 0; i < 3; i++) {
+            SBFUnit unit = new SBFUnit();
+            unit.setDamage(ASDamageVector.createNormRndDmg(2, 2, 2));
+            attacker.addUnit(unit);
+        }
+        game.combatOrders().setManeuver(new SBFCombatOrders.Maneuver(attacker.getId(), target.getId(),
+              target.getId(), attacker.getId(), ASRange.LONG));
+        assertEquals(List.of(-1), modifiers("withheld fire"));
+
+        game.addAction(new SBFStandardUnitAttack(attacker.getId(), 1, target.getId(), ASRange.LONG));
+        assertTrue(modifiers("withheld fire").isEmpty());
+        game.addAction(new SBFStandardUnitAttack(attacker.getId(), 2, target.getId(), ASRange.LONG));
+        assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+    }
+
+    @Test
     void unplacedFormationIsImpossibleAndNeverDereferencesANullPosition() {
         attacker.setPosition(null);
         assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
@@ -159,6 +181,40 @@ class SBFToHitDataTest {
         assertEquals(List.of(2), modifiers("target woods"));
         assertEquals(List.of(1), modifiers("basic fire control"));
         assertEquals(List.of(1), modifiers("drone"));
+    }
+
+    @Test
+    void convertedStealthArmorRetainsItsTypeAndMimeticUsesActualMovement() {
+        AlphaStrikeElement stealth = new AlphaStrikeElement();
+        stealth.setType(ASUnitType.BM);
+        stealth.setMovement(Map.of("", 16));
+        stealth.getSpecialAbilities().setSUA(BattleForceSUA.STL);
+        var report = new DummyCalculationReport();
+        SBFUnit pure = new SBFUnitConverter(List.of(stealth), "pure", report).createSbfUnit();
+        assertTrue(pure.hasSUA(BattleForceSUA.STL));
+        assertFalse(pure.hasMimeticArmor());
+        AlphaStrikeElement mimetic = new AlphaStrikeElement();
+        mimetic.setType(ASUnitType.BM);
+        mimetic.setMovement(Map.of("", 16));
+        SBFUnit plain = new SBFUnitConverter(List.of(mimetic), "plain", report).createSbfUnit();
+        assertEquals(plain.getTmm() + 2, pure.getTmm());
+        mimetic.getSpecialAbilities().setSUA(BattleForceSUA.LMAS);
+        SBFUnit mixed = new SBFUnitConverter(List.of(stealth, mimetic), "mixed", report).createSbfUnit();
+        assertTrue(mixed.hasSUA(BattleForceSUA.LMAS));
+        assertFalse(mixed.hasSUA(BattleForceSUA.STL));
+        target.removeUnit(target.getUnits().getFirst());
+        target.addUnit(mixed);
+        target.setMovement(8);
+        target.setMpSpentThisTurn(1);
+        assertEquals(List.of(1), modifiers("target stealth"));
+        target.setMpSpentThisTurn(2);
+        assertEquals(List.of(), modifiers("target stealth"));
+        // Old saves from the earlier converter carry all three flags; a plain STL Element still grants its full bonus.
+        pure.getSpecialAbilities().setSUA(BattleForceSUA.MAS);
+        pure.getSpecialAbilities().setSUA(BattleForceSUA.LMAS);
+        target.removeUnit(mixed);
+        target.addUnit(pure);
+        assertEquals(List.of(1), modifiers("target stealth"));
     }
 
     private List<Integer> modifiers(String description) {

@@ -68,7 +68,7 @@ final class SBFAllocateCommand extends ServerCommand {
         }
         try {
             int exchange = Integer.parseInt(args[1]) - 1;
-            List<Allocation> queue = game.getDamageAllocations();
+            List<Allocation> queue = exchanges(game, connId);
             if ((exchange < 0) || (exchange >= queue.size()) || (queue.get(exchange).chooserId() != connId)) {
                 server.sendServerChat(connId, "Use /sbfallocate to list your current exchanges.");
                 return;
@@ -79,7 +79,7 @@ final class SBFAllocateCommand extends ServerCommand {
                 units.add(Integer.parseInt(args[i]) - 1);
             }
             int previousReports = manager.getPendingReports().size();
-            if (SBFCombatDamage.allocate(manager, connId, first.attackerId(), first.targetId(), units)) {
+            if (SBFCombatDamage.allocate(manager, connId, first.attackerId(), first.targetId(), first.artilleryExchange(), units)) {
                 server.sendServerChat(connId, "Damage allocation accepted.");
                 manager.finishDamageAllocation(previousReports);
             } else {
@@ -98,21 +98,37 @@ final class SBFAllocateCommand extends ServerCommand {
             server.sendServerChat(playerId, "You have no damage to allocate.");
             return;
         }
-        List<Allocation> remaining = new ArrayList<>(pending);
-        while (!remaining.isEmpty()) {
-            Allocation first = remaining.getFirst();
-            List<Integer> damage = remaining.stream().filter(hit -> hit.isFor(first.attackerId(), first.targetId()))
+        List<Allocation> exchanges = exchanges(game, playerId);
+        for (int i = 0; i < exchanges.size(); i++) {
+            Allocation first = exchanges.get(i);
+            if (first.unitIndex() >= 0) {
+                continue;
+            }
+            List<Integer> damage = pending.stream().filter(hit -> hit.isFor(first.attackerId(), first.targetId(), first.artilleryExchange()))
                   .map(Allocation::damage).toList();
             var target = game.getFormation(first.targetId()).orElseThrow();
+            boolean identified = game.isVisible(playerId, first.targetId());
             List<String> units = new ArrayList<>();
             for (int index = 0; index < target.getUnits().size(); index++) {
                 var unit = target.getUnits().get(index);
-                units.add((index + 1) + " " + unit.getName() + " (" + unit.getCurrentArmor() + " armor)");
+                units.add(identified ? (index + 1) + " " + unit.getName() + " (" + unit.getCurrentArmor() + " armor)"
+                      : String.valueOf(index + 1));
             }
-            server.sendServerChat(playerId, "/sbfallocate " + (game.getDamageAllocations().indexOf(first) + 1)
-                  + " <Unit number per hit>. Hit damage in order: " + damage + ". " + target.generalName()
+            String targetName = identified ? target.generalName() : "Contact " + first.targetId();
+            server.sendServerChat(playerId, "/sbfallocate " + (i + 1)
+                  + " <Unit number per hit>. Hit damage in order: " + damage + ". " + targetName
                   + " Units: " + String.join(", ", units));
-            remaining.removeIf(hit -> hit.isFor(first.attackerId(), first.targetId()));
         }
     }
+    /** Stable per-player exchange numbers avoid exposing unrelated or hidden firing activity. */
+    private List<Allocation> exchanges(SBFGame game, int playerId) {
+        List<Allocation> exchanges = new ArrayList<>();
+        for (Allocation hit : game.getDamageAllocations()) {
+            if ((hit.chooserId() == playerId) && exchanges.stream().noneMatch(e -> e.isFor(hit.attackerId(), hit.targetId(), hit.artilleryExchange()))) {
+                exchanges.add(hit);
+            }
+        }
+        return exchanges;
+    }
+
 }

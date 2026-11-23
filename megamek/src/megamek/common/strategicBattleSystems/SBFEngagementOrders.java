@@ -110,7 +110,7 @@ public class SBFEngagementOrders implements Serializable {
     }
 
     public enum Order {
-        ENGAGE, AVOID, ASK, FORCE, OVERRUN, EVADE;
+        ENGAGE, AVOID, ASK, FORCE, OVERRUN, EVADE, AMBUSH;
 
         public boolean seeksEngagement() {
             return (this == ENGAGE) || (this == FORCE) || (this == ASK);
@@ -133,7 +133,33 @@ public class SBFEngagementOrders implements Serializable {
         return lastResolvedStep;
     }
 
+    public enum Ambush { SHORT, MEDIUM, HOLD }
+
+    // At most one mover is active. Keep entry decisions until its route has passed this hex.
+    private Set<Integer> resolvedAmbushes;
+    private int ambushStep;
+
+    public Set<Integer> resolvedAmbushes(int step) {
+        if (resolvedAmbushes == null || step != ambushStep) {
+            resolvedAmbushes = new HashSet<>();
+            ambushStep = step;
+        }
+        return resolvedAmbushes;
+    }
+
+    private int lastHiddenEntry;
+
+    public boolean alreadyVisited(int step) {
+        return step <= lastHiddenEntry;
+    }
+
+    public void finishEntry(int step) {
+        lastHiddenEntry = step;
+    }
+
     public void finishMovement() {
+        resolvedAmbushes = null;
+        lastHiddenEntry = 0;
         lastResolvedStep = 0;
         exchange = null;
         airDefense = null;

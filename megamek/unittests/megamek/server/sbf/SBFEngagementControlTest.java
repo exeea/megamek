@@ -65,6 +65,8 @@ import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import megamek.server.Server;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -260,6 +262,22 @@ class SBFEngagementControlTest {
     }
 
     @Test
+    void submergedEvadeFreeShotHalvesUnderwaterFireBeforeThreeQuarterDamage() {
+        SBFUnit target = combatUnit(mover, 2, 1);
+        SBFUnit shooter = combatUnit(defender, 8, 8);
+        shooter.setDamage(ASDamageVector.create(8, 8, 8, 0, 3));
+        shooter.setMovementMode(SBFMovementMode.SUBMARINE);
+        game.getHex(hex(1)).addTerrain(new Terrain(Terrains.WATER, 1));
+        game.engagementOrders().order(mover.getId(), defender.getId(), Order.EVADE);
+        game.engagementOrders().order(defender.getId(), mover.getId(), Order.ENGAGE);
+        SBFEngagementControl control = rolls(6, 4, 12);
+        assertNull(control.resolveMovement(mover, route));
+        control.selectUnit(2, defender.getId(), mover.getId(), true, 1);
+        assertEquals(hex(2), control.resolveMovement(mover, route).getLastPosition());
+        assertEquals(17, target.getCurrentArmor());
+    }
+
+    @Test
     void specialEngagementNeedsEnoughMoveToExitIncludingHostileSurcharge() {
         mover.setMovement(2);
         combatUnit(mover, 8, 1);
@@ -344,6 +362,85 @@ class SBFEngagementControlTest {
         assertTrue(game.engagementOrders().selectedEnd().matches(mover.getId(), secondDefender.getId()));
         control.submitOrder(1, mover.getId(), secondDefender.getId(), false);
         assertTrue(game.engagementOrders().remainingEnds().isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2,2", "10,1"})
+    void hiddenDefenderChargesDepartureOnlyIfDetectedOnEntry(int detectionRoll, int finalY) {
+        mover.setMovement(2);
+        mover.setSkill(4);
+        defender.setHidden(true);
+        var plan = new SBFMovePath(mover.getId(), hex(0), game);
+        plan.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, mover.getId(), hex(0), hex(1)));
+        plan.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, mover.getId(), hex(1), hex(2)));
+        assertEquals(2, plan.getMpUsed());
+        orders(false, false);
+        SBFMovePath result = rolls(detectionRoll).resolveMovement(mover, plan);
+        assertEquals(hex(finalY), result.getLastPosition());
+        assertEquals(detectionRoll == 2, defender.isHidden());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"SHORT,3", "MEDIUM,5"})
+    void ambushUsesChosenRangeAndOnlyTerrainAndCriticalsThenPenalizesThisRound(String range, int damage) {
+        SBFUnit victim = combatUnit(mover, 1, 1);
+        SBFUnit shooter = combatUnit(defender, 3, 5);
+        defender.setSkill(4);
+        defender.setHidden(true);
+        mover.setTmm(4);
+        game.getHex(hex(1)).addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.WOODS, 1));
+        shooter.addTargetingCrit();
+        SBFEngagementControl control = rolls(6);
+        orders(false, false);
+        assertNull(control.resolveMovement(mover, route));
+        var choice = megamek.common.strategicBattleSystems.SBFEngagementOrders.Ambush.valueOf(range);
+        assertFalse(control.chooseAmbush(mover.getOwnerId(), defender.getId(), choice));
+        control.remind(defender.getOwnerId());
+        assertTrue(control.chooseAmbush(defender.getOwnerId(), defender.getId(), choice));
+        assertEquals(hex(2), control.resolveMovement(mover, route).getLastPosition());
+        assertFalse(defender.isHidden());
+        assertEquals(20 - damage, victim.getCurrentArmor());
+        assertEquals(3, SBFMovePath.normalMovementPoints(defender, game));
+        var attack = new megamek.common.actions.sbf.SBFStandardUnitAttack(defender.getId(), 0, mover.getId(),
+              megamek.common.alphaStrike.ASRange.LONG);
+        int subsequent = megamek.common.strategicBattleSystems.SBFToHitData.compileToHit(game, attack).getValue();
+        game.incrementCurrentRound();
+        assertEquals(5, SBFMovePath.normalMovementPoints(defender, game));
+        assertEquals(subsequent - 2, megamek.common.strategicBattleSystems.SBFToHitData.compileToHit(game, attack).getValue());
+    }
+
+    @Test
+    void submergedAmbusherCanChooseMediumForHalfDamage() {
+        SBFUnit victim = combatUnit(mover, 1, 1);
+        combatUnit(defender, 4, 8);
+        defender.setSkill(4);
+        defender.setHidden(true);
+        game.getHex(hex(1)).addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.WATER, 1));
+        orders(false, false);
+        SBFEngagementControl control = rolls(6);
+        assertNull(control.resolveMovement(mover, route));
+        assertFalse(control.chooseAmbush(defender.getOwnerId(), defender.getId(),
+              megamek.common.strategicBattleSystems.SBFEngagementOrders.Ambush.SHORT));
+        assertTrue(control.chooseAmbush(defender.getOwnerId(), defender.getId(),
+              megamek.common.strategicBattleSystems.SBFEngagementOrders.Ambush.MEDIUM));
+        control.resolveMovement(mover, route);
+        assertEquals(16, victim.getCurrentArmor());
+    }
+
+    @Test
+    void decliningAmbushKeepsDefenderHiddenWhenDetectionFails() {
+        combatUnit(mover, 1, 1);
+        combatUnit(defender, 1, 1);
+        mover.setSkill(4);
+        defender.setHidden(true);
+        orders(false, false);
+        SBFEngagementControl control = rolls(6);
+        assertNull(control.resolveMovement(mover, route));
+        assertTrue(control.chooseAmbush(defender.getOwnerId(), defender.getId(),
+              megamek.common.strategicBattleSystems.SBFEngagementOrders.Ambush.HOLD));
+        assertEquals(hex(2), control.resolveMovement(mover, route).getLastPosition());
+        assertTrue(defender.isHidden());
+        assertFalse(defender.ambushedIn(game.getCurrentRound()));
     }
 
     private void orders(boolean own, boolean other) {

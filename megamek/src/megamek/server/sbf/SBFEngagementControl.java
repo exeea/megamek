@@ -78,7 +78,21 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                     traveled.setJumpUsed(route.getJumpUsed());
                     return traveled;
                 }
+                mover.setHullDown(false);
                 traveled = extended;
+            }
+            if (i > 0 && !orders.alreadyVisited(i)) {
+                if (!resolveAmbushes(mover, route, traveled.getLastPosition(), i)) {
+                    return null;
+                }
+                orders.finishEntry(i);
+                if (game.getFormation(mover.getId()).isEmpty()) {
+                    return traveled;
+                }
+                SBFHiddenCommand.detectOnEntry(manager, mover, traveled.getLastPosition(), dice);
+            }
+            if ((i < route.getSteps().size()) && !orders.alreadyVisited(i + 1)) {
+                route.refreshDeparture(i, traveled.getLastPosition());
             }
             for (SBFFormation other : opponentsAt(mover, traveled.getLastPosition())) {
                 if (orders.alreadyDeclined(mover.getId(), other.getId())) {
@@ -96,6 +110,10 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                         prompt(other, mover);
                     }
                     return null;
+                }
+                if (game.usesDoubleBlind() && (ownChoice.seeksEngagement() || otherChoice.seeksEngagement())) {
+                    manager.detectionHelper.noteCombat(mover, traveled.getLastPosition());
+                    manager.detectionHelper.noteCombat(other, traveled.getLastPosition());
                 }
                 Boolean contest = movementOutcome(mover, other, ownChoice, otherChoice, traveled.getLastPosition(),
                       route, i);
@@ -122,16 +140,67 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         return route;
     }
 
+    /** IO:BF p. 214. Each hidden owner may fire immediately on entry, including before a probe reveals them. */
+    private boolean resolveAmbushes(SBFFormation mover, SBFMovePath route, BoardLocation location, int step) {
+        SBFGame game = manager.getGame();
+        var orders = game.engagementOrders();
+        var resolved = orders.resolvedAmbushes(step);
+        var damage = new SBFContactDamage(manager, dice);
+        for (SBFFormation other : game.getActiveFormationsAt(location)) {
+            if (resolved.contains(other.getId()) || !game.areHostile(other, game.getPlayer(mover.getOwnerId()))) {
+                continue;
+            }
+            var exchange = orders.exchange();
+            if (exchange == null) {
+                if (!other.isHidden() || (!SBFContactDamage.canAmbush(game, other, ASRange.SHORT)
+                      && !SBFContactDamage.canAmbush(game, other, ASRange.MEDIUM))) {
+                    continue;
+                }
+                exchange = new Exchange(mover.getId(), other.getId(), Order.AMBUSH, true, -2, null);
+                orders.setExchange(exchange);
+            }
+            if (exchange.order() != Order.AMBUSH || exchange.opponent() != other.getId()) {
+                continue;
+            }
+            if (!damage.resolve(mover, other, location, route, step)) {
+                orders.awaitOrders(route, other.getId());
+                return false;
+            }
+            resolved.add(other.getId());
+            if (game.getFormation(mover.getId()).isEmpty()) {
+                break;
+            }
+        }
+        return true;
+    }
+
+    boolean chooseAmbush(int player, int formation, SBFEngagementOrders.Ambush choice) {
+        var orders = manager.getGame().engagementOrders();
+        var exchange = orders.exchange();
+        if (exchange == null || exchange.order() != Order.AMBUSH || exchange.opponent() != formation
+              || exchange.shooter() != -2 || manager.getGame().getFormation(formation)
+                    .filter(f -> f.getOwnerId() == player && f.isHidden() && (choice == SBFEngagementOrders.Ambush.HOLD
+                          || SBFContactDamage.canAmbush(manager.getGame(), f, choice == SBFEngagementOrders.Ambush.SHORT
+                                ? ASRange.SHORT : ASRange.MEDIUM))).isEmpty()) {
+            return false;
+        }
+        int selection = switch (choice) {
+            case HOLD -> -1;
+            case SHORT -> 0;
+            case MEDIUM -> 1;
+        };
+        orders.setExchange(exchange.withShooter(selection));
+        resume(formation);
+        return true;
+    }
+
     /** Air-to-Air Engagements, IO:BF pp. 176–177. There is no extra Thrust cost to leave a hostile zone. */
     Boolean airContact(SBFFormation mover, SBFFormation opponent, SBFMovePath route) {
         SBFEngagementOrders orders = manager.getGame().engagementOrders();
         if (manager.getGame().usesDoubleBlind()) {
             // Same-zone airborne Squadrons always see each other, including an encounter during transit (IO:BF p. 177).
-            var visibility = manager.getGame().visibilityHelper();
-            visibility.setVisibility(mover.getOwnerId(), opponent.getId(),
-                  visibility.getObservedVisibility(mover.getOwnerId(), opponent.getId()).bestOf(SBFVisibilityStatus.EYES_ON_TARGET));
-            visibility.setVisibility(opponent.getOwnerId(), mover.getId(),
-                  visibility.getObservedVisibility(opponent.getOwnerId(), mover.getId()).bestOf(SBFVisibilityStatus.EYES_ON_TARGET));
+            revealAirContact(mover, opponent);
+            revealAirContact(opponent, mover);
         }
         if (mover.isEngagedWith(opponent.getId())) {
             return !mover.passesAirOpponent(opponent.getId());
@@ -180,7 +249,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                 return false;
             }
             SBFFormation defender = winner == mover ? opponent : mover;
-            defense = new AirDefense(winner.getId(), defender.getId(), null);
+            defense = new AirDefense(winner.getId(), defender.getId(), defender.inHighDrop() ? AirResponse.RESERVE : null);
             orders.setAirDefense(defense);
         }
         SBFFormation attacker = defense.attacker() == mover.getId() ? mover : opponent;
@@ -203,6 +272,16 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         }
         manager.sendUnitUpdate(opponent);
         return !mover.passesAirOpponent(opponent.getId());
+    }
+
+    private void revealAirContact(SBFFormation viewer, SBFFormation contact) {
+        var visibility = manager.getGame().visibilityHelper();
+        var old = visibility.getObservedVisibility(viewer.getOwnerId(), contact.getId());
+        var seen = old.bestOf(SBFVisibilityStatus.EYES_ON_TARGET);
+        if (old != seen) {
+            visibility.setVisibility(viewer.getOwnerId(), contact.getId(), seen);
+            manager.sendUnitUpdate(contact); // Recipient-specific placeholders preserve other sides' fog of war.
+        }
     }
 
     private void promptAirDefense(SBFFormation defender, SBFFormation attacker) {
@@ -238,7 +317,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         SBFGame game = manager.getGame();
         Player owner = game.getPlayer(mover.getOwnerId());
         return game.getActiveFormationsAt(location).stream()
-              .filter(SBFFormation::isDeployed)
+              .filter(f -> f.isDeployed() && !f.isHidden())
               .filter(other -> game.areHostile(other, owner))
               .sorted(Comparator.comparingInt(SBFFormation::getId))
               .toList();
@@ -583,7 +662,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     void submitOrder(int playerId, int formationId, int opponentId, Order order) {
         SBFGame game = manager.getGame();
         SBFFormation side = game.getFormation(formationId).orElse(null);
-        if ((side == null) || (side.getOwnerId() != playerId) || !side.isDeployed()) {
+        if ((order == Order.AMBUSH) || (side == null) || (side.getOwnerId() != playerId) || !side.isDeployed()) {
             manager.sendServerChat(playerId, "Choose one of your deployed formations.");
             return;
         }

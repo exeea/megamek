@@ -193,9 +193,10 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
         addFormationSpasIfAny(formation, DN, XMEC, COM, HPG, MCS, UCS, MEC, MAS, LMAS,
               MSW, MFB, SAW, SDS, TRN, FD, HELI, SDCS);
         addFormationSpasIf2Thirds(formation, AC3, PRB, AECM, ECM, ENG, LPRB, LECM, ORO, RCN, SRCH, SHLD, TAG, WAT);
-        addFormationSpasIfAll(formation, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL, RBT, UMU);
+        addFormationSpasIfAll(formation, SPC, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL, RBT, UMU);
         sumFormationSpas(SBF_OMNI, CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
-              VTS, AT, BOMB, DT, MT, PT, ST, SCR, PNT, IF, MHQ);
+              VTS, AT, BOMB, DT, MT, PT, ST, SCR, PNT, IF, MHQ,
+              ARTAIS, ARTAC, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12, ARTLT, ARTS, ARTT);
 
         var fuel = formation.getUnits().stream().filter(SBFUnit::isAerospace).mapToInt(SBFUnit::getFUEL).min();
         if (fuel.isPresent()) {

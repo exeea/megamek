@@ -23,8 +23,13 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.alphaStrike.ASDamageVector;
+import megamek.common.alphaStrike.BattleForceSUA;
+import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
@@ -33,6 +38,7 @@ import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFGame.Allocation;
 import megamek.common.strategicBattleSystems.SBFGame.PendingHit;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.util.SerializationHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -138,6 +144,45 @@ class SBFCombatDamageTest {
     }
 
     @Test
+    void priorIndirectHitCountsTowardManualConcentrationLimit() {
+        var other = new SBFUnit();
+        other.setArmor(20);
+        target.addUnit(other);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.randomInt(2)).thenReturn(0);
+            dice.when(Compute::d6).thenReturn(1, 6);
+            SBFCombatDamage.recordRandomHit(manager, attacker, target, 1);
+            SBFCombatDamage.recordStandardHit(manager, attacker, target, 1);
+            SBFCombatDamage.recordStandardHit(manager, attacker, target, 1);
+        }
+        game.setPhase(GamePhase.FIRING_REPORT);
+        assertFalse(SBFCombatDamage.allocate(manager, 20, 1, 2, List.of(0, 0)));
+        assertEquals(1, game.getPendingHits().size());
+        assertTrue(SBFCombatDamage.allocate(manager, 20, 1, 2, List.of(0, 1)));
+        assertEquals(List.of(0, 0, 1), game.getPendingHits().stream().map(PendingHit::unitIndex).toList());
+    }
+
+    @Test
+    void laterRandomHitRespectsEarlierPendingManualChoicesAndCannotBeRerolled() {
+        var other = new SBFUnit();
+        other.setArmor(20);
+        target.addUnit(other);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(Compute::d6).thenReturn(1, 6);
+            // Prefer Unit zero; the two earlier direct hits make it ineligible in this exchange.
+            dice.when(() -> Compute.randomInt(2)).thenReturn(1);
+            SBFCombatDamage.recordStandardHit(manager, attacker, target, 1);
+            SBFCombatDamage.recordStandardHit(manager, attacker, target, 1);
+            SBFCombatDamage.recordRandomHit(manager, attacker, target, 1);
+            game.setPhase(GamePhase.FIRING_REPORT);
+            assertFalse(SBFCombatDamage.allocate(manager, 20, 1, 2, List.of(0, 7)));
+            assertTrue(SBFCombatDamage.allocate(manager, 20, 1, 2, List.of(0, 0)));
+            dice.verify(() -> Compute.randomInt(2), times(1));
+        }
+        assertEquals(List.of(0, 0, 1), game.getPendingHits().stream().map(PendingHit::unitIndex).toList());
+    }
+
+    @Test
     void attackWinnerCanAssignAndRepliesCannotReorderHitsAtTheThreshold() {
         var second = new SBFUnit();
         second.setArmor(20);
@@ -225,10 +270,64 @@ class SBFCombatDamageTest {
     }
 
     @Test
+    void underwaterBarChecksStackAndArmoredComponentsAbsorbOneChancePerScenario() {
+        game.setBoard(0, Board.createEmptyBoard(2, 2));
+        var position = BoardLocation.of(new Coords(1, 1), 0);
+        game.getBoard(0).setHex(position.coords(), new Hex(0, "water:2", ""));
+        target.setPosition(position);
+        target.setMovementMode(SBFMovementMode.SUBMARINE);
+        unit.getSpecialAbilities().setSUA(BattleForceSUA.BAR);
+        unit.getSpecialAbilities().setSUA(BattleForceSUA.ARM);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.d6(2)).thenReturn(3, 5, 8, 10, 7);
+            SBFCombatDamage.recordHit(manager, attacker, target, 0, 1);
+            SBFCombatDamage.recordHit(manager, attacker, target, 0, 4);
+        }
+        assertEquals(List.of(3), game.getPendingHits().getFirst().criticalRolls());
+        assertEquals(List.of(5, 8, 10, 7), game.getPendingHits().getLast().criticalRolls());
+        SBFCombatDamage.applyEndPhase(manager);
+        assertEquals(2, unit.getTargetingCrits());
+        assertEquals(1, unit.getDamageCrits());
+        assertEquals(1, unit.getMpCrits());
+    }
+
+    @Test
+    void shieldAndHarJelRecoverArmorOncePerRoundAfterDamage() {
+        unit.getSpecialAbilities().setSUA(BattleForceSUA.SHLD);
+        unit.getSpecialAbilities().replaceSUA(BattleForceSUA.BHJ2, 3);
+        SBFCombatDamage.recordHit(manager, attacker, target, 0, 4);
+        assertEquals(3, game.getPendingHits().getFirst().damage());
+        SBFCombatDamage.applyEndPhase(manager);
+        assertEquals(7, unit.getCurrentArmor());
+        SBFCombatDamage.applyEndPhase(manager);
+        assertEquals(7, unit.getCurrentArmor());
+    }
+
+    @Test
+    void bombMissionKillRetainsItsSalvageExclusionThroughTacticsAndEndPhase() {
+        var second = new SBFUnit();
+        second.setArmor(12);
+        target.addUnit(second);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(Compute::d6).thenReturn(3);
+            dice.when(() -> Compute.d6(2)).thenReturn(12);
+            SBFCombatDamage.recordStandardHit(manager, attacker, target, 5, LossCause.ARTILLERY_OR_BOMB);
+            game.setPhase(GamePhase.FIRING_REPORT);
+            assertTrue(SBFCombatDamage.allocate(manager, 20, 1, 2, List.of(0)));
+            assertEquals(LossCause.ARTILLERY_OR_BOMB, game.getPendingHits().getFirst().cause());
+        }
+        SBFCombatDamage.applyEndPhase(manager);
+        assertEquals(LossCause.ARTILLERY_OR_BOMB, game.scenarioProgress().losses().getFirst().cause());
+        assertEquals(List.of(second), target.getUnits());
+    }
+
+    @Test
     void recordedDamageAndRollSurviveSaveLoadBetweenFiringAndEnd() {
         game.getPendingHits().add(new PendingHit(1, 2, 0, 6, 10));
         String xml = SerializationHelper.getSaveGameXStream().toXML(game.getPendingHits());
         assertEquals(game.getPendingHits(), SerializationHelper.getLoadSaveGameXStream().fromXML(xml));
+        assertEquals(game.getPendingHits(), SerializationHelper.getLoadSaveGameXStream()
+              .fromXML(xml.replace("<cause>COMBAT</cause>", "")));
         game.getDamageAllocations().add(new Allocation(1, 2, 10, 4, -1));
         String choicesXml = SerializationHelper.getSaveGameXStream().toXML(game.getDamageAllocations());
         assertEquals(game.getDamageAllocations(), SerializationHelper.getLoadSaveGameXStream().fromXML(choicesXml));
