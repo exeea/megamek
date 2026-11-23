@@ -56,8 +56,29 @@ public class SBFMovePath implements EntityAction, Serializable {
     public record TransportOrder(int afterSteps, int passengerId, boolean mount) implements Serializable { }
 
     private List<TransportOrder> transportOrders;
+    private int processedTransportOrders;
+    private int spentTransportMP;
     private int mpUsed;
     private int jumpUsed = 0;
+
+    /** A declaration of atmospheric zone movement and its optional ground attack flight path (IO:BF p. 176). */
+    public record RadarFlight(List<SBFRadarZone> zones, List<BoardLocation> groundPath, boolean retreat)
+          implements Serializable {
+        public RadarFlight {
+            zones = List.copyOf(zones);
+            groundPath = List.copyOf(groundPath);
+        }
+    }
+
+    private RadarFlight radarFlight;
+
+    public RadarFlight radarFlight() {
+        return radarFlight;
+    }
+
+    public void setRadarFlight(RadarFlight flight) {
+        radarFlight = flight;
+    }
 
     // The game is used mainly during creation of the move path and shouldn't be
     // sent in packets
@@ -78,6 +99,7 @@ public class SBFMovePath implements EntityAction, Serializable {
         overstacked = original.overstacked;
         mpUsed = original.mpUsed;
         jumpUsed = original.jumpUsed;
+        radarFlight = original.radarFlight;
         transportOrders = original.transportOrders == null ? null : new ArrayList<>(original.transportOrders);
     }
 
@@ -115,6 +137,20 @@ public class SBFMovePath implements EntityAction, Serializable {
         return formationId;
     }
 
+    /** Set only on the rebuilt server path when an immediate combat interrupts the movement. */
+    public int processedTransportOrders() {
+        return processedTransportOrders;
+    }
+
+    public int spentTransportMP() {
+        return spentTransportMP;
+    }
+
+    public void recordTransportProgress(int processed, int spent) {
+        processedTransportOrders = processed;
+        spentTransportMP += spent;
+    }
+
     public List<TransportOrder> getTransportOrders() {
         return transportOrders == null ? List.of() : Collections.unmodifiableList(transportOrders);
     }
@@ -126,10 +162,9 @@ public class SBFMovePath implements EntityAction, Serializable {
         transportOrders.add(order);
     }
 
-    public static boolean canInfantryOccupy(SBFGame game, SBFFormation infantry, BoardLocation location) {
+    public static boolean canOccupyTerrain(SBFGame game, SBFFormation formation, BoardLocation location) {
         Hex hex = game.getHex(location);
-        return (hex != null) && SBFTerrainMovement.of(infantry)
-              .allMatch(mover -> mover.cost(hex, hex, 0) != SBFTerrainMovement.PROHIBITED);
+        return (hex != null) && SBFTerrainMovement.of(formation).allMatch(mover -> mover.canOccupy(hex, game.usesExpandedWoods()));
     }
 
     public int getMpUsed() {
@@ -160,7 +195,8 @@ public class SBFMovePath implements EntityAction, Serializable {
     public static int normalMovementPoints(SBFFormation formation, SBFGame game) {
         boolean carriesXmec = game.passengersOf(formation).stream()
               .anyMatch(rider -> rider.isExternallyMounted() && rider.hasSUA(BattleForceSUA.XMEC));
-        return Math.max(0, formation.getMovement() - (formation.dismountedIn(game.getCurrentRound()) ? 1 : 0)
+        return Math.max(0, formation.getMovement() - formation.getReconMpSpent()
+                - (formation.dismountedIn(game.getCurrentRound()) ? 1 : 0)
               - (carriesXmec ? 1 : 0));
     }
 

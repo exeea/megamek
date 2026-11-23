@@ -49,9 +49,12 @@ public interface SBFRuleOptionsUser {
      */
     SBFRuleOptions getOptions();
 
-    /**
-     * @return True when this game uses Detection and Reconnaissance, IO:BF p.195 aka double-blind.
-     */
+    /** Expanded Woods and Jungle terrain, IO:BF pp. 200–203. */
+    default boolean usesExpandedWoods() {
+        return getOptions().booleanOption(SBFRuleOptions.MOVE_EXPANDED_WOODS);
+    }
+
+    /** Detection and Reconnaissance, IO:BF p. 195. */
     default boolean usesDoubleBlind() {
         return getOptions().booleanOption(SBFRuleOptions.BASE_RECON);
     }

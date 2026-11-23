@@ -34,6 +34,7 @@
 package megamek.common.strategicBattleSystems;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,6 +45,30 @@ import megamek.common.Player;
 
 /** Private orders and unresolved movement contacts, retained in SBF saves (IO:BF pp. 167, 172). */
 public class SBFEngagementOrders implements Serializable {
+    public record EndPair(int first, int second) implements Serializable {
+        public boolean matches(int a, int b) {
+            return ((first == a) && (second == b)) || ((first == b) && (second == a));
+        }
+    }
+
+    private List<EndPair> remainingEnds = new ArrayList<>();
+    private EndPair selectedEnd;
+
+    public List<EndPair> remainingEnds() {
+        if (remainingEnds == null) {
+            remainingEnds = new ArrayList<>();
+        }
+        return remainingEnds;
+    }
+
+    public EndPair selectedEnd() {
+        return selectedEnd;
+    }
+
+    public void selectEnd(EndPair selected) {
+        selectedEnd = selected;
+    }
+
     /** A negative targetUnit awaits the Tactics winner's allocation. */
     public record ContactHit(int attacker, int target, int damage, int chooser, int targetUnit) implements Serializable { }
 

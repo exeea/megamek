@@ -110,6 +110,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private Integer dismountRound;
     private boolean forcedWithdrawal;
     private boolean withdrawn;
+    private int reconMpSpent;
     private boolean attackedThisTurn;
     private boolean attackedByMekThisTurn;
     private boolean hostileEnteredHex;
@@ -544,6 +545,9 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public void resetEngagementMovement() {
+        jumpUsedThisTurn = 0;
+        optionalAirReturns = new ArrayList<>();
+        reservedAirReturns = new ArrayList<>();
         mpSpentThisTurn = 0;
         overranThisTurn = false;
         wasOverrunThisTurn = false;
@@ -628,6 +632,90 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         }
     }
 
+    private List<Integer> optionalAirReturns = new ArrayList<>();
+    private List<Integer> reservedAirReturns = new ArrayList<>();
+
+    public void permitAirReturnChoice(int attacker) {
+        if (optionalAirReturns == null) {
+            optionalAirReturns = new ArrayList<>();
+        }
+        if (!optionalAirReturns.contains(attacker)) {
+            optionalAirReturns.add(attacker);
+        }
+    }
+
+    public boolean reserveAirReturn(int attacker) {
+        if (!isEngagedWith(attacker) || (optionalAirReturns == null) || !optionalAirReturns.contains(attacker)) {
+            return false;
+        }
+        if (reservedAirReturns == null) {
+            reservedAirReturns = new ArrayList<>();
+        }
+        if (!reservedAirReturns.contains(attacker)) {
+            reservedAirReturns.add(attacker);
+        }
+        return true;
+    }
+
+    public boolean reservedAirReturn(int attacker) {
+        return (reservedAirReturns != null) && reservedAirReturns.contains(attacker);
+    }
+
+    private SBFRadarZone radarZone;
+    private SBFRadarZone radarHome;
+
+    public SBFRadarZone getRadarHome() {
+        return radarHome;
+    }
+
+    public void setRadarHome(SBFRadarZone home) {
+        radarHome = home;
+    }
+    private List<BoardLocation> groundFlightPath = List.of();
+    private int highExplosiveBombs;
+    private int clusterBombs;
+
+    /** Ground occupation excludes embarked passengers and the ground footprint of an airborne flight path. */
+    public boolean occupiesGroundHex() {
+        return isDeployed() && !isEmbarked() && !isOnRadarMap() && getPosition() != null;
+    }
+
+    public boolean isOnRadarMap() {
+        return radarZone != null;
+    }
+
+    public SBFRadarZone getRadarZone() {
+        return radarZone;
+    }
+
+    public List<BoardLocation> getGroundFlightPath() {
+        return groundFlightPath == null ? List.of() : groundFlightPath;
+    }
+
+    public void setRadarPosition(SBFRadarZone zone, List<BoardLocation> flightPath) {
+        radarZone = zone;
+        groundFlightPath = List.copyOf(flightPath);
+        setPosition(groundFlightPath.isEmpty() ? null : groundFlightPath.getLast());
+    }
+
+    public int getHighExplosiveBombs() {
+        return highExplosiveBombs;
+    }
+
+    public int getClusterBombs() {
+        return clusterBombs;
+    }
+
+    public void setBombLoad(int highExplosive, int cluster) {
+        highExplosiveBombs = highExplosive;
+        clusterBombs = cluster;
+    }
+
+    /** Loaded bombs reduce atmospheric Thrust, to a minimum of one for a mobile craft (IO:BF p. 176). */
+    public int getCurrentThrust() {
+        return getMovement() <= 0 ? 0 : Math.max(1, getMovement() - highExplosiveBombs - clusterBombs);
+    }
+
     public boolean isEligibleForPhase(GamePhase phase) {
         // A sprinting Formation may not make attacks (IO:BF p.199)
         return !isDone && !isEmbarked() && !(phase.isFiring() && (sprintedThisTurn || !canAttackAfterEngagement())) && switch (phase) {
@@ -704,6 +792,18 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public boolean dismountedIn(int round) {
         return (dismountRound != null) && (dismountRound == round);
+    }
+
+    public int getReconMpSpent() {
+        return reconMpSpent;
+    }
+
+    public void spendReconMp() {
+        reconMpSpent++;
+    }
+
+    public void resetReconMp() {
+        reconMpSpent = 0;
     }
 
     public boolean mustWithdraw() {

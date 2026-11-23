@@ -52,6 +52,7 @@ import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.enums.GamePhase;
+import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.event.UnitChangedGameEvent;
@@ -67,6 +68,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.BTObject;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.logging.MMLogger;
 import megamek.server.sbf.SBFActionHandler;
 
@@ -99,12 +101,43 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     }
 
     /** One recorded Combat Phase hit, retained across the firing report and save/load until the End Phase. */
-    public record PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll)
-          implements Serializable { }
+    public record PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll,
+          List<Integer> additionalRolls, LossCause cause) implements Serializable {
+        public PendingHit {
+            cause = cause == null ? LossCause.COMBAT : cause;
+            additionalRolls = additionalRolls == null ? new ArrayList<>() : new ArrayList<>(additionalRolls);
+        }
+
+        public PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll) {
+            this(attackerId, targetId, unitIndex, damage, criticalRoll, List.of(), LossCause.COMBAT);
+        }
+
+        public List<Integer> criticalRolls() {
+            List<Integer> rolls = new ArrayList<>();
+            if (criticalRoll > 0) {
+                rolls.add(criticalRoll);
+            }
+            rolls.addAll(additionalRolls);
+            return rolls;
+        }
+    }
 
     /** Successful standard hit awaiting allocation; a negative Unit index is an outstanding player choice. */
-    public record Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex)
-          implements Serializable {
+    public record Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex,
+          List<Integer> randomOrder, LossCause cause) implements Serializable {
+        public Allocation {
+            cause = cause == null ? LossCause.COMBAT : cause;
+            randomOrder = randomOrder == null ? new ArrayList<>() : new ArrayList<>(randomOrder);
+        }
+
+        public Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex) {
+            this(attackerId, targetId, chooserId, damage, unitIndex, List.of(), LossCause.COMBAT);
+        }
+
+        public Allocation assignedTo(int index) {
+            return new Allocation(attackerId, targetId, chooserId, damage, index, randomOrder, cause);
+        }
+
         public boolean isFor(int attacker, int target) {
             return (attackerId == attacker) && (targetId == target);
         }
@@ -158,6 +191,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     @ClientOnly
     public void receiveCombatOrders(SBFCombatOrders orders) {
         combatOrders = orders;
+        fireGameEvent(new GameEntityChangeEvent(this, null));
     }
 
     private SBFEngagementOrders engagementOrders = new SBFEngagementOrders();
@@ -167,6 +201,28 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
             engagementOrders = new SBFEngagementOrders();
         }
         return engagementOrders;
+    }
+
+    private int centralOccupancyRound = Integer.MIN_VALUE;
+    private Map<Integer, Integer> centralOccupants = new java.util.HashMap<>();
+
+    /** A maximum of three friendly Squadrons may occupy Central in one turn (IO:BF p. 176). */
+    public boolean canEnterCentral(SBFFormation squadron) {
+        if ((centralOccupants == null) || (centralOccupancyRound != getCurrentRound())) {
+            centralOccupants = new java.util.HashMap<>();
+            centralOccupancyRound = getCurrentRound();
+            getActiveFormations().stream().filter(f -> f.getRadarZone() == SBFRadarZone.CENTRAL)
+                  .forEach(f -> centralOccupants.put(f.getId(), f.getOwnerId()));
+        }
+        Player player = getPlayer(squadron.getOwnerId());
+        return centralOccupants.containsKey(squadron.getId()) || centralOccupants.values().stream()
+              .filter(owner -> !player.isEnemyOf(getPlayer(owner))).count() < 3;
+    }
+
+    public void enterCentral(SBFFormation squadron) {
+        if (canEnterCentral(squadron)) {
+            centralOccupants.put(squadron.getId(), squadron.getOwnerId());
+        }
     }
 
     public SBFGame() {
@@ -224,12 +280,14 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
             boolean db = getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND);
             player.setSingleBlind(sbb && db);
         }
+        fireGameEvent(new GamePlayerChangeEvent(this, player));
     }
 
     @Override
     public boolean isCurrentPhasePlayable() {
         return switch (phase) {
-            case INITIATIVE, END, TARGETING, PHYSICAL, OFFBOARD, OFFBOARD_REPORT, SBF_DETECTION, SBF_DETECTION_REPORT ->
+            case END -> !engagementOrders().remainingEnds().isEmpty();
+            case INITIATIVE, TARGETING, PHYSICAL, OFFBOARD, OFFBOARD_REPORT, SBF_DETECTION ->
                   false;
             case DEPLOYMENT,
                  PREMOVEMENT,
@@ -244,12 +302,16 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
 
     @Override
     public void setPlayer(int id, Player player) {
-
+        addPlayer(id, player);
     }
 
     @Override
     public void removePlayer(int id) {
-
+        Player removed = players.remove(id);
+        if (removed != null) {
+            setupTeams();
+            fireGameEvent(new GamePlayerChangeEvent(this, removed));
+        }
     }
 
     @Override
@@ -492,6 +554,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
      */
     public List<SBFFormation> getActiveFormationsAt(BoardLocation location) {
         return getActiveFormations().stream()
+              .filter(f -> !f.isOnRadarMap())
               .filter(f -> f.getPosition() != null)
               .filter(f -> f.getPosition().equals(location))
               .collect(Collectors.toList());

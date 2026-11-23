@@ -49,6 +49,7 @@ import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeEach;
@@ -149,9 +150,25 @@ class SurfaceSBFMoveStepTest {
         tank.setMovementMode(SBFMovementMode.TRACKED);
         tank.setArmor(4);
         formation.setUnits(List.of(flyer, tank));
+        assertFalse(step().isIllegal());
+        assertEquals(2, step().getMpUsed());
+        game.getOptions().getOption(SBFRuleOptions.MOVE_EXPANDED_WOODS).setValue(true);
         assertTrue(step().isIllegal());
         tank.setCurrentArmor(0);
         assertFalse(step().isIllegal());
+    }
+
+    @Test
+    void connectedRailCannotCrossRubbleOrWoods() {
+        setMover(SBFElementType.V, SBFMovementMode.RAIL);
+        from.addTerrain(new Terrain(Terrains.RAIL, 1, true, 63));
+        to.addTerrain(new Terrain(Terrains.RAIL, 1, true, 63));
+        assertFalse(step().isIllegal());
+        to.addTerrain(new Terrain(Terrains.RUBBLE, 1));
+        assertTrue(step().isIllegal());
+        to.removeTerrain(Terrains.RUBBLE);
+        to.addTerrain(new Terrain(Terrains.WOODS, 1));
+        assertTrue(step().isIllegal());
     }
 
     private void setMover(SBFElementType type, SBFMovementMode mode) {

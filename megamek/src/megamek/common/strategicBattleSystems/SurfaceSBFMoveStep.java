@@ -86,7 +86,7 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
         roadBonusEligible = SBFTerrainMovement.isPaved(from) && SBFTerrainMovement.isPaved(to);
         int direction = startingPoint.coords().direction(destination.coords());
         for (SBFTerrainMovement mover : movers) {
-            int cost = mover.cost(from, to, direction);
+            int cost = mover.cost(from, to, direction, game.usesExpandedWoods());
             if (cost == SBFTerrainMovement.PROHIBITED) {
                 isIllegal = true;
                 return;

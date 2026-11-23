@@ -75,14 +75,21 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         return hex.hasPavementOrRoad() || hex.containsTerrain(Terrains.BUILDING);
     }
 
-    int cost(Hex from, Hex to, int direction) {
+    boolean canOccupy(Hex hex, boolean expandedWoods) {
+        if (mode == SBFMovementMode.RAIL) {
+            return railTerrainAllowed(hex) && (hex.containsTerrain(Terrains.RAIL) || hex.containsTerrain(Terrains.BRIDGE_RAIL));
+        }
+        return cost(hex, hex, 0, expandedWoods) != PROHIBITED;
+    }
+
+    int cost(Hex from, Hex to, int direction, boolean expandedWoods) {
         int levels = Math.abs(to.getLevel() - from.getLevel());
         if (mode == SBFMovementMode.VTOL) {
             // Airborne VTOLs ignore the underlying terrain and maintain one level of clearance (IO:BF p. 166).
             return 1 + levels;
         }
         if (mode == SBFMovementMode.RAIL) {
-            if (!hasRailExit(from, direction) || !hasRailExit(to, (direction + 3) % 6)) {
+            if (!railTerrainAllowed(to) || !hasRailExit(from, direction) || !hasRailExit(to, (direction + 3) % 6)) {
                 return PROHIBITED;
             }
         }
@@ -124,17 +131,18 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         }
         boolean wheeledOrHover = (mode == SBFMovementMode.WHEELED) || (mode == SBFMovementMode.QUAD_WHEELED)
               || (mode == SBFMovementMode.HOVER);
-        int woods = to.terrainLevel(Terrains.WOODS);
-        int jungle = to.terrainLevel(Terrains.JUNGLE);
-        if ((Math.max(woods, jungle) > 1) && ((type == SBFElementType.V)
-              || ((Math.max(woods, jungle) >= 3) && !infantry))) {
-            return PROHIBITED;
-        }
-        if (woods > 0) {
-            cost += wheeledOrHover ? 2 : woods - (infantry ? 1 : 0);
-        }
-        if (jungle > 0) {
-            cost += wheeledOrHover ? 2 : jungle + 1;
+        boolean jungle = to.containsTerrain(Terrains.JUNGLE);
+        if (to.containsTerrain(Terrains.WOODS) || jungle) {
+            int density = expandedWoods ? Math.max(to.terrainLevel(Terrains.WOODS), to.terrainLevel(Terrains.JUNGLE)) : 1;
+            if ((density > 1 && type == SBFElementType.V) || (density >= 3 && !infantry)) {
+                return PROHIBITED;
+            }
+            boolean expandedJungle = jungle && expandedWoods;
+            int surcharge = density + (expandedJungle ? 1 : 0);
+            if (infantry && !expandedJungle && density < 3) {
+                surcharge--;
+            }
+            cost += wheeledOrHover ? 2 : surcharge;
         }
         if (to.containsTerrain(Terrains.RUBBLE)) {
             cost++;
@@ -143,6 +151,11 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
             cost += wheeledOrHover ? 2 : 1;
         }
         return cost;
+    }
+
+    private static boolean railTerrainAllowed(Hex hex) {
+        return !hex.containsTerrain(Terrains.WOODS) && !hex.containsTerrain(Terrains.JUNGLE)
+              && !hex.containsTerrain(Terrains.RUBBLE);
     }
 
     private static boolean hasRailExit(Hex hex, int direction) {
