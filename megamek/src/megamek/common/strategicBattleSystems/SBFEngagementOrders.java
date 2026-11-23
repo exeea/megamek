@@ -36,6 +36,7 @@ package megamek.common.strategicBattleSystems;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -43,6 +44,31 @@ import megamek.common.Player;
 
 /** Private orders and unresolved movement contacts, retained in SBF saves (IO:BF pp. 167, 172). */
 public class SBFEngagementOrders implements Serializable {
+    /** A negative targetUnit awaits the Tactics winner's allocation. */
+    public record ContactHit(int attacker, int target, int damage, int chooser, int targetUnit) implements Serializable { }
+
+    /** A free shot uses -2 for a pending shooter, -1 for a declined shot. Null hits await preparation. */
+    public record Exchange(int mover, int opponent, Order order, boolean succeeded, int shooter,
+          List<ContactHit> hits) implements Serializable {
+        public Exchange withShooter(int selected) {
+            return new Exchange(mover, opponent, order, succeeded, selected, hits);
+        }
+
+        public Exchange withHits(List<ContactHit> prepared) {
+            return new Exchange(mover, opponent, order, succeeded, shooter, List.copyOf(prepared));
+        }
+    }
+
+    private Exchange exchange;
+
+    public Exchange exchange() {
+        return exchange;
+    }
+
+    public void setExchange(Exchange exchange) {
+        this.exchange = exchange;
+    }
+
     public enum Order {
         ENGAGE, AVOID, ASK, FORCE, OVERRUN, EVADE;
 
@@ -57,6 +83,22 @@ public class SBFEngagementOrders implements Serializable {
     private Boolean decision;
     private final Set<Long> declinedPairs = new HashSet<>();
     private int round = -1;
+    private int lastResolvedStep;
+
+    public void recordResolvedStep(int step) {
+        lastResolvedStep = Math.max(lastResolvedStep, step);
+    }
+
+    public int lastResolvedStep() {
+        return lastResolvedStep;
+    }
+
+    public void finishMovement() {
+        lastResolvedStep = 0;
+        exchange = null;
+        clearPendingMove();
+        clearDecision();
+    }
     private SBFMovePath pendingMove;
     private int contactId = Player.PLAYER_NONE;
 
@@ -76,8 +118,7 @@ public class SBFEngagementOrders implements Serializable {
     public void startRound(int currentRound) {
         if (round != currentRound) {
             declinedPairs.clear();
-            clearDecision();
-            clearPendingMove();
+            finishMovement();
             round = currentRound;
         }
     }

@@ -44,8 +44,8 @@ import static org.mockito.Mockito.when;
 
 import megamek.common.Hex;
 import megamek.common.Player;
-import megamek.common.board.BoardLocation;
 import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
@@ -53,8 +53,11 @@ import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
+import megamek.common.strategicBattleSystems.SBFMovePathFinder;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -192,6 +195,112 @@ class SBFMovementProcessorTest {
         game.getOptions().getOption(SBFRuleOptions.MOVE_SPRINT).setValue(true);
 
         assertRejected(pathWithSteps(6));
+    }
+
+    @Test
+    void minimumMovementUsesNormalMoveEvenWhenSprintingIsEnabled() {
+        formation.setMovement(1);
+        game.getOptions().getOption(SBFRuleOptions.MOVE_SPRINT).setValue(true);
+        BoardLocation adjacent = BoardLocation.of(new Coords(2, 1), 0);
+        game.getBoard(0).getHex(adjacent.coords()).addTerrain(new Terrain(Terrains.ROUGH, 1));
+
+        SBFMovePathFinder finder = SBFMovePathFinder.moveEnvelopeFinder(1, game);
+        finder.run(new SBFMovePath(formation.getId(), start, game));
+        SBFMovePath path = finder.getAllComputedPaths().get(adjacent);
+        assertEquals(1, path.getMpUsed());
+        assertTrue(processor.processMovement(path, formation));
+        assertFalse(formation.hasSprintedThisTurn());
+    }
+
+    @Test
+    void minimumMovementCannotBeUsedOnALongerRouteOrByAnImmobileFormation() {
+        formation.setMovement(1);
+        game.getBoard(0).getHex(new Coords(2, 1)).addTerrain(new Terrain(Terrains.ROUGH, 1));
+        assertRejected(pathWithSteps(2));
+        formation.setMovement(0);
+        assertRejected(pathWithSteps(1));
+    }
+
+    @Test
+    void minimumMovementCannotEnterProhibitedTerrain() {
+        formation.setMovement(1);
+        game.getBoard(0).getHex(new Coords(2, 1)).setLevel(4);
+        assertRejected(pathWithSteps(1));
+    }
+
+    @Test
+    void infantryCanJoinAndHoldWithAnotherFormation() {
+        BoardLocation adjacent = BoardLocation.of(new Coords(2, 1), 0);
+        addFriendly(18, adjacent, SBFElementType.BM);
+        assertRejected(pathWithSteps(1));
+        formation.setType(SBFElementType.BA);
+        assertTrue(processor.processMovement(pathWithSteps(1), formation));
+        formation.setDone(false);
+        assertTrue(processor.processMovement(new SBFMovePath(formation.getId(), adjacent, game), formation));
+    }
+
+    @Test
+    void infantryCannotJoinAFullFriendlyStack() {
+        BoardLocation adjacent = BoardLocation.of(new Coords(2, 1), 0);
+        formation.setType(SBFElementType.BA);
+        addFriendly(18, adjacent, SBFElementType.BM);
+        addFriendly(19, adjacent, SBFElementType.CI);
+        assertRejected(pathWithSteps(1));
+    }
+
+    @Test
+    void pathfindersAndServerAllowTransitThroughAFullFriendlyStack() {
+        Board corridor = new Board(1, 3);
+        for (int y = 0; y < 3; y++) {
+            corridor.setHex(0, y, new Hex());
+        }
+        game.setBoard(0, corridor);
+        BoardLocation entrance = BoardLocation.of(new Coords(0, 0), 0);
+        BoardLocation middle = BoardLocation.of(new Coords(0, 1), 0);
+        BoardLocation exit = BoardLocation.of(new Coords(0, 2), 0);
+        formation.setPosition(entrance);
+        addFriendly(18, middle, SBFElementType.CI);
+        addFriendly(19, middle, SBFElementType.BM);
+        SBFMovePath startPath = new SBFMovePath(formation.getId(), entrance, game);
+
+        SBFMovePathFinder envelope = SBFMovePathFinder.moveEnvelopeFinder(2, game);
+        envelope.run(startPath);
+        assertFalse(envelope.getAllComputedPaths().containsKey(middle));
+        assertTrue(envelope.getAllComputedPaths().containsKey(exit));
+        SBFMovePathFinder finder = SBFMovePathFinder.aStarFinder(exit, game);
+        finder.run(startPath);
+        assertTrue(processor.processMovement(finder.getComputedPath(exit), formation));
+        assertEquals(exit, formation.getPosition());
+    }
+
+    @Test
+    void extraRoadHexRequiresTheEntireRouteToQualify() {
+        formation.setMovementMode(SBFMovementMode.TRACKED);
+        formation.setType(SBFElementType.V);
+        for (int x = 1; x <= 5; x++) {
+            game.getBoard(0).getHex(new Coords(x, 1)).addTerrain(new Terrain(Terrains.ROAD, 1));
+        }
+        Hex middle = game.getBoard(0).getHex(new Coords(3, 1));
+        middle.removeTerrain(Terrains.ROAD);
+        assertRejected(pathWithSteps(4));
+        middle.addTerrain(new Terrain(Terrains.ROAD, 1));
+
+        SBFMovePathFinder envelope = SBFMovePathFinder.moveEnvelopeFinder(formation.getMovement(), game);
+        envelope.run(new SBFMovePath(formation.getId(), start, game));
+        BoardLocation end = BoardLocation.of(new Coords(5, 1), 0);
+        assertEquals(3, envelope.getComputedPath(end).getMpUsed());
+        assertTrue(processor.processMovement(pathWithSteps(4), formation));
+        assertFalse(formation.hasSprintedThisTurn());
+    }
+
+    private void addFriendly(int id, BoardLocation location, SBFElementType type) {
+        SBFFormation friendly = new SBFFormation();
+        friendly.setId(id);
+        friendly.setOwnerId(formation.getOwnerId());
+        friendly.setPosition(location);
+        friendly.setType(type);
+        friendly.setDeployed(true);
+        game.addUnit(friendly);
     }
 
     private SBFMovePath pathWithSteps(int count) {

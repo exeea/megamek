@@ -33,15 +33,14 @@
 
 package megamek.common.strategicBattleSystems;
 
-import static java.util.stream.Collectors.toSet;
-
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 
+import megamek.common.Hex;
 import megamek.common.Player;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.actions.EntityAction;
 import megamek.common.board.BoardLocation;
 import megamek.logging.MMLogger;
@@ -52,7 +51,12 @@ public class SBFMovePath implements EntityAction, Serializable {
     private final int formationId;
     private final List<SBFMoveStep> steps = new ArrayList<>();
     private final BoardLocation startLocation;
-    private boolean isIllegal;
+    private boolean routeIllegal;
+    private boolean overstacked;
+    public record TransportOrder(int afterSteps, int passengerId, boolean mount) implements Serializable { }
+
+    private List<TransportOrder> transportOrders;
+    private int mpUsed;
     private int jumpUsed = 0;
 
     // The game is used mainly during creation of the move path and shouldn't be
@@ -63,6 +67,18 @@ public class SBFMovePath implements EntityAction, Serializable {
         this.formationId = formationId;
         this.startLocation = startLocation;
         this.game = game;
+        game.getFormation(formationId).ifPresent(formation -> overstacked = exceedsStackingLimit(game, formation, startLocation));
+    }
+
+    private SBFMovePath(SBFMovePath original) {
+        formationId = original.formationId;
+        startLocation = original.startLocation;
+        game = original.game;
+        routeIllegal = original.routeIllegal;
+        overstacked = original.overstacked;
+        mpUsed = original.mpUsed;
+        jumpUsed = original.jumpUsed;
+        transportOrders = original.transportOrders == null ? null : new ArrayList<>(original.transportOrders);
     }
 
     /**
@@ -74,7 +90,7 @@ public class SBFMovePath implements EntityAction, Serializable {
      * @return A new move path that is equal to the original
      */
     public static SBFMovePath createMovePathShallow(SBFMovePath original) {
-        SBFMovePath newPath = new SBFMovePath(original.formationId, original.startLocation, original.game);
+        SBFMovePath newPath = new SBFMovePath(original);
         newPath.steps.addAll(original.steps);
         return newPath;
     }
@@ -89,7 +105,7 @@ public class SBFMovePath implements EntityAction, Serializable {
      */
     @Deprecated(since = "0.51.0", forRemoval = true)
     public static SBFMovePath createMovePathDeep(SBFMovePath original) {
-        SBFMovePath newPath = new SBFMovePath(original.formationId, original.startLocation, original.game);
+        SBFMovePath newPath = new SBFMovePath(original);
         newPath.steps.addAll(original.steps.stream().map(SBFMoveStep::copy).toList());
         return newPath;
     }
@@ -99,7 +115,35 @@ public class SBFMovePath implements EntityAction, Serializable {
         return formationId;
     }
 
+    public List<TransportOrder> getTransportOrders() {
+        return transportOrders == null ? List.of() : Collections.unmodifiableList(transportOrders);
+    }
+
+    public void addTransportOrder(TransportOrder order) {
+        if (transportOrders == null) {
+            transportOrders = new ArrayList<>();
+        }
+        transportOrders.add(order);
+    }
+
+    public static boolean canInfantryOccupy(SBFGame game, SBFFormation infantry, BoardLocation location) {
+        Hex hex = game.getHex(location);
+        return (hex != null) && SBFTerrainMovement.of(infantry)
+              .allMatch(mover -> mover.cost(hex, hex, 0) != SBFTerrainMovement.PROHIBITED);
+    }
+
     public int getMpUsed() {
+        return mpUsed;
+    }
+
+    /** The extra paved MP requires an entirely paved turn for every constituent (IO:BF pp. 165–166). */
+    boolean earnsRoadBonus() {
+        return !steps.isEmpty() && steps.stream().allMatch(step ->
+              step instanceof SurfaceSBFMoveStep surface && surface.earnsRoadBonus());
+    }
+
+    /** Terrain cost before the minimum movement and paved movement allowances (IO:BF pp. 164–165). */
+    int getTerrainCost() {
         return steps.stream().mapToInt(SBFMoveStep::getMpUsed).sum();
     }
 
@@ -108,8 +152,16 @@ public class SBFMovePath implements EntityAction, Serializable {
      * Move multiplied by 1.5, rounding up.
      */
     public static int maximumMovementPoints(SBFFormation formation, SBFGame game) {
-        int movement = Math.max(0, formation.getMovement());
+        int movement = normalMovementPoints(formation, game);
         return game.usesSprintingMove() ? movement + ((movement + 1) / 2) : movement;
+    }
+
+    /** Transported Infantry and Extended Mechanized, IO:BF pp. 167, 268. */
+    public static int normalMovementPoints(SBFFormation formation, SBFGame game) {
+        boolean carriesXmec = game.passengersOf(formation).stream()
+              .anyMatch(rider -> rider.isExternallyMounted() && rider.hasSUA(BattleForceSUA.XMEC));
+        return Math.max(0, formation.getMovement() - (formation.dismountedIn(game.getCurrentRound()) ? 1 : 0)
+              - (carriesXmec ? 1 : 0));
     }
 
     public void addStep(SBFMoveStep step) {
@@ -126,7 +178,12 @@ public class SBFMovePath implements EntityAction, Serializable {
     }
 
     public boolean isIllegal() {
-        return isIllegal;
+        return routeIllegal || overstacked;
+    }
+
+    /** A friendly stack may be crossed even when the formation cannot stop there (IO:BF p. 164). */
+    boolean isTraversable() {
+        return !routeIllegal;
     }
 
     /**
@@ -139,29 +196,43 @@ public class SBFMovePath implements EntityAction, Serializable {
 
         SBFFormation formation = game.getFormation(formationId).orElseThrow();
 
-        isIllegal = steps.stream().anyMatch(s -> s.isIllegal);
-        isIllegal |= getMpUsed() > maximumMovementPoints(formation, game);
+        int move = normalMovementPoints(formation, game);
+        mpUsed = getTerrainCost();
+        if ((steps.size() == 1) && (move > 0)) {
+            // Minimum Movement (IO:BF p. 164) allows one otherwise legal hex on the formation's normal Move.
+            mpUsed = Math.min(mpUsed, move);
+        } else if ((move > 0) && (mpUsed > move) && earnsRoadBonus()) {
+            mpUsed--;
+        }
+        routeIllegal = steps.stream().anyMatch(SBFMoveStep::isIllegal)
+              || (mpUsed > maximumMovementPoints(formation, game));
 
-        // may not leave after entering hostile hex
+        // Opposed movement is resolved by the server. Even transit must respect capacity in a hostile hex (p. 164).
         for (SBFMoveStep step : steps) {
-            if (game.isHostileActiveFormationAt(step.startingPoint, formation)
-                  && !step.startingPoint.equals(step.destination)
-                  && !startLocation.equals(step.startingPoint)) {
-                isIllegal = true;
+            if (game.isHostileActiveFormationAt(step.destination, formation)
+                  && exceedsStackingLimit(game, formation, step.destination)) {
+                routeIllegal = true;
             }
         }
+        routeIllegal |= !steps.isEmpty() && !formation.getEngagedOpponents().isEmpty();
 
-        // stacking friendly at end of turn
+        overstacked = exceedsStackingLimit(game, formation, getLastPosition());
+    }
+
+    /** Stacking (IO:BF p. 164): one formation of any type plus one infantry formation per side. */
+    public static boolean exceedsStackingLimit(SBFGame game, SBFFormation formation, BoardLocation destination) {
         Player owner = game.getPlayer(formation.getOwnerId());
-        List<SBFFormation> friendliesAtDestination = game.getActiveFormationsAt(getLastPosition()).stream()
-              .filter(f -> !game.areHostile(f, owner))
+        List<SBFFormation> others = game.getActiveFormationsAt(destination).stream()
+              .filter(SBFFormation::isDeployed)
+              .filter(f -> (f.getId() != formation.getId()) && !game.areHostile(f, owner))
               .toList();
+        return exceedsStackingLimit(formation, others);
+    }
 
-        Set<SBFElementType> friendliesTypes = friendliesAtDestination.stream()
-              .map(SBFFormation::getType).collect(toSet());
-        isIllegal |= friendliesAtDestination.size() > 2;
-        isIllegal |= (friendliesAtDestination.size() == 2) && !friendliesTypes.contains(SBFElementType.CI)
-              && !friendliesTypes.contains(SBFElementType.BA);
+    public static boolean exceedsStackingLimit(SBFFormation formation, List<SBFFormation> others) {
+        return (others.size() >= 2) || ((others.size() == 1)
+              && !formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
+              && !others.getFirst().isAnyTypeOf(SBFElementType.CI, SBFElementType.BA));
     }
 
     /**
@@ -205,6 +276,9 @@ public class SBFMovePath implements EntityAction, Serializable {
      * @return The total mp up to the given step
      */
     public int getMpUpTo(SBFMoveStep step) {
+        if (!steps.isEmpty() && (steps.getLast() == step)) {
+            return getMpUsed();
+        }
         if (steps.contains(step)) {
             int mpUsed = 0;
             for (SBFMoveStep step2 : steps) {

@@ -89,6 +89,14 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
      * Contains all units that have left the game by any means.
      */
     private final List<InGameObject> graveyard = new ArrayList<>();
+    private SBFScenarioProgress scenarioProgress;
+
+    public SBFScenarioProgress scenarioProgress() {
+        if (scenarioProgress == null) {
+            scenarioProgress = new SBFScenarioProgress();
+        }
+        return scenarioProgress;
+    }
 
     /** One recorded Combat Phase hit, retained across the firing report and save/load until the End Phase. */
     public record PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll)
@@ -100,6 +108,23 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         public boolean isFor(int attacker, int target) {
             return (attackerId == attacker) && (targetId == target);
         }
+    }
+
+    public record FormationLosses(SBFFormation formation, boolean armorAtHalf, int destroyedUnits, boolean leaderLost,
+          boolean commanderLost, boolean newlyCrippled) implements Serializable {
+        public FormationLosses combine(FormationLosses other) {
+            return new FormationLosses(formation, armorAtHalf || other.armorAtHalf, destroyedUnits + other.destroyedUnits,
+                  leaderLost || other.leaderLost, commanderLost || other.commanderLost, newlyCrippled || other.newlyCrippled);
+        }
+    }
+
+    private List<FormationLosses> immediateLosses;
+
+    public List<FormationLosses> getImmediateLosses() {
+        if (immediateLosses == null) {
+            immediateLosses = new ArrayList<>();
+        }
+        return immediateLosses;
     }
 
     private List<Allocation> damageAllocations;
@@ -119,6 +144,20 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
             pendingHits = new ArrayList<>();
         }
         return pendingHits;
+    }
+
+    private SBFCombatOrders combatOrders;
+
+    public SBFCombatOrders combatOrders() {
+        if ((combatOrders == null) || (combatOrders.round() != getCurrentRound())) {
+            combatOrders = new SBFCombatOrders(getCurrentRound());
+        }
+        return combatOrders;
+    }
+
+    @ClientOnly
+    public void receiveCombatOrders(SBFCombatOrders orders) {
+        combatOrders = orders;
     }
 
     private SBFEngagementOrders engagementOrders = new SBFEngagementOrders();

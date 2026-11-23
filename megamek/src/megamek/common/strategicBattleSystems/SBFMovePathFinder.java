@@ -77,7 +77,8 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
      */
     public static SBFMovePathFinder moveEnvelopeFinder(int maxMP, SBFGame game) {
         SBFMovePathFinder spf = new SBFMovePathFinder(game, SBFMovePath::getLastPosition, new MovePathRelaxer(),
-              new GroundMovementAdjacency(game), Comparator.comparingInt(SBFMovePath::getMpUsed));
+              new GroundMovementAdjacency(game), Comparator.comparingInt(SBFMovePath::getTerrainCost)
+                    .thenComparing(path -> !path.earnsRoadBonus()));
         spf.addFilter(new MovePathLengthFilter(maxMP));
         spf.addFilter(new MovePathLegalityFilter());
         return spf;
@@ -118,7 +119,10 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
 
         Map<BoardLocation, SBFMovePath> pathsMap = new HashMap<>();
         for (BoardLocation coords : allDestinations) {
-            pathsMap.put(coords, getCost(coords, comp));
+            SBFMovePath path = getCost(coords, comp);
+            if (path != null) {
+                pathsMap.put(coords, path);
+            }
         }
         return pathsMap;
     }
@@ -132,14 +136,15 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
      * @return shortest path to the hex at c coordinates or {@code null}
      */
     protected @Nullable SBFMovePath getCost(BoardLocation coords, Comparator<SBFMovePath> comp) {
-        return getCostOf(coords);
+        SBFMovePath path = getCostOf(coords);
+        return ((path == null) || path.isIllegal()) ? null : path;
     }
 
     private static class MovePathLegalityFilter extends Filter<SBFMovePath> {
 
         @Override
         public boolean shouldStay(SBFMovePath mp) {
-            return !mp.isIllegal();
+            return mp.isTraversable();
         }
     }
 
@@ -163,12 +168,14 @@ public class SBFMovePathFinder extends AbstractPathFinder<BoardLocation, SBFMove
         public int compare(SBFMovePath first, SBFMovePath second) {
             int h1 = 0, h2 = 0;
 
-            int dd = (first.getMpUsed() + h1) - (second.getMpUsed() + h2);
+            int dd = (first.getTerrainCost() + h1) - (second.getTerrainCost() + h2);
 
             if (dd != 0) {
                 return dd;
             } else {
-                return first.getHexesMoved() - second.getHexesMoved();
+                // An equally short paved route can extend one hex farther (IO:BF p. 165).
+                int pavement = Boolean.compare(second.earnsRoadBonus(), first.earnsRoadBonus());
+                return pavement != 0 ? pavement : first.getHexesMoved() - second.getHexesMoved();
             }
         }
     }

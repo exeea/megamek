@@ -63,12 +63,46 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
             return false;
         }
 
-        SBFMovePath movePath = rebuiltPath.get();
+        return executeMovement(rebuiltPath.get(), formation, false);
+    }
+
+    /** Only the persisted server-rebuilt route can resume. An earlier immediate critical may have reduced Move. */
+    void resumeMovement(SBFMovePath route, SBFFormation formation) {
+        route.restore(game());
+        executeMovement(route, formation, true);
+    }
+
+    private boolean executeMovement(SBFMovePath movePath, SBFFormation formation, boolean resuming) {
+        var transport = SBFTransport.plan(game(), formation, movePath, resuming);
+        if (transport.isEmpty() || (!resuming && !SBFWithdrawal.permitsMove(game(), formation, movePath))
+              || (game().engagementOrders().pendingMove() != null)) {
+            return false;
+        }
+        movePath = new SBFEngagementControl(gameManager).resolveMovement(formation, movePath);
+        if (movePath == null) {
+            return true; // The authoritative move resumes when both owners supply their orders.
+        }
+        game().engagementOrders().finishMovement();
+        if (game().getFormation(formation.getId()).isEmpty()) {
+            gameManager.endCurrentTurn(formation);
+            return true;
+        }
+        int transportCost = SBFTransport.apply(gameManager, formation, transport.get(), movePath.getSteps().size());
+        if (!movePath.getSteps().isEmpty()) {
+            game().scenarioProgress().interruptOccupation(formation);
+        }
+        SBFWithdrawal.recordHostileEntries(game(), formation, movePath);
         formation.setPosition(movePath.getLastPosition());
         formation.setJumpUsedThisTurn(movePath.getJumpUsed());
-        formation.setSprintedThisTurn(movePath.getMpUsed() > formation.getMovement());
+        formation.setMpSpentThisTurn(movePath.getMpUsed() + transportCost);
+        formation.setSprintedThisTurn(movePath.getMpUsed() + transportCost > SBFMovePath.normalMovementPoints(formation, game()));
         formation.setDone(true);
-        gameManager.sendUnitUpdate(formation);
+        if (!SBFWithdrawal.withdrawIfAtHomeEdge(gameManager, formation)) {
+            gameManager.sendUnitUpdate(formation);
+        }
+        if (transportCost > 0) {
+            SBFTransport.restoreDismountTurns(gameManager, formation.getOwnerId());
+        }
         gameManager.endCurrentTurn(formation);
         return true;
     }
@@ -77,7 +111,7 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
         if (!game().getPhase().isMovement()) {
             logger.error("Server got movement packet in wrong phase!");
             return false;
-        } else if (formation.isDone()) {
+        } else if (formation.isDone() || formation.isEmbarked()) {
             logger.error("Formation already done!");
             return false;
         }
@@ -97,7 +131,8 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
             }
 
             List<SBFMoveStep> submittedSteps = submittedPath.getSteps();
-            if (submittedSteps.size() > SBFMovePath.maximumMovementPoints(formation, game())) {
+            // One additional wholly paved hex is possible. Rebuilt terrain costs verify actual eligibility.
+            if (submittedSteps.size() > (long) SBFMovePath.maximumMovementPoints(formation, game()) + 1) {
                 return Optional.empty();
             }
 
@@ -113,6 +148,10 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
                       currentLocation, destination));
                 currentLocation = destination;
             }
+            if (submittedPath.getTransportOrders().size() > SBFMovePath.maximumMovementPoints(formation, game())) {
+                return Optional.empty();
+            }
+            submittedPath.getTransportOrders().forEach(rebuiltPath::addTransportOrder);
             rebuiltPath.setJumpUsed(jumpUsed);
             return Optional.of(rebuiltPath);
         } catch (RuntimeException exception) {
