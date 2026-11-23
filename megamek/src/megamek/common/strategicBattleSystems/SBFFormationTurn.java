@@ -33,6 +33,7 @@
 
 package megamek.common.strategicBattleSystems;
 
+import megamek.common.enums.GamePhase;
 import megamek.common.game.IGame;
 import megamek.common.game.InGameObject;
 
@@ -57,7 +58,12 @@ public class SBFFormationTurn extends SBFTurn {
 
     @Override
     public boolean isValidEntity(InGameObject unit, IGame game) {
-        return (unit.getOwnerId() == playerId()) && unit instanceof SBFFormation
-              && ((SBFFormation) unit).isEligibleForPhase(game.getPhase());
+        return (unit.getOwnerId() == playerId()) && unit instanceof SBFFormation formation
+              && isEligible(formation, game.getPhase(), game.getCurrentRound());
+    }
+
+    public static boolean isEligible(SBFFormation formation, GamePhase phase, int round) {
+        return phase.isDeployment() ? !formation.isDeployed() && formation.getDeployRound() == round
+              : formation.isDeployed() && formation.isEligibleForPhase(phase);
     }
 }

@@ -45,7 +45,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import megamek.common.Player;
-import megamek.common.Team;
 import megamek.common.game.InGameObject;
 import megamek.common.interfaces.ServerOnly;
 import megamek.common.options.SBFRuleOptions;
@@ -72,6 +71,26 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     private final Map<Integer, Map<Integer, SBFVisibilityStatus>> visibilityMap = new HashMap<>();
 
     private final SBFGame game;
+    private Set<Integer> uncountedMovers;
+
+    /** Freeze the p. 164 movement ratio before any Formation can gain or lose a contact in transit. */
+    public void beginMovement() {
+        uncountedMovers = null;
+        if (usesDoubleBlind()) {
+            uncountedMovers = new HashSet<>();
+            for (SBFFormation formation : game.getActiveFormations()) {
+                if (formation.occupiesGroundHex() && game.getPlayersList().stream().filter(p -> !p.isObserver())
+                      .filter(p -> game.areHostile(formation, p))
+                      .noneMatch(p -> getVisibility(p.getId(), formation.getId()).isLocated())) {
+                    uncountedMovers.add(formation.getId());
+                }
+            }
+        }
+    }
+
+    public boolean isUncountedMover(int formation) {
+        return uncountedMovers != null && uncountedMovers.contains(formation);
+    }
 
     public SBFVisibilityHelper(SBFGame game) {
         this.game = game;
@@ -110,7 +129,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
         if (!usesDoubleBlind()) {
             return VISIBLE;
         } else {
-            return getBestVisibilityFor(getPlayersToCheck(viewingPlayer), formationID);
+            return getBestVisibilityFor(playersSharingVision(viewingPlayer), formationID);
         }
     }
 
@@ -177,7 +196,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     private SBFVisibilityStatus getBestVisibilityFor(Collection<Player> players, int formationID) {
         return players.stream()
               .map(Player::getId)
-              .map(id -> getVisibilityImpl(id, formationID))
+              .map(id -> getObservedVisibility(id, formationID))
               .max(Comparator.comparing(Enum::ordinal))
               .orElse(INVISIBLE);
     }
@@ -196,7 +215,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
      *
      * @return A list of players who share their vision
      */
-    private Set<Player> getPlayersToCheck(int viewingPlayer) {
+    public Set<Player> playersSharingVision(int viewingPlayer) {
         Set<Player> playersToCheck = new HashSet<>();
         Player player = game.getPlayer(viewingPlayer);
         if (player == null) {
@@ -204,18 +223,14 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
         } else {
             playersToCheck.add(player);
             if (usesTeamVision()) {
-                Team team = game.getTeamForPlayer(player);
-                if (team == null) {
-                    logger.error("Player {} is not on a team.", viewingPlayer);
-                } else {
-                    playersToCheck.addAll(team.players());
-                }
+                game.getPlayersList().stream().filter(other -> !player.isEnemyOf(other)).forEach(playersToCheck::add);
             }
         }
         return playersToCheck;
     }
 
-    private SBFVisibilityStatus getVisibilityImpl(int viewingPlayer, int formationID) {
+    /** The observer's own record before team vision is shared. */
+    public SBFVisibilityStatus getObservedVisibility(int viewingPlayer, int formationID) {
         if (isOwner(viewingPlayer, formationID)) {
             return VISIBLE;
         } else {

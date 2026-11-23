@@ -36,6 +36,7 @@ package megamek.server.sbf;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -45,7 +46,11 @@ import megamek.common.Team;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.AbstractGame;
 import megamek.common.game.InGameObject;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.Declaration;
+import megamek.common.strategicBattleSystems.SBFUnit.InitiativeAbility;
+import megamek.common.turns.TurnOrdered;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFInitiativeRollReportEntry;
 import megamek.common.strategicBattleSystems.SBFPlayerNameReportEntry;
@@ -75,6 +80,9 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                   .map(p -> new SBFPlayerTurn(p.getId()))
                   .collect(Collectors.toList());
 
+        } else if (phase.isDeployment() && game().getCurrentRound() == 0) {
+            List<SBFTurn> winnerFirst = formationTurns(phase, true);
+            turns = winnerFirst.isEmpty() ? List.of() : List.of(new SBFPlayerTurn(winnerFirst.getFirst().playerId()));
         } else {
             turns = formationTurns(phase);
         }
@@ -86,15 +94,32 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
 
     /** IO:BF, “Unequal Number of Formations” and “Combat Phase”, p. 164. */
     List<SBFTurn> formationTurns(GamePhase phase) {
+        return formationTurns(phase, false);
+    }
+
+    List<SBFTurn> formationTurns(GamePhase phase, boolean winnerFirst) {
+        boolean reconMovement = phase.isMovement() && game().usesDoubleBlind();
+        if (phase.isMovement()) {
+            game().visibilityHelper().beginMovement();
+        }
         Map<Integer, List<SBFFormationTurn>> byOwner = game().getActiveFormations().stream()
-              .filter(f -> f.isDeployed() && f.isEligibleForPhase(phase))
+              .filter(f -> !reconMovement || !game().visibilityHelper().isUncountedMover(f.getId()))
+              .filter(f -> SBFFormationTurn.isEligible(f, phase, game().getCurrentRound()))
               .map(f -> new SBFFormationTurn(f.getOwnerId()))
               .collect(Collectors.groupingBy(SBFFormationTurn::playerId));
         List<ArrayDeque<SBFTurn>> sides = new ArrayList<>();
-        for (Team team : game().getTeams().stream().sorted(Comparator.comparing(Team::getInitiative)).toList()) {
+        List<SBFTurn> remainingMovers = new ArrayList<>();
+        Comparator<Team> initiative = Comparator.comparing(Team::getInitiative);
+        for (Team team : game().getTeams().stream().sorted(winnerFirst ? initiative.reversed() : initiative).toList()) {
             ArrayDeque<SBFTurn> side = new ArrayDeque<>();
             team.nonObserverPlayers().stream().sorted(Comparator.comparing(Player::getInitiative))
-                  .forEach(player -> side.addAll(byOwner.getOrDefault(player.getId(), List.of())));
+                  .forEach(player -> {
+                      side.addAll(byOwner.getOrDefault(player.getId(), List.of()));
+                      if (reconMovement) {
+                          // One opportunity per owner, independent of how many private counters exist.
+                          remainingMovers.add(new SBFFormationTurn(player.getId()));
+                      }
+                  });
             if (!side.isEmpty()) {
                 sides.add(side);
             }
@@ -111,7 +136,76 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
             }
             sides.removeIf(ArrayDeque::isEmpty);
         }
+        turns.addAll(remainingMovers);
         return turns;
+    }
+
+    /** IO:BF p. 195. The winning side completes reconnaissance first. Ready votes are saved with the game. */
+    boolean hasReconPriority(int playerId) {
+        Player player = game().getPlayer(playerId);
+        if (player == null || player.isObserver() || player.isGhost() || player.isDone()) {
+            return false;
+        }
+        return game().getTeams().stream()
+              .filter(team -> team.nonObserverPlayers().stream().anyMatch(member -> !member.isDone() && !member.isGhost()))
+              .max(Comparator.comparing(Team::getInitiative))
+              .map(team -> team.nonObserverPlayers().contains(player)).orElse(false);
+    }
+
+    void rollInitiative() {
+        Map<Team, SBFInitiativeModifiers> forces = new LinkedHashMap<>();
+        Map<Team, Integer> bonuses = new LinkedHashMap<>();
+        for (Team team : game().getTeams()) {
+            if (!team.isObserverTeam()) {
+                var force = new SBFInitiativeModifiers(game(), team.nonObserverPlayers().getFirst());
+                forces.put(team, force);
+                int modifier = force.total();
+                if (modifier != 0) {
+                    bonuses.put(team, modifier);
+                }
+            }
+        }
+        boolean turnRoll = game().getPhase().isInitiative();
+        if (turnRoll && forces.size() == 2) {
+            List<Team> sides = List.copyOf(forces.keySet());
+            var a = forces.get(sides.getFirst());
+            var b = forces.get(sides.getLast());
+            int first = bankingBid(a);
+            int second = bankingBid(b);
+            a.orders.spend(Math.max(first, 0));
+            b.orders.spend(Math.max(second, 0));
+            if (first != second) {
+                // Subordinate owners still roll for their places within their own side.
+                game().getTeams().forEach(team -> team.clearInitiative(false, Map.of()));
+                sides.getFirst().getInitiative().automaticResult(first > second);
+                sides.getLast().getInitiative().automaticResult(second > first);
+            } else {
+                TurnOrdered.rollInitiative(game().getTeams(), false, Map.of(), bonuses);
+            }
+            if (first == -1 && sides.getFirst().getInitiative().compareTo(sides.getLast().getInitiative()) < 0) {
+                a.orders.creditYield();
+            }
+            if (second == -1 && sides.getLast().getInitiative().compareTo(sides.getFirst().getInitiative()) < 0) {
+                b.orders.creditYield();
+            }
+        } else {
+            TurnOrdered.rollInitiative(game().getTeams(), false, Map.of(), bonuses);
+        }
+        if (turnRoll) {
+            forces.values().forEach(force -> force.orders.declare(Declaration.NORMAL));
+        }
+    }
+
+    private static int bankingBid(SBFInitiativeModifiers force) {
+        if (!force.hasAbility(InitiativeAbility.BANKING)) {
+            return 0;
+        }
+        return switch (force.orders.declaration()) {
+            case YIELD -> -1;
+            case SPEND -> Math.min(1, force.orders.bankedPoints());
+            case SPEND_TWO -> Math.min(2, force.orders.bankedPoints());
+            default -> 0;
+        };
     }
 
     void writeInitiativeReport() {
@@ -180,6 +274,11 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                 continue;
             }
 
+            if (game().getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT)) {
+                Player member = team.nonObserverPlayers().getFirst();
+                addReport(new SBFPublicReportEntry(1067).add(team.getNonObserverSize() == 1 ? member.getName()
+                      : Player.TEAM_NAMES[team.getId()]).add(new SBFInitiativeModifiers(game(), member).intelligenceRating()));
+            }
             // If there is only one non-observer player, list them as the 'team', and use the team initiative
             if (team.getNonObserverSize() == 1) {
                 final Player player = team.nonObserverPlayers().getFirst();
@@ -188,11 +287,11 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                 addReport(new SBFInitiativeRollReportEntry(team.getInitiative()));
             } else {
                 // Multiple players. List the team, then break it down.
-                SBFReportEntry r = new SBFPublicReportEntry(1015).add(Player.TEAM_NAMES[team.getId()]);
+                SBFReportEntry r = new SBFPublicReportEntry(1068).add(Player.TEAM_NAMES[team.getId()]);
                 r.add(team.getInitiative().toString());
                 addReport(r);
                 for (Player player : team.nonObserverPlayers()) {
-                    addReport(new SBFPublicReportEntry(1015).indent()
+                    addReport(new SBFPublicReportEntry(1068).indent()
                           .add(player.getName())
                           .add(player.getInitiative().toString()));
                 }

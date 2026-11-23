@@ -38,6 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 
 import megamek.common.Player;
+import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
+import megamek.common.options.SBFRuleOptions;
+import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
 import megamek.common.enums.GamePhase;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
@@ -68,6 +72,43 @@ class SBFInitiativeHelperTest {
               .stream().map(SBFTurn::playerId).toList());
         assertEquals(List.of(1, 2, 2, 2, 3, 3), manager.initiativeHelper.formationTurns(GamePhase.FIRING)
               .stream().map(SBFTurn::playerId).toList());
+    }
+
+    @Test
+    void undetectedMoversDoNotInflateTheRatioOrConsumeAnOrdinaryMovementTurn() {
+        SBFGame game = new SBFGame();
+        SBFGameManager manager = new SBFGameManager();
+        manager.setGame(game);
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        game.setPhase(GamePhase.MOVEMENT);
+        Player first = addPlayer(game, 1, 1, 0);
+        Player second = addPlayer(game, 2, 2, 0);
+        game.getTeamForPlayer(first).getInitiative().addRoll(-20, "");
+        game.getTeamForPlayer(second).getInitiative().addRoll(20, "");
+        for (int id = 10; id <= 14; id++) {
+            SBFFormation formation = new SBFFormation();
+            formation.setId(id);
+            formation.setOwnerId(id == 14 ? 2 : 1);
+            formation.setDeployed(true);
+            formation.setPosition(BoardLocation.of(new Coords(id, 0), 0));
+            game.addUnit(formation);
+        }
+        game.visibilityHelper().setVisibility(2, 10, SBFVisibilityStatus.BLIP);
+        game.visibilityHelper().setVisibility(1, 14, SBFVisibilityStatus.BLIP);
+        game.visibilityHelper().setVisibility(2, 11, SBFVisibilityStatus.SENSOR_PING);
+        var turns = manager.initiativeHelper.formationTurns(GamePhase.MOVEMENT);
+        assertEquals(List.of(1, 2, 1, 2), turns.stream().map(SBFTurn::playerId).toList());
+        game.setTurns(turns);
+        game.changeToNextTurn();
+        SBFFormation hidden = game.getFormation(11).orElseThrow();
+        game.visibilityHelper().setVisible(2, hidden.getId());
+        hidden.setDone(true);
+        manager.endCurrentTurn(hidden);
+        assertEquals(0, game.getTurnIndex());
+        SBFFormation located = game.getFormation(10).orElseThrow();
+        located.setDone(true);
+        manager.endCurrentTurn(located);
+        assertEquals(2, game.getTurn().playerId());
     }
 
     private static Player addPlayer(SBFGame game, int id, int team, int bonus) {
