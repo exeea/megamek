@@ -105,6 +105,7 @@ class GpuSbfCaptureTest {
         assertEquals(List.of(31, 32, 30), status.units().stream().map(GpuBattleStatus.UnitStatus::id).toList());
         var readyStatus = status.units().getFirst();
         assertTrue(readyStatus.canActNow());
+        assertEquals(ready.getName(), readyStatus.chassis());
         assertEquals(0.5, readyStatus.armor(), 1e-9);
         assertFalse(status.units().get(1).canActNow(), "a done formation cannot act");
         assertTrue(status.units().get(1).done());

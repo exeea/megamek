@@ -54,6 +54,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.GamePhaseChangeEvent;
+import megamek.common.event.GameSettingsChangeEvent;
 import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.event.UnitChangedGameEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
@@ -78,7 +79,7 @@ import megamek.server.sbf.SBFActionHandler;
 public final class SBFGame extends AbstractGame implements PlanetaryConditionsUsing, SBFRuleOptionsUser {
     private static final MMLogger logger = MMLogger.create(SBFGame.class);
 
-    private final SBFRuleOptions options = new SBFRuleOptions();
+    private SBFRuleOptions options = new SBFRuleOptions();
     private GamePhase phase = GamePhase.UNKNOWN;
     private GamePhase lastPhase = GamePhase.UNKNOWN;
     private final PlanetaryConditions planetaryConditions = new PlanetaryConditions();
@@ -238,6 +239,12 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         }
     }
 
+    @ClientOnly
+    public void receiveOptions(SBFRuleOptions options) {
+        this.options = options;
+        fireGameEvent(new GameSettingsChangeEvent(this));
+    }
+
     @Override
     public SBFRuleOptions getOptions() {
         return options;
@@ -392,6 +399,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
             logger.error("Can't set the planetary conditions to null!");
         } else {
             planetaryConditions.alterConditions(conditions);
+            fireGameEvent(new GameSettingsChangeEvent(this));
         }
     }
 

@@ -37,12 +37,9 @@ import java.awt.Color;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
-import megamek.client.ui.clientGUI.boardview.sprite.sbf.SBFStepSprite;
 import megamek.common.board.Coords;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMoveStep;
@@ -54,33 +51,10 @@ public class MovePathSpriteHandler extends BoardViewSpriteHandler {
     }
 
     /**
-     * Clears the current sprites and creates new sprites for all formations.
+     * Replaces the planned route on the board, including the cost at its destination.
      */
     public void update(@Nullable SBFMovePath movePath) {
         clear();
-        if (SBFClientGUI.NATIVE_3D) {
-            marks(movePath);
-            return;
-        }
-        if (clientGUI.boardViews().isEmpty()) {
-            return;
-        }
-        if (movePath == null) {
-            return;
-        }
-
-        for (SBFMoveStep step : movePath.getSteps()) {
-            currentSprites.add(new SBFStepSprite((BoardView) clientGUI.boardViews().getFirst(), step, movePath));
-        }
-
-        clientGUI.boardViews().getFirst().addSprites(currentSprites);
-    }
-
-    /**
-     * The path as board marks, which the 3D board draws: a dot on each step, the destination a flag with the MP the
-     * path uses; in the illegal-move colour where the step or the path is illegal.
-     */
-    private void marks(@Nullable SBFMovePath movePath) {
         if (movePath == null) {
             return;
         }

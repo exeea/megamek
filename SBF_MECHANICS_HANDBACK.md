@@ -1,8 +1,16 @@
 # Strategic BattleForce mechanics handback
 
-Working checkout: `C:\Projects\megamek\megamek_temp`, branch `UI_terraincompression`. Baseline inspected: `fa210f38b7`. Fetched the coordinator branch locally. All six supplied commits are ancestors of this checkout. The native 3D board and SBF client phase displays are owned by the coordinator's UI worker.
+Working checkout: `C:\Projects\megamek\megamek_temp`, branch `UI_terraincompression`. Baseline inspected: `fa210f38b7`. Fetched the coordinator branch locally. All six supplied commits are ancestors of this checkout. The native SBF board, phase controls and removal of the legacy renderer are now part of this handback.
 
 Rules authority: *Interstellar Operations: BattleForce*, third printing, BattleTech-35006VB. All page numbers below are printed page numbers. The standard ground game is pp. 160–174. Aerospace, advanced options and campaign extensions have separate entries. BattleForce standard (pp. 24ff.), ACAR, Abstract Combat System and Total Warfare are different games. A conversion, stat block, optional-rule flag or UI label alone does not implement a rule in a networked SBF game.
+
+## Native board verification
+
+SBF starts on the native 3D board without a system property. The active movement, firing and report controllers supply the HUD commands on first entry and on later rounds. SBF chat reads replies and submits orders through its own network client. Reconnecting restores the server’s rules and weather. The phase, chat, packet and capture regression run passed 14 tests. The SBF-specific Swing targeting and report dialogs, formation sprites and movement-step sprites have been removed.
+
+The two-player GPU run in `work/sbf-3d/out/native-firing-06` acknowledged the first initiative report, plotted a one-hex move, submitted it with the native Done command and observed the new position on the server. The native firing picker showed each lance’s target number and chance. The server accepted Formation 3, Unit 0 firing on Formation 7 and the client reached the firing report. The planned move, firing choice, planned order and report each have a framebuffer PNG and capture card. The shared 2D renderer and its remaining dependencies are a separate removal in progress.
+
+Independent reviews found that native Skip, supplementary fire orders, changes of turn during modal choices, disconnect on quit and late weather updates required explicit handling. The partial-contact route uses the server’s combat command. The unresolved third-print rule interpretations below remain open.
 
 ## Current play and independent reviews
 

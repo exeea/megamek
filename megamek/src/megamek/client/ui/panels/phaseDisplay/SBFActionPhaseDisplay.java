@@ -55,6 +55,11 @@ import megamek.common.units.Entity;
 
 public abstract class SBFActionPhaseDisplay extends StatusBarPhaseDisplay {
 
+    @Override
+    public java.util.List<MegaMekButton> getCompletionButtons() {
+        return completionButtons(butSkipTurn);
+    }
+
     private boolean ignoreNoActionNag = false;
 
     /** The currently selected unit for taking action. Not necessarily equal to the unit shown in the unit viewer. */
@@ -153,12 +158,12 @@ public abstract class SBFActionPhaseDisplay extends StatusBarPhaseDisplay {
             return;
         }
 
-        if (GUIP.getNagForNoAction()) {
+        butSkipTurn.setVisible(GUIP.getNagForNoAction());
+        if (butSkipTurn.isVisible()) {
             butDone.setText("<html><b>" + doneButtonLabel + "</b></html>");
             butSkipTurn.setText("<html><b>" + skipButtonLabel + "</b></html>");
         } else {
             // toggle the text on the done button, butIgnoreNag is not used
-            butSkipTurn.setVisible(false);
             if (isDoingAction) {
                 butDone.setText("<html><b>" + doneButtonLabel + "</b></html>");
             } else {
@@ -194,6 +199,12 @@ public abstract class SBFActionPhaseDisplay extends StatusBarPhaseDisplay {
      */
     protected final Optional<SBFFormation> actingFormation() {
         return clientGUI.getClient().getGame().getFormation(currentFormation);
+    }
+
+    /** A modal native dialog can process network packets while its caller is waiting on the EDT. */
+    protected boolean stillActing(int formationId, SBFFormationTurn turn) {
+        return !isIgnoringEvents() && isMyTurn() && clientGUI.getClient().getGame().getTurn() == turn
+              && currentFormation == formationId;
     }
 
     /** The id of the formation selected for action, or {@link SBFFormation#NONE}: the 3D board's acting unit. */

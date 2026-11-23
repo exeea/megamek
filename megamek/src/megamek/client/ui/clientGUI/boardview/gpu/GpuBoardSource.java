@@ -548,7 +548,7 @@ final class GpuBoardSource implements BoardSource {
         };
         // Everything that registers a listener comes last, next to the failure cleanup below.
         preview = new GpuFirePreview(view.game, this::refresh, this::acceptsInput, GpuFirePreview.SLICE_NANOS);
-        chat = new GpuChat(this);
+        chat = new GpuChat(this, sbfGui == null ? null : sbfGui.getClient());
         view.game.addGameListener(gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
         preferences.addPreferenceChangeListener(preferenceListener);

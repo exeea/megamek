@@ -34,6 +34,7 @@
 package megamek.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -43,6 +44,7 @@ import java.util.List;
 import megamek.common.actions.EntityAction;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,6 +86,17 @@ class SBFClientPacketHandlingTest {
 
         assertTrue(handled);
         assertEquals(List.of(replacementAction), client.getGame().getActionsVector());
+    }
+
+    @Test
+    void reconnectUsesTheServersReconRulesAndCanRestoreTheDefault() {
+        SBFRuleOptions serverOptions = new SBFRuleOptions();
+        serverOptions.getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        assertTrue(client.handleGameSpecificPacket(new Packet(PacketCommand.SENDING_GAME_SETTINGS, serverOptions)));
+        assertTrue(client.getGame().usesDoubleBlind());
+
+        assertTrue(client.handleGameSpecificPacket(new Packet(PacketCommand.SENDING_GAME_SETTINGS, new SBFRuleOptions())));
+        assertFalse(client.getGame().usesDoubleBlind());
     }
 
     private SBFFormation formation() {

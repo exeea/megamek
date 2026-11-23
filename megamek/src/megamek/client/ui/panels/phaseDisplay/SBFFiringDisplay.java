@@ -40,32 +40,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
-import javax.swing.event.ListSelectionEvent;
-import javax.swing.event.ListSelectionListener;
 
 import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.dialogs.phaseDisplay.SBFTargetDialog;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
-import megamek.common.board.BoardLocation;
 import megamek.common.compute.Compute;
 import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.game.InGameObject;
-import megamek.common.rolls.TargetRoll;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFToHitData;
 import megamek.common.units.BTObject;
 
-public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelectionListener {
+public class SBFFiringDisplay extends SBFActionPhaseDisplay {
 
     private enum FiringCommand implements PhaseCommand {
         FIRE_NEXT("moveNext"),
@@ -109,7 +104,6 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
     private final List<EntityAction> plannedActions = new ArrayList<>();
     private InGameObject selectedTarget;
     private int firingUnit = BTObject.NONE;
-    private final SBFTargetDialog targetDialog;
 
     private final Map<FiringCommand, MegaMekButton> buttons = new HashMap<>();
 
@@ -124,7 +118,6 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
         //TODO: rather have clientGUI take BVListeners and forward all events -> dont have to deal with changing
         // BoardViews
         clientGUI.boardStates().forEach(b -> b.addBoardViewListener(this));
-        targetDialog = new SBFTargetDialog(getClientGUI().getFrame(), game(), this);
     }
 
     @Override
@@ -151,7 +144,6 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
         }
         resetPlannedActions();
         clientGUI.selectForAction(formation);
-        updateTargetingData();
         updateDonePanel();
     }
 
@@ -218,7 +210,7 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
     }
 
     private void fire() {
-        if (actingFormation().isEmpty() || !isMyTurn() || selectedTarget == null) {
+        if (!isMyTurn() || !isFirePossible()) {
             return;
         }
         var attack = new SBFStandardUnitAttack(actingFormation().get().getId(),
@@ -248,7 +240,6 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
         stopTimer();
         updateButtonStatus();
         selectFormation(null);
-        hideTargetDialog();
     }
 
     @Override
@@ -290,14 +281,22 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
               && actingFormation().get().isEligibleForPhase(game().getPhase())
               && !unitHasPlannedFire(firingUnit)
               && (selectedTarget != null)
-              && !SBFToHitData.compileToHit(game(), new SBFStandardUnitAttack(actingFormation().get().getId(),
-                    firingUnit, selectedTarget.getId(), ASRange.LONG)).cannotSucceed();
+              && !preview(actingFormation().get(), firingUnit).cannotSucceed();
+    }
+
+    private SBFToHitData preview(SBFFormation attacker, int unit) {
+        var attack = new SBFStandardUnitAttack(attacker.getId(), unit, selectedTarget.getId(), ASRange.LONG);
+        List<EntityAction> declarations = new ArrayList<>(game().getActionsVector());
+        declarations.addAll(plannedActions);
+        return SBFToHitData.compileToHit(game(), attack, declarations);
     }
 
     private boolean unitHasPlannedFire(int unit) {
-        return plannedActions.stream()
-              .filter(a -> a instanceof SBFStandardUnitAttack)
-              .anyMatch(a -> ((SBFStandardUnitAttack) a).getUnitNumber() == unit);
+        return java.util.stream.Stream.concat(game().getActionsVector().stream(), plannedActions.stream())
+              .filter(SBFStandardUnitAttack.class::isInstance)
+              .map(SBFStandardUnitAttack.class::cast)
+              .anyMatch(attack -> attack.getEntityId() == currentFormation && attack.getUnitNumber() == unit
+                    && attack.getWeaponMode() != SBFStandardUnitAttack.WeaponMode.TORPEDO);
     }
 
     @Override
@@ -326,87 +325,50 @@ public class SBFFiringDisplay extends SBFActionPhaseDisplay implements ListSelec
             return;
         }
 
-        if (!game().getActiveFormationsAt(BoardLocation.of(b.getCoords(), 0)).isEmpty()) {
-            setTarget(game().getActiveFormationsAt(BoardLocation.of(b.getCoords(), 0)).getFirst());
-        } else {
-            setTarget(null);
+        if (actingFormation().isEmpty() || !(game().getTurn() instanceof SBFFormationTurn turn)) {
+            return;
         }
-        updateTargetingData();
-        if (SBFClientGUI.NATIVE_3D && (selectedTarget != null)) {
-            askFiringUnit();
+        int attackerId = currentFormation;
+        List<SBFFormation> targets = game().getActiveFormationsAt(b.getBoardLocation()).stream()
+              .filter(formation -> game().areHostile(formation, clientGUI.getClient().getLocalPlayer())).toList();
+        if (targets.size() > 1) {
+            Integer chosen = clientGUI.askChoice(Messages.getString("SBFTargetDialog.title"), "",
+                  targets.stream().map(target -> new DialogRow(target.getName(), "", null, true)).toList());
+            if (!stillActing(attackerId, turn)) {
+                return;
+            }
+            setTarget(chosen == null ? null : game().getFormation(targets.get(chosen).getId()).orElse(null));
+        } else {
+            setTarget(targets.isEmpty() ? null : targets.getFirst());
+        }
+        if (selectedTarget != null) {
+            askFiringUnit(turn);
         }
     }
 
     /**
-     * 3D board: asks which unit of the acting formation fires at the target, each unit's row with its to-hit (the
-     * Legacy 2D target dialog's unit list and to-hit in one choice), and plans that unit's attack as Fire Unit does.
+     * Shows each unit's chance to hit and plans the selected unit's attack.
      */
-    private void askFiringUnit() {
+    private void askFiringUnit(SBFFormationTurn turn) {
         if (actingFormation().isEmpty()) {
             return;
         }
         SBFFormation attacker = actingFormation().get();
+        int targetId = selectedTarget.getId();
         List<DialogRow> rows = new ArrayList<>();
         for (int unit = 0; unit < attacker.getUnits().size(); unit++) {
-            SBFToHitData toHit = SBFToHitData.compileToHit(game(),
-                  new SBFStandardUnitAttack(attacker.getId(), unit, selectedTarget.getId(), ASRange.LONG));
+            SBFToHitData toHit = preview(attacker, unit);
             String chance = toHit.cannotSucceed() ? toHit.getDesc()
-                  : String.format("%s (%2.0f%%): %s", toHit.getValueAsString(), Compute.oddsAbove(toHit.getValue()),
-                  toHit.getDesc());
-            rows.add(new DialogRow(attacker.getUnits().get(unit).getName(), chance, null,
+                  : String.format("%s (%.0f%%)", toHit.getValueAsString(), Compute.oddsAbove(toHit.getValue()));
+            rows.add(new DialogRow(attacker.getUnits().get(unit).getName() + "   " + chance, toHit.getDesc(), null,
                   !toHit.cannotSucceed() && !unitHasPlannedFire(unit)));
         }
         Integer chosen = clientGUI.askChoice("Fire at " + selectedTarget.generalName(),
               attacker.getName() + ": which unit fires?", rows);
-        if (chosen != null) {
+        if (chosen != null && selectedTarget != null && selectedTarget.getId() == targetId
+              && game().getFormation(targetId).isPresent() && stillActing(attacker.getId(), turn)) {
             firingUnit = chosen;
             fire();
-        }
-    }
-
-    /**
-     * Recalculates toHit from the current selections for attacker and target and updates the targeting dialog
-     * accordingly.
-     */
-    private void updateTargetingData() {
-        SBFToHitData toHitData = new SBFToHitData();
-        if (selectedTarget == null) {
-            toHitData.addModifier(TargetRoll.IMPOSSIBLE, "No target selected");
-        } else if (firingUnit == BTObject.NONE) {
-            toHitData.addModifier(TargetRoll.IMPOSSIBLE, "No Unit selected for firing");
-        } else if (actingFormation().isEmpty()) {
-            toHitData.addModifier(TargetRoll.IMPOSSIBLE, "No Formation selected for firing");
-        } else {
-            SBFFormation attacker = actingFormation().get();
-            if (firingUnit >= attacker.getUnits().size() || firingUnit < 0) {
-                toHitData.addModifier(TargetRoll.IMPOSSIBLE, "Invalid Unit");
-            } else {
-                toHitData = SBFToHitData.compileToHit(game(),
-                      new SBFStandardUnitAttack(attacker.getId(), firingUnit, selectedTarget.getId(), ASRange.LONG));
-            }
-        }
-        if (SBFClientGUI.NATIVE_3D) {
-            // The 3D board asks natively (askFiringUnit); the Swing dialog would open over the board window
-            return;
-        }
-        showTargetDialog();
-        targetDialog.setContent(game().getFormation(currentFormation).orElse(null), selectedTarget, toHitData);
-    }
-
-    public void showTargetDialog() {
-        targetDialog.setVisible(true);
-    }
-
-    public void hideTargetDialog() {
-        targetDialog.setVisible(false);
-    }
-
-    @Override
-    public void valueChanged(ListSelectionEvent e) {
-        if (!e.getValueIsAdjusting() && !isIgnoringEvents()) {
-            firingUnit = e.getFirstIndex();
-            updateTargetingData();
-            updateButtonStatus();
         }
     }
 }

@@ -6,6 +6,8 @@ import java.util.Comparator;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
+import jakarta.annotation.Nullable;
+import megamek.client.SBFClient;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.common.Player;
@@ -13,7 +15,7 @@ import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.player.GamePlayerChatEvent;
-import megamek.common.game.Game;
+import megamek.common.game.IGame;
 import megamek.server.Server;
 
 /** EDT service for the chat panel: the recent chat lines of the client's game and a guarded send. */
@@ -34,7 +36,8 @@ final class GpuChat implements AutoCloseable {
 
     private final GpuBoardSource source;
     /** The game this service listens to; every board view of one client shares it. */
-    private final Game game;
+    private final IGame game;
+    private final @Nullable SBFClient sbfClient;
     /** Records each chat line; chat packets are handled on the EDT, anything else is moved there. */
     private final GameListenerAdapter listener = new GameListenerAdapter() {
         @Override
@@ -55,9 +58,10 @@ final class GpuChat implements AutoCloseable {
     private int resolvedRound;
 
     /** EDT: listens to the source's game until {@link #close()}. */
-    GpuChat(GpuBoardSource source) {
+    GpuChat(GpuBoardSource source, @Nullable SBFClient sbfClient) {
         this.source = source;
-        game = source.currentView().game;
+        this.sbfClient = sbfClient;
+        game = sbfClient == null ? source.currentView().game : sbfClient.getGame();
         game.addGameListener(listener);
     }
 
@@ -115,7 +119,11 @@ final class GpuChat implements AutoCloseable {
      */
     void send(String text) {
         SwingUtilities.invokeLater(() -> {
-            if (source.isClosed()) {
+            if (source.isClosed() || text.isBlank()) {
+                return;
+            }
+            if (sbfClient != null) {
+                sbfClient.sendChat(text);
                 return;
             }
             ChatterBoxOverlay chat = source.currentView().getOverlay(ChatterBoxOverlay.class);

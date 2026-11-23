@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -22,6 +23,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.SBFClient;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -72,6 +74,28 @@ class GpuHudMessagesTest {
             assertEquals(80, lines.size(), "The panel keeps the 80 newest lines");
             assertEquals("line 1", lines.getFirst().text());
             assertEquals("line 80", lines.getLast().text());
+        }
+    }
+
+    @Test
+    void sbfOrdersAndServerRepliesUseTheSbfSession() throws Exception {
+        SBFClient client = spy(new SBFClient("SBF player", "localhost", 0));
+        org.mockito.Mockito.doNothing().when(client).sendChat(org.mockito.ArgumentMatchers.anyString());
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            GpuChat chat = GpuTestSupport.onSwing(() -> new GpuChat(fixture.source, client));
+            try {
+                chat.send("/sbfcombat");
+                chat.send(" ");
+                SwingUtilities.invokeAndWait(() -> {
+                    client.getGame().fireGameEvent(new GamePlayerChatEvent(client, null, "Orders received"));
+                    assertEquals("Orders received", chat.capture().lines().getLast().text());
+                    assertTrue(fixture.source.chat().capture().lines().isEmpty());
+                });
+                verify(client).sendChat("/sbfcombat");
+                verify(client, never()).sendChat(" ");
+            } finally {
+                SwingUtilities.invokeAndWait(chat::close);
+            }
         }
     }
 

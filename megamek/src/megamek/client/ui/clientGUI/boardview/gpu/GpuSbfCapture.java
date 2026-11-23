@@ -223,7 +223,7 @@ final class GpuSbfCapture {
         }
         double armorShare = armor == 0 ? IArmorState.ARMOR_NA : currentArmor / (double) armor;
         String type = formation.getType().toString();
-        return new GpuBattleStatus.UnitStatus(formation.getId(), side, false, formation.getName(), type, "", 0,
+        return new GpuBattleStatus.UnitStatus(formation.getId(), side, false, formation.getName(), formation.getName(), "", 0,
               type + " " + formation.getSize(), "", "", formation.getSkill(), 0, armorShare, IArmorState.ARMOR_NA, 0, 0,
               "", formation.getMovement(), "", formation.getJumpMove(), "", 0, 0, -1, formation.getTmm(), canActNow,
               pending, formation.isDone(), false, Entity.DMG_NONE, List.of(), "", location.coords(),

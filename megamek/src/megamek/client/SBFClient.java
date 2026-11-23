@@ -48,6 +48,7 @@ import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
@@ -94,6 +95,11 @@ public class SBFClient extends AbstractClient {
     protected boolean handleGameSpecificPacket(Packet packet) {
         try {
             switch (packet.command()) {
+                case SENDING_GAME_SETTINGS:
+                    if (packet.getObject(0) instanceof SBFRuleOptions options) {
+                        game.receiveOptions(options);
+                    }
+                    break;
                 case SENDING_ENTITIES:
                     receiveEntities(packet);
                     break;
@@ -107,7 +113,7 @@ public class SBFClient extends AbstractClient {
                             possiblyWriteToLog(assembleAndAddImages(receivedReports.get(round)));
                         }
                     }
-                    roundReport = assembleAndAddImages(receivedReports.get(game.getCurrentRound()));
+                    roundReport = assembleAndAddImages(receivedReports.getOrDefault(game.getCurrentRound(), List.of()));
                     // We don't really have a copy of the phase report at this point, so I guess
                     // we'll just use the
                     // round report until the next phase actually completes.

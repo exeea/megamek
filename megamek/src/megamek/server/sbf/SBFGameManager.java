@@ -223,8 +223,6 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
 
         Player player = getGame().getPlayer(connId);
         if (player != null) {
-            send(connId, new Packet(PacketCommand.SENDING_MINEFIELDS, player.getMinefields()));
-
             if (getGame().getPhase().isLounge()) {
                 // send(connId, createMapSettingsPacket());
                 // send(createMapSizesPacket());

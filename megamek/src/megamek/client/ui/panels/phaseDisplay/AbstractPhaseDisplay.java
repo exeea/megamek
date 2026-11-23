@@ -259,7 +259,11 @@ public abstract class AbstractPhaseDisplay extends SkinnedJPanel implements
 
     /** Turn completion controls, separate from commands that edit the pending orders. */
     public java.util.List<MegaMekButton> getCompletionButtons() {
-        return java.util.List.of(butDone);
+        return completionButtons(null);
+    }
+
+    protected final java.util.List<MegaMekButton> completionButtons(MegaMekButton skip) {
+        return skip != null && skip.isVisible() ? java.util.List.of(butDone, skip) : java.util.List.of(butDone);
     }
 
     /**
