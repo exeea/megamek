@@ -52,6 +52,23 @@ The user supplied the writer’s answers for the third printing on 23 November 2
 
 The p. 195 answer addresses total MHQ rating. The p. 207 Battlefield Intelligence question counts qualifying Units. Joshua has four Formations and two qualifying Units (MHQ6 and MHQ5). The outstanding question is whether he earns the extra network +1 in addition to his MHQ3+ headquarters bonus.
 
+### Resume checkpoint for the four rules-writer fixes
+
+Saved on 23 November 2026 at the user's request. Work in `C:\Projects\megamek\megamek_temp` on `UI_terraincompression`. Keep commits local. Other workers have unrelated changes in this checkout.
+
+1. **Force-wide MHQ, p. 195.** Local commit `e79e29c464` contains the production fix, the test `SBFAdvancedInitiativeTest.forceWideMhqSelectsOneAdvancedInitiativeModifier`, and the updated table entry above. The new test exercises distributed MHQ2 + MHQ2, the MHQ7 threshold, enemy exclusion, and a destroyed allied Unit. The commit passed `git diff --check`. Gradle has not yet run on this commit. Independent reviewer `/root/sbf_advanced` signed off on the calculation, ordinary server roll, regression fixture and p. 207 separation. The remaining step for this item is running the regression. The previous 316-test result predates these four fixes.
+2. **Sensor Ping, p. 196.** Implementation and tests are pending. Start with `SBFDetectionHelper.performSensorDetection(Player)`. It still formats the target's Y coordinate into report 3601. Retain the observer that actually rolled each reported Ping, report a direction toward a hexside or the point between two hexsides, and keep the result private to the detecting player. Use the existing board geometry in `Coords.radian`. Preserve old saved report 3601 with its existing arguments by giving the new text a fresh report ID. Cover side and vertex bearings, wraparound, two observers, no fresh roll, and report privacy.
+3. **MX/PM visual spotting, p. 197.** Implementation and tests are pending. Update the BattleMech/vehicle column selection in `SBFDetectionHelper.visualRange`. In Visual 1/2 both types receive 4/2 hexes. Check the existing infantry column and the unchanged Visual 3/4 distances as controls.
+4. **Storm visual classes, p. 197.** Implementation and tests are pending. Extend the existing Visual 3 branch in `SBFDetectionHelper.visualLevel` for light hail, heavy hail, lightning storm and ice storm. Cover all four weather settings in daylight, and retain the existing darker-light precedence and searchlight behavior.
+
+Resume with the focused tests below. Then run the integrated SBF tests, verify the private detection report on the native 3D board, and record independent review for each completed part here. The existing two-player native harness is in `work/sbf-3d`.
+
+```powershell
+.\gradlew.bat :megamek:test --tests '*SBFAdvancedInitiativeTest' --tests '*SBFDetectionHelperTest' --offline --console=plain
+```
+
+The p. 165 generic infantry interpretation and p. 207 Battlefield Intelligence density are separate unresolved questions. The current four fixes can proceed independently.
+
 ## Current play and independent reviews
 
 The current ground scenario test runs two players from deployment through movement, reciprocal attacks, simultaneous armor loss and victory. The following status describes reachable play in this checkout. The initial audit below is retained to show which deficiencies prompted the changes. Each implementation entry later in the document names its tests and specific rule evidence.
