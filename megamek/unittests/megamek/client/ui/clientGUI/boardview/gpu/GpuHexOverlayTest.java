@@ -28,7 +28,7 @@ class GpuHexOverlayTest {
         private final GUIPreferences prefs = GUIPreferences.getInstance();
         private final boolean sheets = prefs.getShowMapSheets();
         private final Color sheetColor = prefs.getMapsheetColor();
-        private final int alpha = prefs.getECMTransparency(), zoom = prefs.getMapZoomIndex();
+        private final int alpha = prefs.getECMTransparency();
 
         Options() throws Exception {
             SwingUtilities.invokeAndWait(() -> {
@@ -43,7 +43,6 @@ class GpuHexOverlayTest {
                 prefs.setShowMapSheets(sheets);
                 prefs.setMapSheetColor(sheetColor);
                 prefs.setECMTransparency(alpha);
-                prefs.setMapZoomIndex(zoom);
             });
         }
     }

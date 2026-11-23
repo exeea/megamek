@@ -366,7 +366,7 @@ class CommonSettingsDialogTest {
         JCheckBox performance = new JCheckBox(Messages.getString("CommonSettingsDialog.highPerformanceGraphics"));
         JCheckBox mapSheets = new JCheckBox(Messages.getString("CommonSettingsDialog.showMapsheets"));
         ColourSelectorButton mapSheetColour = new ColourSelectorButton("Map Sheet Color");
-        JCheckBox ambientShadows = new JCheckBox(Messages.getString("CommonSettingsDialog.aOHexSHadows"));
+        JCheckBox damageDecals = new JCheckBox(Messages.getString("CommonSettingsDialog.showDamageDecal"));
         JCheckBox spriteShadows = new JCheckBox(Messages.getString("CommonSettingsDialog.useShadowMap"));
         JCheckBox inclines = new JCheckBox(Messages.getString("CommonSettingsDialog.useInclines"));
         JCheckBox level = new JCheckBox(Messages.getString("CommonSettingsDialog.levelHighlight"));
@@ -379,7 +379,7 @@ class CommonSettingsDialogTest {
         JPanel renderingGrid = CommonSettingsDialog.createGameBoardGroupedOptionGrid(
             "TestGameBoardRenderingGrid",
             List.of(animate, wrecks, quality, performance),
-            List.of(mapSheets, ambientShadows, spriteShadows, inclines, level),
+            List.of(mapSheets, damageDecals, spriteShadows, inclines, level),
             List.of(mapSheetColour, boardText, spaceText, buildingText),
             List.of(demolitionOutline));
 
@@ -436,7 +436,7 @@ class CommonSettingsDialogTest {
             List.of(renderingSection, indicatorsSection, movementSection, fireSection),
                   laidOutPane -> assertAlignedBalancedRows(laidOutPane, List.of(
                       List.of(animate, wrecks), List.of(quality, performance),
-                      List.of(mapSheets, ambientShadows), List.of(spriteShadows, inclines),
+                      List.of(mapSheets, damageDecals), List.of(spriteShadows, inclines),
                     List.of(level, renderingOptionFiller),
                       List.of(mapSheetColour, boardText), List.of(spaceText, buildingText),
                     List.of(demolitionOutline, demolitionFiller),
@@ -450,11 +450,9 @@ class CommonSettingsDialogTest {
     void gameBoardAppearanceLabelsFitStandardBalancedCells() {
         int cellWidth = UIUtil.scaleForGUI(SettingsFormPanel.DEFAULT_LABEL_WIDTH);
         List<String> keys = List.of(
-            "CommonSettingsDialog.aOHexSHadows",
             "CommonSettingsDialog.useShadowMap",
             "CommonSettingsDialog.useInclines",
             "CommonSettingsDialog.levelHighlight",
-            "CommonSettingsDialog.floatingIso",
             "CommonSettingsDialog.demolitionChargeHazardOutline");
 
         for (String key : keys) {

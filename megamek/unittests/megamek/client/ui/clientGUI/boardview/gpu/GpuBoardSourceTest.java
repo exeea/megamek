@@ -538,17 +538,14 @@ class GpuBoardSourceTest {
     void gpuArtworkDoesNotIncludeLegacy2DGeneratedShadows() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean shadows = preferences.getShadowMap();
-        boolean ambient = preferences.getAOHexShadows();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setShadowMap(true);
-                preferences.setAOHexShadows(true);
                 fixture.source.refresh();
             });
             BoardScene before = fixture.source.takeFrame().scene();
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setShadowMap(false);
-                preferences.setAOHexShadows(false);
                 fixture.source.refresh();
             });
             BoardScene after = fixture.source.takeFrame().scene();
@@ -557,7 +554,6 @@ class GpuBoardSourceTest {
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setShadowMap(shadows);
-                preferences.setAOHexShadows(ambient);
             });
         }
     }

@@ -141,8 +141,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String TACTICAL_LEVEL_SHADING = "TacticalLevelShading";
     /** The boards draw the lines between units: C3 networks, spotting for indirect fire and TAG (View menu). */
     public static final String SHOW_UNIT_LINKS = "ShowUnitLinks";
-    public static final String BOARD_DARKEN_MAP_AT_NIGHT = "BoardDarkenMapAtNight";
-    public static final String BOARD_TRANSLUCENT_HIDDEN_UNITS = "BoardTranslucentHiddenUnits";
     public static final String BOARD_TMM_PIP_MODE = "BoardTmmPipMode";
 
     public static final String SHOW_ARTILLERY_MISSES = "ShowArtilleryMisses";
@@ -194,9 +192,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String HIGH_QUALITY_GRAPHICS = "HighQualityGraphics";
     public static final String SHADOW_MAP = "ShadowMap";
     public static final String INCLINES = "Inclines";
-    public static final String AO_HEX_SHADOWS = "AoHexShadows";
     public static final String LEVEL_HIGHLIGHT = "LevelHighlight";
-    public static final String FLOATING_ISO = "FloatingIsometric";
     public static final String MM_SYMBOL = "MmSymbol";
     public static final String SOFT_CENTER = "SoftCenter";
     public static final String AUTO_CENTER = "AutoCenter";
@@ -370,7 +366,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String REQUISITION_FILTERS = "RequisitionFilters";
     /** Whether the lobby's chat dock is folded. */
     public static final String LOBBY_CHAT_FOLDED = "LobbyChatFolded";
-    public static final String MAP_ZOOM_INDEX = "MapZoomIndex";
     public static final String MEK_SELECTOR_UNIT_TYPE = "MekSelectorUnitType";
     public static final String MEK_SELECTOR_WEIGHT_CLASS = "MekSelectorWeightClass";
     public static final String MEK_SELECTOR_RULES_LEVELS = "MekSelectorRuleType";
@@ -774,8 +769,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(TACTICAL_REAR_ARCS, true);
         store.setDefault(TACTICAL_LEVEL_SHADING, false);
         store.setDefault(SHOW_UNIT_LINKS, true);
-        store.setDefault(BOARD_DARKEN_MAP_AT_NIGHT, true);
-        store.setDefault(BOARD_TRANSLUCENT_HIDDEN_UNITS, true);
         setDefault(BOARD_TMM_PIP_MODE, 2); // show pips with colors based on move type
 
         store.setDefault(SHOW_ARTILLERY_MISSES, true);
@@ -811,10 +804,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SHOW_OBJECTIVE_OVERLAYS, true);
 
         store.setDefault(HIGH_QUALITY_GRAPHICS, true);
-        store.setDefault(AO_HEX_SHADOWS, false);
         store.setDefault(SHADOW_MAP, true);
         store.setDefault(INCLINES, true);
-        store.setDefault(FLOATING_ISO, false);
         store.setDefault(LEVEL_HIGHLIGHT, false);
 
         // Declarations wait for FIRE WEAPONS unless the player turns this on.
@@ -951,7 +942,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(REQUISITION_READOUT_TRO, false);
         store.setDefault(REQUISITION_FILTERS, "");
         store.setDefault(LOBBY_CHAT_FOLDED, false);
-        store.setDefault(MAP_ZOOM_INDEX, 7);
         store.setDefault(MEK_SELECTOR_UNIT_TYPE, 0);
         store.setDefault(MEK_SELECTOR_WEIGHT_CLASS, 15);
         store.setDefault(MEK_SELECTOR_RULES_LEVELS, "[0]");
@@ -1160,16 +1150,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getAdvancedProperties();
     }
 
-    public boolean getAOHexShadows() {
-        return store.getBoolean(AO_HEX_SHADOWS);
-    }
-
     public boolean getHighQualityGraphics() {
         return store.getBoolean(HIGH_QUALITY_GRAPHICS);
-    }
-
-    public boolean getFloatingIso() {
-        return store.getBoolean(FLOATING_ISO);
     }
 
     public boolean getMmSymbol() {
@@ -1523,10 +1505,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)
-    public int getMapZoomIndex() {
-        return store.getInt(MAP_ZOOM_INDEX);
-    }
-
     public int getMekSelectorUnitType() {
         return store.getInt(MEK_SELECTOR_UNIT_TYPE);
     }
@@ -2326,16 +2304,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(INCLINES, state);
     }
 
-    public void setAOHexShadows(boolean state) {
-        store.setValue(AO_HEX_SHADOWS, state);
-    }
-
     public void setHighQualityGraphics(boolean state) {
         store.setValue(HIGH_QUALITY_GRAPHICS, state);
-    }
-
-    public void setFloatingIso(boolean state) {
-        store.setValue(FLOATING_ISO, state);
     }
 
     public void setMmSymbol(boolean state) {
@@ -2697,10 +2667,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setShowObjectiveOverlays(boolean state) {
         store.setValue(SHOW_OBJECTIVE_OVERLAYS, state);
-    }
-
-    public void setMapZoomIndex(int zoomIndex) {
-        store.setValue(MAP_ZOOM_INDEX, zoomIndex);
     }
 
     public void setMekSelectorUnitType(int unitType) {
@@ -3716,22 +3682,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void toggleShowUnitLinks() {
         store.setValue(SHOW_UNIT_LINKS, !getShowUnitLinks());
-    }
-
-    public boolean getDarkenMapAtNight() {
-        return getBoolean(BOARD_DARKEN_MAP_AT_NIGHT);
-    }
-
-    public void setDarkenMapAtNight(boolean b) {
-        store.setValue(BOARD_DARKEN_MAP_AT_NIGHT, b);
-    }
-
-    public boolean getTranslucentHiddenUnits() {
-        return getBoolean(BOARD_TRANSLUCENT_HIDDEN_UNITS);
-    }
-
-    public void setTranslucentHiddenUnits(boolean b) {
-        store.setValue(BOARD_TRANSLUCENT_HIDDEN_UNITS, b);
     }
 
     public void setShowArtilleryMisses(boolean b) {
