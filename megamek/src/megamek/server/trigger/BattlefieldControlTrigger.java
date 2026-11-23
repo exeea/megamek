@@ -33,8 +33,13 @@
 
 package megamek.server.trigger;
 
+import java.util.List;
+
+import megamek.common.Player;
 import megamek.common.game.Game;
 import megamek.common.game.IGame;
+import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.units.EjectedCrew;
 import megamek.common.weapons.TeleMissile;
 import megamek.logging.MMLogger;
@@ -48,7 +53,12 @@ public class BattlefieldControlTrigger implements Trigger {
 
     @Override
     public boolean isTriggered(IGame game, TriggerSituation event) {
-        if (game instanceof Game twGame) {
+        if (game instanceof SBFGame sbfGame) {
+            List<Player> occupants = sbfGame.getActiveFormations().stream().filter(SBFFormation::isDeployed)
+                  .filter(formation -> !formation.isEmbarked() && formation.getPosition() != null)
+                  .map(formation -> game.getPlayer(formation.getOwnerId())).distinct().toList();
+            return !occupants.isEmpty() && occupants.stream().noneMatch(occupants.getFirst()::isEnemyOf);
+        } else if (game instanceof Game twGame) {
             return twGame.getEntitiesVector().stream()
                   .filter(e -> !e.isOffBoard())
                   .filter(e -> e.getPosition() != null)
@@ -59,7 +69,7 @@ public class BattlefieldControlTrigger implements Trigger {
                   .distinct()
                   .count() == 1;
         } else {
-            logger.warn("BattlefieldControlTrigger is currently only available for TW games.");
+            logger.warn("Unsupported game type for BattlefieldControlTrigger.");
             return false;
         }
     }

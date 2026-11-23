@@ -37,12 +37,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import megamek.common.Player;
+import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
+import megamek.common.hexArea.ListHexArea;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.server.scriptedEvents.GameEndTriggeredEvent;
 import megamek.server.scriptedEvents.VictoryTriggeredEvent;
+import megamek.server.trigger.BattlefieldControlTrigger;
+import megamek.server.trigger.KilledUnitsTrigger;
 import megamek.server.trigger.SpecificRoundEndTrigger;
+import megamek.server.trigger.TriggerSituation;
+import megamek.server.trigger.UnitPositionTrigger;
 import org.junit.jupiter.api.Test;
 
 class SBFVictoryTest {
@@ -79,6 +88,28 @@ class SBFVictoryTest {
         assertFalse(SBFVictory.atRoundEnd(game).isVictory());
         game.setCurrentRound(3);
         assertEquals(2, SBFVictory.atRoundEnd(game).getWinningPlayer());
+    }
+
+    @Test
+    void scenarioPredicatesDistinguishFieldControlWithdrawalAndActualLoss() {
+        SBFFormation first = add(1, Player.TEAM_NONE);
+        SBFFormation other = add(2, Player.TEAM_NONE);
+        BoardLocation hex = BoardLocation.of(new Coords(0, 0), 0);
+        first.setPosition(hex);
+        first.setDeployed(true);
+        var area = new UnitPositionTrigger(new ListHexArea(hex.coords()), "Side 1", List.of(first.getId()), 1, 1);
+        var control = new BattlefieldControlTrigger();
+        assertTrue(area.isTriggered(game, TriggerSituation.ROUND_END));
+        assertTrue(control.isTriggered(game, TriggerSituation.ROUND_END));
+        other.setPosition(hex);
+        other.setDeployed(true);
+        assertFalse(control.isTriggered(game, TriggerSituation.ROUND_END));
+        game.removeFormationFromPlay(first);
+        assertFalse(area.isTriggered(game, TriggerSituation.ROUND_END));
+        assertTrue(new KilledUnitsTrigger(first.getId()).isTriggered(game, TriggerSituation.ROUND_END));
+        other.markWithdrawn();
+        game.removeFormationFromPlay(other);
+        assertFalse(new KilledUnitsTrigger(other.getId()).isTriggered(game, TriggerSituation.ROUND_END));
     }
 
     private SBFFormation add(int id, int team) {

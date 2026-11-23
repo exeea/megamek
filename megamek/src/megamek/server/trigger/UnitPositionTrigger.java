@@ -36,6 +36,7 @@ package megamek.server.trigger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 import jakarta.annotation.Nullable;
 import megamek.common.Player;
@@ -43,6 +44,8 @@ import megamek.common.game.Game;
 import megamek.common.game.IGame;
 import megamek.common.game.InGameObject;
 import megamek.common.hexArea.HexArea;
+import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
@@ -109,21 +112,22 @@ public class UnitPositionTrigger implements Trigger {
 
     @Override
     public boolean isTriggered(IGame game, TriggerSituation event) {
-        if (game instanceof Game) {
-            List<InGameObject> allUnits = game.getInGameObjects();
-            allUnits.addAll(game.getGraveyard());
-            long matchingUnitCount = allUnits.stream()
-                  .filter(this::matchesIdList)
-                  .filter(e -> matchesPlayerName(game.getPlayer(e.getOwnerId())))
-                  .filter(e -> e instanceof Entity)
-                  .map(e -> (Entity) e)
-                  .filter(e -> area.containsCoords(e.getPosition(), game.getBoard(e)))
-                  .count();
-            return (matchingUnitCount >= minUnitCount) && (matchingUnitCount <= maxUnitCount);
+        Stream<? extends InGameObject> inArea;
+        if (game instanceof SBFGame sbfGame) {
+            inArea = sbfGame.getActiveFormations().stream().filter(SBFFormation::isDeployed)
+                  .filter(formation -> !formation.isEmbarked() && formation.getPosition() != null)
+                  .filter(formation -> area.containsCoords(formation.getPosition().coords(), game.getBoard(formation.getPosition())));
+        } else if (game instanceof Game) {
+            inArea = Stream.concat(game.getInGameObjects().stream(), game.getGraveyard().stream())
+                  .filter(Entity.class::isInstance).map(Entity.class::cast)
+                  .filter(entity -> area.containsCoords(entity.getPosition(), game.getBoard(entity)));
         } else {
-            LOGGER.warn("UnitPositionTrigger is currently only available for TW games.");
+            LOGGER.warn("Unsupported game type for UnitPositionTrigger: {}", game.getClass());
             return false;
         }
+        long count = inArea.filter(this::matchesIdList)
+              .filter(unit -> matchesPlayerName(game.getPlayer(unit.getOwnerId()))).count();
+        return count >= minUnitCount && count <= maxUnitCount;
     }
 
     private boolean matchesPlayerName(Player player) {

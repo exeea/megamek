@@ -36,12 +36,15 @@ package megamek.server.trigger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 import jakarta.annotation.Nullable;
 import megamek.common.Player;
 import megamek.common.game.Game;
 import megamek.common.game.IGame;
 import megamek.common.game.InGameObject;
+import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
@@ -104,21 +107,20 @@ public class KilledUnitsTrigger implements Trigger {
 
     @Override
     public boolean isTriggered(IGame game, TriggerSituation event) {
-        if (game instanceof Game) {
-            List<InGameObject> allUnits = game.getInGameObjects();
-            allUnits.addAll(game.getGraveyard());
-            long killedUnitCount = allUnits.stream()
-                  .filter(this::matchesIdList)
-                  .filter(e -> matchesPlayerName(game.getPlayer(e.getOwnerId())))
-                  .filter(e -> e instanceof Entity)
-                  .map(e -> (Entity) e)
-                  .filter(e -> e.isDestroyed() || e.isCarcass())
-                  .count();
-            return (killedUnitCount >= minUnitCount) && (killedUnitCount <= maxUnitCount);
+        Stream<InGameObject> casualties;
+        if (game instanceof SBFGame) {
+            casualties = game.getGraveyard().stream().filter(unit -> unit instanceof SBFFormation formation
+                  && !formation.hasWithdrawn());
+        } else if (game instanceof Game) {
+            casualties = Stream.concat(game.getInGameObjects().stream(), game.getGraveyard().stream())
+                  .filter(unit -> unit instanceof Entity entity && (entity.isDestroyed() || entity.isCarcass()));
         } else {
-            logger.warn("UnitKilledTrigger is currently only available for TW games.");
+            logger.warn("Unsupported game type for KilledUnitsTrigger: {}", game.getClass());
             return false;
         }
+        long count = casualties.filter(this::matchesIdList).filter(unit -> matchesPlayerName(game.getPlayer(unit.getOwnerId())))
+              .count();
+        return count >= minUnitCount && count <= maxUnitCount;
     }
 
     private boolean matchesPlayerName(Player player) {
