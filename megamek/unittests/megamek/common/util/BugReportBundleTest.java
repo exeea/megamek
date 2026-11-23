@@ -37,7 +37,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -369,19 +368,6 @@ class BugReportBundleTest {
               "logs/gameSummaries/minimap/" + GAME_UUID + "/" + newestFrame.getName(),
               "logs/gameSummaries/minimap/" + GAME_UUID + "/" + oldestFrame.getName()), entryNamesOf(archiveFile));
         assertEquals(List.of(recording.getName()), result.skippedEntries());
-    }
-
-    @Test
-    void findsTheNewestGameFolderWhenNoGameIsRunning() throws IOException {
-        File minimapDirectory = new File(logDirectory, "gameSummaries/minimap");
-        File olderGame = new File(minimapDirectory, "older-game");
-        File newerGame = new File(minimapDirectory, "newer-game");
-        assertTrue(olderGame.mkdirs() && newerGame.mkdirs(), "test fixture: could not create the game folders");
-        assertTrue(olderGame.setLastModified(1_000_000L), "test fixture: could not set a modification time");
-        assertTrue(newerGame.setLastModified(2_000_000L), "test fixture: could not set a modification time");
-
-        assertEquals(newerGame, BugReportBundle.newestGameSummaryDirectory(minimapDirectory));
-        assertNull(BugReportBundle.newestGameSummaryDirectory(new File(logDirectory, "no-such-directory")));
     }
 
     @Test

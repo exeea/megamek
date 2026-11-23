@@ -38,7 +38,6 @@ package megamek;
 import java.awt.Color;
 import java.awt.Desktop;
 import java.io.File;
-import java.io.IOException;
 import java.io.ObjectInputFilter;
 import java.lang.management.ManagementFactory;
 import java.net.URL;
@@ -75,7 +74,6 @@ import megamek.common.ui.RATGeneratorEditor;
 import megamek.common.util.HardwareDescription;
 import megamek.logging.MMLogger;
 import megamek.server.DedicatedServer;
-import megamek.utilities.GifWriter;
 
 /**
  * This is the primary MegaMek class.
@@ -163,10 +161,6 @@ public class MegaMek {
 
         if (parser.quick()) {
             startQuickLoad(restArgs);
-            return;
-        }
-        if (parser.writeGif()) {
-            startGifWriter(restArgs);
             return;
         }
         if (parser.ratGenEditor()) {
@@ -342,14 +336,6 @@ public class MegaMek {
             mmg.start(false);
             mmg.startClient(resolver.playerName, resolver.serverAddress, resolver.port);
         });
-    }
-
-    private static void startGifWriter(String... args) {
-        try {
-            GifWriter.createGifFromGameSummary(args[0]);
-        } catch (IOException e) {
-            LOGGER.error(e, "Error creating GIF");
-        }
     }
 
     /**
