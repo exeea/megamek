@@ -37,6 +37,21 @@ Independent rules and source review covered both Thunder munitions, clearance ti
 
 The integrated selection passed 316 tests in 31 suites, including all 22 formation-adjustment tests. Ten native GPU label smoke tests passed after their fixture opened the contacts panel for the row-click assertions. Main and test Checkstyle reported zero violations. The game-rules changes are local commits on `UI_terraincompression`. Latest-sheet behavior is in `8a5884f553` and the raster cleanup is in `55dd2bfc18`.
 
+## Rules writer Q&A checked against the current code
+
+The user supplied the writer’s answers for the third printing on 23 November 2026. The following results are from source inspection.
+
+| Printed section | Status | Ruling and code evidence |
+| --- | --- | --- |
+| Movement Cost Table, p. 165 | PARTIAL | The writer identifies infantry as CI and directs MX to use its most restrictive member. SurfaceSBFMoveStep already rejects a move if any represented mover is prohibited and otherwise charges the highest cost. SBFTerrainMovement.cost groups CI and BA for generic infantry costs. The printed Unit Types Key includes both, and urban footnote 8 expressly grants the reduction to both. Clarification is needed on whether the CI answer supersedes the general key for every generic infantry row. |
+| Aerospace Movement, p. 176 | IMPLEMENTED for standard movement | Eligible atmospheric and ground Formations share the player’s movement slots in SBFInitiativeHelper and SBFFormationTurn. The optional capital combat-area sequence has its own rules. |
+| Advanced Initiative, pp. 194–195 | PARTIAL | The writer uses the sum of MHQ ratings across the Force to select the Special Ability modifier once. SBFInitiativeModifiers.total takes the largest surviving Unit rating. Two separate MHQ2 Units cross the MHQ3 threshold together. |
+| Playing the Game and Detecting Hostile Forces, p. 195 | IMPLEMENTED for ordinary ground sensor detection | SBFPhasePreparationManager starts detection in the Detection Phase. SBFDetectionHelper rolls for each eligible observer and each hostile Formation within range every round. Movement may identify an already located Blip in the same hex under p. 196. |
+| Sensor Ping, p. 196 | PARTIAL | The writer reports a bearing from the detecting Formation toward a hexside or the point between two sides. SBFDetectionHelper sends the target’s absolute board row in report 3601 and omits the observer. |
+| Visual Spotting Range Table, p. 197 | PARTIAL | The writer assigns MX and PM to the BattleMech/Vehicle column. SBFDetectionHelper.visualRange currently gives them the shorter ranges at Visual 1 and 2. Sleet already selects Visual 3. The writer advises treating hail, lightning storms and ice storms as Visual 3. Those weather settings currently fall through to Visual 1 in daylight with clear air. |
+
+The p. 195 answer addresses total MHQ rating. The p. 207 Battlefield Intelligence question counts qualifying Units. Joshua has four Formations and two qualifying Units (MHQ6 and MHQ5). The outstanding question is whether he earns the extra network +1 in addition to his MHQ3+ headquarters bonus.
+
 ## Current play and independent reviews
 
 The current ground scenario test runs two players from deployment through movement, reciprocal attacks, simultaneous armor loss and victory. The following status describes reachable play in this checkout. The initial audit below is retained to show which deficiencies prompted the changes. Each implementation entry later in the document names its tests and specific rule evidence.
