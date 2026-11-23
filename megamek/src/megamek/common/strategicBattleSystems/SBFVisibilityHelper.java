@@ -229,7 +229,8 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     }
 
     private boolean isOwner(int viewingPlayer, int formationID) {
-        Optional<InGameObject> unit = game.getInGameObject(formationID);
+        Optional<InGameObject> unit = game.getInGameObject(formationID)
+              .or(() -> game.getGraveyard().stream().filter(wreck -> wreck.getId() == formationID).findFirst());
         return unit.isPresent() && (unit.get().getOwnerId() == viewingPlayer) && (viewingPlayer != Player.PLAYER_NONE);
     }
 

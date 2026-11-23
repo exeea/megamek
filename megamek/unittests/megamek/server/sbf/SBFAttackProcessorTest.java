@@ -118,6 +118,22 @@ class SBFAttackProcessorTest {
     }
 
     @Test
+    void targetingDamageAppliesToItsUnitAndThirdHitRefusesTheOrder() {
+        var damaged = formation.getUnits().getFirst();
+        var first = attack(0, target, ASRange.LONG);
+        var other = attack(1, target, ASRange.LONG);
+        int base = SBFToHitData.compileToHit(game, first).getValue();
+        damaged.addTargetingCrit();
+        damaged.addTargetingCrit();
+        assertEquals(base + 2, SBFToHitData.compileToHit(game, first).getValue());
+        assertEquals(base, SBFToHitData.compileToHit(game, other).getValue());
+
+        damaged.addTargetingCrit();
+        assertTrue(SBFToHitData.compileToHit(game, first).cannotSucceed());
+        assertRejected(List.of(first));
+    }
+
+    @Test
     void duplicateUnitInSubmissionRejectsAtomically() {
         assertRejected(List.of(attack(0, target, ASRange.LONG), attack(0, target, ASRange.LONG)));
     }

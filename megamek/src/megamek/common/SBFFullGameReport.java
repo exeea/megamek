@@ -35,8 +35,11 @@ package megamek.common;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import megamek.common.interfaces.FullGameReport;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
@@ -47,6 +50,8 @@ import megamek.common.strategicBattleSystems.SBFReportEntry;
 public class SBFFullGameReport implements FullGameReport<SBFReportEntry> {
 
     private final Map<Integer, List<SBFReportEntry>> fullReport = new HashMap<>();
+    // Kept on the server so a recipient cannot inspect who else saw the same formation.
+    private Map<SBFReportEntry, Set<Integer>> audiences = new HashMap<>();
 
     @Override
     public void add(int round, List<SBFReportEntry> reports) {
@@ -68,6 +73,9 @@ public class SBFFullGameReport implements FullGameReport<SBFReportEntry> {
     @Override
     public void clear() {
         fullReport.clear();
+        if (audiences != null) {
+            audiences.clear();
+        }
     }
 
     public void replaceAllReports(Map<Integer, List<SBFReportEntry>> newReports) {
@@ -76,13 +84,23 @@ public class SBFFullGameReport implements FullGameReport<SBFReportEntry> {
     }
 
 
+    public void restrictTo(SBFReportEntry entry, Set<Integer> recipientIds) {
+        if (audiences == null) {
+            audiences = new HashMap<>(); // Games saved before report visibility was recorded.
+        }
+        audiences.put(entry, new HashSet<>(recipientIds));
+    }
+
+    /** Uses the visibility at the time of the event, including when serving historical reports on reconnect. */
+    public List<SBFReportEntry> visibleTo(Player recipient, List<SBFReportEntry> entries) {
+        return entries.stream().filter(entry -> (audiences == null) || !audiences.containsKey(entry)
+              || audiences.get(entry).contains(recipient.getId())).collect(Collectors.toCollection(ArrayList::new));
+    }
+
     public Map<Integer, List<SBFReportEntry>> createFilteredReport(Player recipient) {
-        // In SBF, double blind is always in effect, presenting radar blips;
-        //TODO  But it is optional to hide units entirely; may check this game option
         Map<Integer, List<SBFReportEntry>> filteredReports = new HashMap<>();
         for (int round : fullReport.keySet()) {
-            List<SBFReportEntry> filteredRoundReports = new ArrayList<>(fullReport.get(round));
-            filteredReports.put(round, filteredRoundReports);
+            filteredReports.put(round, visibleTo(recipient, fullReport.get(round)));
         }
         return filteredReports;
     }

@@ -42,7 +42,6 @@ import java.util.Set;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
-import megamek.common.alphaStrike.ASRange;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFToHitData;
 import megamek.logging.MMLogger;
@@ -120,14 +119,14 @@ record SBFAttackProcessor(SBFGameManager gameManager) implements SBFGameManagerH
                 return Optional.empty();
             }
 
-            Optional<ASRange> range = SBFToHitData.standardAttackRange(formation, target);
-            if (range.isEmpty()) {
-                logger.error("SBF standard attack target is out of range!");
+            SBFToHitData toHit = SBFToHitData.compileToHit(game(), attack, submittedActions);
+            if (toHit.cannotSucceed()) {
+                logger.error("SBF standard attack is impossible!");
                 return Optional.empty();
             }
 
             attacks.add(new SBFStandardUnitAttack(formation.getId(), attack.getUnitNumber(), target.getId(),
-                  range.get()));
+                  toHit.attackRange().orElseThrow()));
             targetIds.add(target.getId());
         }
 

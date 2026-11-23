@@ -35,10 +35,7 @@ package megamek.server.sbf;
 
 import static megamek.client.ui.clientGUI.tooltip.SBFInGameObjectTooltip.ownerColor;
 
-import java.util.List;
-
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
-import megamek.common.alphaStrike.ASRange;
 import megamek.common.compute.Compute;
 import megamek.common.rolls.Roll;
 import megamek.common.strategicBattleSystems.SBFFormation;
@@ -71,46 +68,34 @@ public class SBFStandardUnitAttackHandler extends AbstractSBFActionHandler {
             //noinspection OptionalGetWithoutIsPresent
             SBFFormation target = game().getFormation(attack.getTargetId()).get();
             SBFUnit attackingUnit = attacker.getUnits().get(attack.getUnitNumber());
-            List<SBFUnit> targetUnits = target.getUnits();
-            SBFUnit targetUnit = targetUnits.getFirst();
 
             SBFToHitData toHit = SBFToHitData.compileToHit(game(), attack);
             SBFReportEntry report = new SBFReportEntry(2001).noNL();
             report.add(new SBFUnitReportEntry(attacker, attack.getUnitNumber(), ownerColor(attacker, game())).text());
             report.add(new SBFFormationReportEntry(target, game()).text());
-            addReport(report);
+            gameManager().addReportFor(report, attacker, target);
 
+            target.recordAttack(attacker);
             if (toHit.cannotSucceed()) {
-                addReport(new SBFReportEntry(2010).add(toHit.getDesc()));
+                gameManager().addReportFor(new SBFReportEntry(2010).add(toHit.getDesc()), attacker, target);
             } else {
-                addReport(new SBFReportEntry(2003).add(toHit.getValue()).noNL());
+                gameManager().addReportFor(new SBFReportEntry(2003).add(toHit.getValue()).noNL(), attacker, target);
                 Roll roll = Compute.rollD6(2);
                 report = new SBFReportEntry(2020).noNL();
                 report.add(new SBFPlayerNameReportEntry(game().getPlayer(attacker.getOwnerId())).text());
                 report.add(new SBFRollReportEntry(roll).noNL().text());
-                addReport(report);
+                gameManager().addReportFor(report, attacker, target);
 
                 if (roll.getIntValue() < toHit.getValue()) {
-                    addReport(new SBFPublicReportEntry(2012));
+                    gameManager().addReportFor(new SBFPublicReportEntry(2012), attacker, target);
                 } else {
-                    addReport(new SBFPublicReportEntry(2013));
-                    int damage = standardAttackDamage(attackingUnit, attacker, target);
+                    gameManager().addReportFor(new SBFPublicReportEntry(2013), attacker, target);
+                    int damage = SBFStandardUnitAttack.damageAtRange(attacker, attackingUnit, toHit.attackRange().orElseThrow(),
+                          game().getCurrentRound());
                     if (damage > 0) {
-                        int newArmor = targetUnit.getCurrentArmor() - damage;
-                        addReport(new SBFPublicReportEntry(3100).add(damage).add(damage));
-                        if (newArmor < 0) {
-                            newArmor = 0;
-                        }
-                        targetUnits.getFirst().setCurrentArmor(newArmor);
-                        if (newArmor == 0) {
-                            addReport(new SBFPublicReportEntry(3092));
-                        }
-                        if (newArmor * 2 < targetUnit.getArmor()) {
-                            targetUnit.addDamageCrit();
-                        }
-                        gameManager().sendUnitUpdate(target);
+                        SBFCombatDamage.recordStandardHit(gameManager(), attacker, target, damage);
                     } else {
-                        addReport(new SBFPublicReportEntry(3068));
+                        gameManager().addReportFor(new SBFPublicReportEntry(3068), attacker, target);
                     }
                 }
             }
@@ -118,13 +103,4 @@ public class SBFStandardUnitAttackHandler extends AbstractSBFActionHandler {
         setFinished();
     }
 
-    /**
-     * Returns the damage of a successful standard attack (IO:BF p.170): the Unit's attack value for the range; Extreme
-     * Range damage is equal to Long Range -1. The range follows from the Formations' positions.
-     */
-    private static int standardAttackDamage(SBFUnit attackingUnit, SBFFormation attacker, SBFFormation target) {
-        int longRangeDamage = attackingUnit.getCurrentDamage().getDamage(ASRange.LONG).damage;
-        ASRange range = SBFToHitData.standardAttackRange(attacker, target).orElse(ASRange.LONG);
-        return (range == ASRange.EXTREME) ? Math.max(0, longRangeDamage - 1) : longRangeDamage;
-    }
 }

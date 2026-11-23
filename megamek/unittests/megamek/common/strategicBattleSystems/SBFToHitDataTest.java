@@ -38,10 +38,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
+import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.TargetRollModifier;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.alphaStrike.ASDamageVector;
 import megamek.common.alphaStrike.ASRange;
+import megamek.common.alphaStrike.BattleForceSUA;
+import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -100,6 +104,61 @@ class SBFToHitDataTest {
 
         assertEquals(List.of(1), modifiers("attacker JUMP"));
         assertEquals(List.of(3), modifiers("target JUMP"));
+    }
+
+    @Test
+    void secondaryPenaltyAppliesToTheSecondDeclaredTargetOnly() {
+        var secondary = formation(21, 2, target.getPosition().coords());
+        game.addUnit(secondary);
+        var secondAttack = new SBFStandardUnitAttack(attacker.getId(), 0, secondary.getId(), ASRange.LONG);
+        int base = SBFToHitData.compileToHit(game, attack()).getValue();
+
+        assertEquals(base + 1, SBFToHitData.compileToHit(game, secondAttack, List.of(attack())).getValue());
+        game.addAction(attack());
+        game.addAction(secondAttack);
+        assertEquals(base, SBFToHitData.compileToHit(game, attack()).getValue());
+        assertEquals(base + 1, SBFToHitData.compileToHit(game, secondAttack).getValue());
+    }
+
+    @Test
+    void withheldBonusCountsOnlyUnitsAbleToDamageThisTargetThatHaveNoDeclaredShot() {
+        for (int i = 0; i < 3; i++) {
+            SBFUnit unit = new SBFUnit();
+            unit.setDamage(ASDamageVector.createNormRndDmg(2, 2, 1));
+            attacker.addUnit(unit);
+        }
+        assertEquals(List.of(-2), modifiers("withheld fire"));
+        game.addAction(new SBFStandardUnitAttack(attacker.getId(), 1, target.getId(), ASRange.LONG));
+        var disabled = attacker.getUnits().get(2);
+        disabled.addTargetingCrit();
+        disabled.addTargetingCrit();
+        disabled.addTargetingCrit();
+        assertEquals(List.of(-1), modifiers("withheld fire"));
+
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertTrue(modifiers("withheld fire").isEmpty());
+    }
+
+    @Test
+    void unplacedFormationIsImpossibleAndNeverDereferencesANullPosition() {
+        attacker.setPosition(null);
+        assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+    }
+
+    @Test
+    void adjacentCoverBlocksLosButSameHexRetainsTerrainAndUnitFireControlModifiers() {
+        Board board = Board.createEmptyBoard(4, 4);
+        game.setBoard(0, board);
+        board.setHex(attacker.getPosition().coords(), new Hex(0, "woods:1", ""));
+        board.setHex(target.getPosition().coords(), new Hex(0, "woods:2", ""));
+        assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+
+        attacker.setPosition(target.getPosition());
+        attacker.getUnits().getFirst().getSpecialAbilities().setSUA(BattleForceSUA.BFC);
+        attacker.getUnits().getFirst().getSpecialAbilities().setSUA(BattleForceSUA.DRO);
+        assertEquals(List.of(2), modifiers("target woods"));
+        assertEquals(List.of(1), modifiers("basic fire control"));
+        assertEquals(List.of(1), modifiers("drone"));
     }
 
     private List<Integer> modifiers(String description) {

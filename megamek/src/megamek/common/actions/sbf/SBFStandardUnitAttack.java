@@ -38,6 +38,7 @@ import java.util.Optional;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.logging.MMLogger;
 import megamek.server.sbf.SBFActionHandler;
 import megamek.server.sbf.SBFGameManager;
@@ -77,6 +78,15 @@ public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
         return range;
     }
 
+    /** IO:BF pp. 170, 173: a Unit's attack value at range, including its current critical and morale effects. */
+    public static int damageAtRange(SBFFormation attacker, SBFUnit unit, ASRange range, int round) {
+        if (range == ASRange.EXTREME) {
+            return Math.max(0, unit.getCurrentDamage().L().damage - 1);
+        }
+        int damage = unit.getCurrentDamage().getDamage(range).damage;
+        return damage + (((range == ASRange.SHORT) && attacker.hasEnragedDamageBonus(round)) ? 1 : 0);
+    }
+
     @Override
     public SBFActionHandler getHandler(SBFGameManager gameManager) {
         return new SBFStandardUnitAttackHandler(this, gameManager);
@@ -98,6 +108,8 @@ public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
         } else if ((getUnitNumber() >= possibleAttacker.get().getUnits().size())
               || (getUnitNumber() < 0)) {
             logger.error("SBF Unit not found! {}", this);
+            return false;
+        } else if (possibleAttacker.get().isEmbarked() || possibleTarget.get().isEmbarked()) {
             return false;
         } else if (possibleTarget.get().getUnits().isEmpty()) {
             logger.error("Target has no units! {}", this);
