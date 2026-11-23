@@ -67,6 +67,7 @@ public class ASElementSerializer extends StdSerializer<ASCardDisplayable> {
 
     static final String FULL_NAME = "fullname";
     static final String AS_TYPE = "astype";
+    static final String CLAN_ACTIVE_PROBE = "clanactiveprobe";
     static final String STRUCTURE = "structure";
     static final String SQUAD_SIZE = "squadsize";
     static final String STRUCTURE_DAMAGE = "structuredamage";
@@ -115,6 +116,9 @@ public class ASElementSerializer extends StdSerializer<ASCardDisplayable> {
 
         if (!writeCacheLink) {
             jsonGenerator.writeStringField(AS_TYPE, element.getASUnitType().name());
+            if (element instanceof AlphaStrikeElement actual && actual.hasClanActiveProbe()) {
+                jsonGenerator.writeBooleanField(CLAN_ACTIVE_PROBE, true);
+            }
             jsonGenerator.writeNumberField(SIZE, element.getSize());
             if (element.getRole() != UnitRole.UNDETERMINED) {
                 jsonGenerator.writeStringField(ROLE, element.getRole().toString());

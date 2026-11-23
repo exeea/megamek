@@ -37,7 +37,8 @@ import static megamek.common.alphaStrike.BattleForceSUA.*;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.IntStream;
+import megamek.common.alphaStrike.ASSpecialAbilityCollector;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 
 import megamek.common.board.BoardLocation;
 import megamek.common.rolls.TargetRoll;
@@ -63,17 +64,29 @@ public class SBFDetectionModifiers extends TargetRoll {
      * @return the sensor range
      */
     static int sensorRange(SBFFormation formation) {
-        int basic = formation.getUnits().stream().filter(unit -> unit.getArmor() == 0 || unit.getCurrentArmor() > 0)
-              .flatMapToInt(unit -> unit.getElements().isEmpty() ? IntStream.of(basicRange(unit.getType()))
-                    : unit.getElements().stream().map(SBFElementType::getUnitType).mapToInt(SBFDetectionModifiers::basicRange))
-              .max()
-              .orElse(basicRange(formation.getType()));
-        if (basic > 0 && formation.hasSUA(RCN)) {
-            basic += 2;
+        // Summary-only and scenario-authored counters may have only a Formation-level sensor rating.
+        boolean allEquipmentKnown = !formation.getUnits().isEmpty()
+              && formation.getUnits().stream().allMatch(unit -> !unit.getElements().isEmpty());
+        int best = allEquipmentKnown ? 0 : range(formation, formation.getType(), formation.hasSUA(RCN));
+        for (var unit : formation.getUnits()) {
+            if (unit.getArmor() > 0 && unit.getCurrentArmor() <= 0) {
+                continue;
+            }
+            best = Math.max(best, range(unit, unit.getType(), formation.hasSUA(RCN)));
+            for (var element : unit.getElements()) {
+                var type = element.getASUnitType() == null ? unit.getType() : SBFElementType.getUnitType(element);
+                best = Math.max(best, range(element, type, formation.hasSUA(RCN)));
+            }
         }
-        int probe = formation.hasSUA(BH) ? 10 : formation.hasSUA(PRB) ? 8
-              : formation.hasAnySUAOf(LPRB, WAT) ? 7 : 0;
-        return Math.max(basic, probe);
+        return best;
+    }
+
+    private static int range(ASSpecialAbilityCollector sensors, SBFElementType type, boolean recon) {
+        int basic = basicRange(type);
+        int probe = sensors.hasSUA(BH) ? 10 : sensors.hasSUA(PRB)
+              ? (sensors instanceof AlphaStrikeElement element && element.hasClanActiveProbe() ? 9 : 8)
+              : sensors.hasAnySUAOf(LPRB, WAT) ? 7 : 0;
+        return Math.max(basic > 0 && recon ? basic + 2 : basic, probe);
     }
 
     private static int basicRange(SBFElementType type) {

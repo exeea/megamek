@@ -45,6 +45,7 @@ import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -92,6 +93,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
               .toList();
 
         for (SBFFormation hostileFormation : hostileFormations) {
+            SBFFormation ghostObserver = null;
             SBFVisibilityStatus visibilityStatus = game().visibilityHelper().getObservedVisibility(viewingPlayer.getId(),
                   hostileFormation.getId());
             for (SBFFormation viewingFormation : viewingFormations) {
@@ -107,7 +109,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                 if (detectionModifiers.getValue() != TargetRoll.CHECK_FALSE) {
                     Roll diceRoll = Compute.rollD6(2);
                     int rollResult = diceRoll.getIntValue() + detectionModifiers.getValue();
-                    SBFVisibilityStatus detectionResult = sensorDetectionResult(rollResult);
+                    SBFVisibilityStatus detectionResult = sensorDetectionResult(rollResult, game().getOptions().booleanOption(SBFRuleOptions.SIMPLE_DETECTION));
                     // TODO remove or move to protocol:
                     logger.info("Detected from {} to {} result {}",
                           viewingFormation.getId(),
@@ -116,17 +118,29 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                     if (concealedInHardenedUrban(game(), hostileFormation) && detectionResult.isLocated()) {
                         detectionResult = SBFVisibilityStatus.BLIP;
                     }
+                    if (detectionResult == SBFVisibilityStatus.SENSOR_GHOST) {
+                        ghostObserver = viewingFormation;
+                    }
                     visibilityStatus = visibilityStatus.bestOf(detectionResult);
                 }
             }
             game().visibilityHelper().setVisibility(viewingPlayer.getId(), hostileFormation.getId(), visibilityStatus);
-            if (visibilityStatus == SBFVisibilityStatus.SENSOR_PING || visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST) {
-                SBFReportEntry report = visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST ? new SBFReportEntry(3600)
+            if (visibilityStatus == SBFVisibilityStatus.SENSOR_PING
+                  || (visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST && ghostObserver != null)) {
+                SBFReportEntry report = visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST
+                      ? new SBFReportEntry(inFrontOf(ghostObserver, hostileFormation.getPosition()) ? 3600 : 3602)
+                            .add(ghostObserver.generalName())
                       : new SBFReportEntry(3601).add(hostileFormation.getPosition().coords().getY() + 1);
                 game().getGameReport().restrictTo(report, Set.of(viewingPlayer.getId()));
                 addReport(report);
             }
         }
+    }
+
+    static boolean inFrontOf(SBFFormation observer, BoardLocation position) {
+        int bearing = observer.getPosition().coords().direction(position.coords());
+        int relative = Math.floorMod(bearing - observer.getReconFacing(), 6);
+        return relative == 0 || relative == 1 || relative == 5;
     }
 
     /** IO:BF “Losing Contact”, p. 198. Identification persists until the target leaves every observer's range. */
@@ -257,7 +271,10 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
      *
      * @return The visibility status from sensor scan
      */
-    static SBFVisibilityStatus sensorDetectionResult(int rollWithModifiers) {
+    static SBFVisibilityStatus sensorDetectionResult(int rollWithModifiers, boolean simple) {
+        if (simple) {
+            return rollWithModifiers >= 7 ? SBFVisibilityStatus.BLIP : SBFVisibilityStatus.INVISIBLE;
+        }
         return switch (Math.clamp(rollWithModifiers, 2, 12)) {
             case 2 -> SBFVisibilityStatus.INVISIBLE;
             case 3, 4 -> SBFVisibilityStatus.SENSOR_GHOST;
@@ -282,8 +299,15 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
             return SBFVisibilityStatus.EYES_ON_TARGET;
         }
         int result = dice.getAsInt() + visualModifier(game, viewer, target.getPosition());
+        if (game.getOptions().booleanOption(SBFRuleOptions.SIMPLE_RECON)) {
+            return simpleReconResult(result);
+        }
         return result <= 3 ? SBFVisibilityStatus.BLIP : result <= 5 ? SBFVisibilityStatus.SOMETHING_OUT_THERE
               : result <= 8 ? SBFVisibilityStatus.I_GOT_SOMETHING : SBFVisibilityStatus.EYES_ON_TARGET;
+    }
+
+    private static SBFVisibilityStatus simpleReconResult(int modifiedRoll) {
+        return modifiedRoll >= 7 ? SBFVisibilityStatus.VISIBLE : SBFVisibilityStatus.BLIP;
     }
 
     boolean scan(int player, SBFFormation viewer, SBFFormation target, IntSupplier dice) {
@@ -312,11 +336,12 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         int player = viewer.getOwnerId();
         SBFVisibilityStatus previous = game.getVisibility(game.getPlayer(player), target.getId());
         int roll = dice.getAsInt();
-        if (roll == 2) {
+        boolean simple = game.getOptions().booleanOption(SBFRuleOptions.SIMPLE_RECON);
+        if (!simple && roll == 2) {
             game.visibilityHelper().setVisible(target.getOwnerId(), viewer.getId());
         } else if (!concealedInHardenedUrban(game, target)) {
             int result = roll + scanModifier(game, viewer, target, target.getPosition(), distance);
-            SBFVisibilityStatus scanned = result <= 3 ? SBFVisibilityStatus.BLIP
+            SBFVisibilityStatus scanned = simple ? simpleReconResult(result) : result <= 3 ? SBFVisibilityStatus.BLIP
                   : result <= 5 ? SBFVisibilityStatus.I_GOT_SOMETHING : result <= 8 ? SBFVisibilityStatus.PARTIAL_SCAN_RECON
                   : SBFVisibilityStatus.VISIBLE;
             game.visibilityHelper().setVisibility(player, target.getId(), previous.bestOf(scanned));

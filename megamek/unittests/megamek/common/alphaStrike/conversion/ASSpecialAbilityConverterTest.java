@@ -128,6 +128,20 @@ class ASSpecialAbilityConverterTest {
     }
 
     @Test
+    void clanProbeAndBeagleShareTheCardAbilityButKeepTheirSensorIdentity() throws Exception {
+        for (var probe : new MiscType[] { MiscType.createBeagleActiveProbe(), MiscType.createCLActiveProbe() }) {
+            var mek = new BipedMek();
+            var equipment = mek.addEquipment(probe, Mek.LOC_RIGHT_TORSO);
+            var element = new AlphaStrikeElement();
+            element.setType(BM);
+            ASSpecialAbilityConverter.getConverter(mek, element, new DummyCalculationReport()).processMiscMounted(equipment);
+            assertTrue(element.hasSUA(megamek.common.alphaStrike.BattleForceSUA.PRB));
+            org.junit.jupiter.api.Assertions.assertEquals(probe.is(megamek.common.equipment.Sensor.CLAN_AP),
+                  element.hasClanActiveProbe());
+        }
+    }
+
+    @Test
     void explosiveWeaponStillBlocksENE() throws Exception {
         BipedMek mek = new BipedMek();
         mek.addEquipment(new ISGaussRifle(), Mek.LOC_RIGHT_ARM);

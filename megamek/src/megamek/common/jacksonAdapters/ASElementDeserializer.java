@@ -117,6 +117,7 @@ public class ASElementDeserializer extends StdDeserializer<AlphaStrikeElement> {
             requireFields(AS_ELEMENT, node, CHASSIS, SIZE, STRUCTURE, AS_TYPE, MOVE);
             element = new AlphaStrikeElement();
             element.setChassis(node.get(CHASSIS).textValue());
+            element.setClanActiveProbe(node.path(ASElementSerializer.CLAN_ACTIVE_PROBE).asBoolean(false));
             if (node.has(MODEL)) {
                 element.setModel(node.get(MODEL).textValue());
             }

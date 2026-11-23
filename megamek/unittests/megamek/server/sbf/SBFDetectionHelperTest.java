@@ -50,8 +50,6 @@ import megamek.common.Player;
 import megamek.common.actions.sbf.SBFAirGroundAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
-import megamek.common.actions.sbf.SBFStandardUnitAttack;
-import megamek.common.alphaStrike.ASRange;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -86,6 +84,13 @@ class SBFDetectionHelperTest {
         assertEquals(6, SBFDetectionModifiers.sensorRange(infantry));
         infantry.getSpecialAbilities().setSUA(LPRB);
         assertEquals(7, SBFDetectionModifiers.sensorRange(infantry));
+        var element = new megamek.common.alphaStrike.AlphaStrikeElement();
+        element.getSpecialAbilities().setSUA(PRB);
+        mek.setElements(List.of(element));
+        assertEquals(8, SBFDetectionModifiers.sensorRange(infantry));
+        element.setClanActiveProbe(true);
+        assertEquals(9, SBFDetectionModifiers.sensorRange(infantry));
+        mek.setElements(List.of());
         infantry.setType(SBFElementType.BM);
         infantry.getSpecialAbilities().setSUA(RCN);
         assertEquals(8, SBFDetectionModifiers.sensorRange(infantry));
@@ -123,6 +128,34 @@ class SBFDetectionHelperTest {
         assertFalse(manager.detectionHelper.scan(0, viewer, target, () -> 12));
         game.getPlayer(0).setDone(true);
         assertTrue(manager.initiativeHelper.hasReconPriority(1));
+    }
+
+    @Test
+    void simpleTablesUseModifiedSevenAndKeepDetectionSeparateFromIdentification() {
+        assertEquals(SBFVisibilityStatus.INVISIBLE, SBFDetectionHelper.sensorDetectionResult(6, true));
+        assertEquals(SBFVisibilityStatus.BLIP, SBFDetectionHelper.sensorDetectionResult(7, true));
+        assertEquals(SBFVisibilityStatus.BLIP, SBFDetectionHelper.sensorDetectionResult(12, true));
+        SBFGame game = new SBFGame();
+        SBFGameManager manager = new SBFGameManager();
+        manager.setGame(game);
+        game.setBoard(0, Board.createEmptyBoard(8, 8));
+        game.setPhase(GamePhase.SBF_DETECTION_REPORT);
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        game.getOptions().getOption(SBFRuleOptions.SIMPLE_RECON).setValue(true);
+        SBFFormation viewer = deploy(game, 0, 20);
+        SBFFormation target = deploy(game, 1, 21);
+        game.getTeamForPlayer(game.getPlayer(0)).getInitiative().addRoll(20, "");
+        game.getTeamForPlayer(game.getPlayer(1)).getInitiative().addRoll(-20, "");
+        viewer.setMovement(2);
+        target.setPosition(BoardLocation.of(new Coords(4, 0), 0));
+        assertEquals(SBFVisibilityStatus.BLIP, SBFDetectionHelper.identifyVisually(game, viewer, target, () -> 6));
+        assertEquals(SBFVisibilityStatus.VISIBLE, SBFDetectionHelper.identifyVisually(game, viewer, target, () -> 7));
+        target.setPosition(BoardLocation.of(new Coords(6, 0), 0));
+        game.visibilityHelper().setVisibility(0, 21, SBFVisibilityStatus.BLIP);
+        assertTrue(manager.detectionHelper.scan(0, viewer, target, () -> 6));
+        assertEquals(SBFVisibilityStatus.BLIP, game.getVisibility(game.getPlayer(0), 21));
+        assertTrue(manager.detectionHelper.scan(0, viewer, target, () -> 7));
+        assertEquals(SBFVisibilityStatus.VISIBLE, game.getVisibility(game.getPlayer(0), 21));
     }
 
     @Test
@@ -292,6 +325,45 @@ class SBFDetectionHelperTest {
     }
 
     @Test
+    void destroyedSoleBloodhoundNoLongerExtendsTheSurvivorsRange() {
+        var f = new SBFFormation();
+        f.setType(SBFElementType.BM);
+        f.getSpecialAbilities().setSUA(BH);
+        var survivor = new SBFUnit();
+        survivor.setType(SBFElementType.BM);
+        survivor.setArmor(8);
+        var element = new megamek.common.alphaStrike.AlphaStrikeElement();
+        element.setType(megamek.common.alphaStrike.ASUnitType.BM);
+        survivor.setElements(List.of(element));
+        f.addUnit(survivor);
+        var scout = new SBFUnit();
+        scout.setType(SBFElementType.BM);
+        scout.setArmor(5);
+        var probe = new megamek.common.alphaStrike.AlphaStrikeElement();
+        probe.setType(megamek.common.alphaStrike.ASUnitType.BM);
+        probe.getSpecialAbilities().setSUA(BH);
+        scout.setElements(List.of(probe));
+        f.addUnit(scout);
+        assertEquals(10, SBFDetectionModifiers.sensorRange(f));
+        f.removeUnit(scout);
+        assertEquals(6, SBFDetectionModifiers.sensorRange(f));
+    }
+
+    @Test
+    void sensorGhostReportsOnlyWhichOfTheTwoThreeHexsideArcsContainsTheContact() {
+        var viewer = new SBFFormation();
+        Coords center = new Coords(4, 4);
+        viewer.setPosition(BoardLocation.of(center, 0));
+        for (int front = 0; front < 6; front++) {
+            viewer.setReconFacing(front);
+            for (int offset = 0; offset < 6; offset++) {
+                var target = BoardLocation.of(center.translated((front + offset) % 6), 0);
+                assertEquals(offset <= 1 || offset == 5, SBFDetectionHelper.inFrontOf(viewer, target));
+            }
+        }
+    }
+
+    @Test
     void aSolidLockShowsOnlyTheHexAndWeakerContactsNeverTransmitItsCoordinates() {
         SBFGame game = new SBFGame();
         SBFGameManager manager = new SBFGameManager();
@@ -314,14 +386,21 @@ class SBFDetectionHelperTest {
         assertTrue(forces.getForce(friendlyRoot.getId()).getEntities().isEmpty());
         assertEquals(List.of("Friendly"), forces.getAllForces().stream().map(Force::getName).toList());
         assertEquals(2, game.getForces().getTopLevelForces().size());
+        var hostileRoot = game.getForces().getTopLevelForces().stream().filter(f -> f.getOwnerId() == 1).findFirst().orElseThrow();
+        int child = game.getForces().addSubForce(new Force("Detached ally", 0, viewer.getCamouflage()), hostileRoot);
+        game.getForces().getForce(child).setOwnerId(0);
+        var rebuilt = assertInstanceOf(Forces.class, manager.createGameStartUnitPacket(viewer).getObject(2));
+        assertEquals(2, rebuilt.getTopLevelForces().size());
+        assertTrue(rebuilt.getForce(child).isTopLevel());
+        assertTrue(hostileRoot.getSubForces().contains(child));
 
         for (int roll : List.of(2, 4, 6)) {
-            game.visibilityHelper().setVisibility(0, 42, SBFDetectionHelper.sensorDetectionResult(roll));
+            game.visibilityHelper().setVisibility(0, 42, SBFDetectionHelper.sensorDetectionResult(roll, false));
             assertNull(manager.unitUpdateHelper.representationFor(viewer, target));
             assertEquals(List.of(), manager.createGameStartUnitPacket(viewer).getObject(0));
         }
-        assertEquals(SBFVisibilityStatus.BLIP, SBFDetectionHelper.sensorDetectionResult(9));
-        game.visibilityHelper().setVisibility(0, 42, SBFDetectionHelper.sensorDetectionResult(7));
+        assertEquals(SBFVisibilityStatus.BLIP, SBFDetectionHelper.sensorDetectionResult(9, false));
+        game.visibilityHelper().setVisibility(0, 42, SBFDetectionHelper.sensorDetectionResult(7, false));
         var packet = manager.createGameStartUnitPacket(viewer);
         var contact = assertInstanceOf(SBFUnitPlaceHolder.class, ((List<?>) packet.getObject(0)).getFirst());
         assertEquals(SBFUnitPlaceHolder.class, contact.getClass());

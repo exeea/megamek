@@ -40,8 +40,15 @@ public class SBFRuleOptions extends BasicGameOptions {
 
     /** Detection and recon rules aka "double-blind", IO BF p.195 */
     public static final String BASE_RECON = "base_recon";
+    /** Optional replacements for the individual detection and reconnaissance tables (IO:BF p. 196). */
+    public static final String SIMPLE_DETECTION = "sbf_simple_detection";
+    public static final String SIMPLE_RECON = "sbf_simple_recon";
     /** Expanded woods and jungle levels, IO:BF pp. 200–203. */
     public static final String MOVE_EXPANDED_WOODS = "sbf_expanded_woods";
+    public static final String MOVE_ADVANCED_TERRAIN = "sbf_advanced_terrain";
+
+    /** On-map artillery attacks and spotting, IO:BF pp. 203-204. */
+    public static final String ADVANCED_ARTILLERY = "sbf_artillery";
 
     /** Random allocation instead of opposed Tactics for standard attacks, IO:BF p. 171. */
     public static final String BASE_SIMPLIFIED_DAMAGE = "base_sbf_simplified_damage";
@@ -84,8 +91,15 @@ public class SBFRuleOptions extends BasicGameOptions {
     public static final String INIT_MODIFIERS = "init_modifiers";
 
     /** Advanced initiative, IO BF p.206 */
-    //TODO: is this mutually exclusive with INIT_MODIFIERS?
+    // Replaces the MHQ/RCN equipment bonus when running both optional systems.
     public static final String INIT_BATTLEFIELD_INT = "init_battlefield_int";
+
+    /** Tactical, environmental and enemy initiative specializations, IO:BF pp. 225-226. */
+    public static final String INIT_SPECIALIZATION = "init_specialization";
+
+    /** Advanced Strategic Aerospace, IO:BF pp. 180-194. A ground-centered map links Central to the atmosphere. */
+    public static final String CAPITAL_AEROSPACE = "sbf_capital_aerospace";
+    public static final String CAPITAL_GROUND_CENTER = "sbf_capital_ground_center";
 
     /** Banking initiative, IO BF p.223 IS AN SCA */
     public static final String INIT_BANKING = "init_banking";
@@ -99,17 +113,27 @@ public class SBFRuleOptions extends BasicGameOptions {
 
         IBasicOptionGroup base = addGroup("base");
         addOption(base, BASE_RECON, false);
+        addOption(base, SIMPLE_DETECTION, false);
+        addOption(base, SIMPLE_RECON, false);
+        addOption(base, CAPITAL_AEROSPACE, false);
+        addOption(base, CAPITAL_GROUND_CENTER, false);
+        addOption(base, BASE_HIDDEN, false);
         addOption(base, BASE_TEAM_VISION, true);
         addOption(base, BASE_ADJUST_FORMATIONS, false);
         addOption(base, BASE_FORCED_WITHDRAWAL, false);
         addOption(base, BASE_VICTORY_POINTS, false);
         addOption(base, BASE_SALVAGE, false);
         addOption(base, BASE_SIMPLIFIED_DAMAGE, false);
+        addOption(base, ADVANCED_ARTILLERY, false);
         addOption(base, MOVE_EXPANDED_WOODS, false);
+        addOption(base, MOVE_ADVANCED_TERRAIN, false);
 
         IBasicOptionGroup init = addGroup("initiative");
         addOption(init, INIT_MODIFIERS, false);
         addOption(init, INIT_BATTLEFIELD_INT, false);
+        addOption(init, INIT_BANKING, false);
+        addOption(init, INIT_FORCING, false);
+        addOption(init, INIT_SPECIALIZATION, false);
 
         IBasicOptionGroup move = addGroup("movement");
         addOption(move, MOVE_HULL_DOWN, false);

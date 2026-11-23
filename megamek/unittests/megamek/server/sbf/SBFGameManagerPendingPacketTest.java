@@ -49,8 +49,11 @@ import megamek.common.Player;
 import megamek.common.enums.GamePhase;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
+import megamek.common.options.SBFRuleOptions;
+import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFReportEntry;
 import megamek.server.Server;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -58,6 +61,33 @@ import org.mockito.MockedStatic;
 
 /** Tests recipient filtering and empty-envelope suppression in SBF packet batching. */
 class SBFGameManagerPendingPacketTest {
+
+    @Test
+    void unseenIdsAreNeverSentAndLosingAKnownContactRemovesItOnce() {
+        SBFGameManager manager = mock(SBFGameManager.class);
+        SBFGame game = new SBFGame();
+        org.mockito.Mockito.when(manager.getGame()).thenReturn(game);
+        Player viewer = new Player(0, "Viewer");
+        game.addPlayer(0, viewer);
+        game.addPlayer(1, new Player(1, "Enemy"));
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        SBFFormation target = new SBFFormation();
+        target.setId(37);
+        target.setOwnerId(1);
+        game.addUnit(target);
+        var updates = new SBFUnitUpdateHelper(manager);
+        updates.sendUnitUpdate(viewer, target);
+        verify(manager, never()).send(eq(0), any());
+        game.visibilityHelper().setVisible(0, 37);
+        assertEquals(List.of(target), updates.snapshotFor(viewer));
+        game.visibilityHelper().setInvisible(0, 37);
+        updates.sendUnitUpdate(viewer, target);
+        updates.sendUnitUpdate(viewer, target);
+        var packet = ArgumentCaptor.forClass(Packet.class);
+        verify(manager).send(eq(0), packet.capture());
+        assertEquals(PacketCommand.UNIT_INVISIBLE, packet.getValue().command());
+        assertEquals(37, packet.getValue().getObject(0));
+    }
 
     @Test
     void reconnectDuringLastMovementTurnResendsItOnlyToReturningPlayer() {
@@ -82,6 +112,62 @@ class SBFGameManagerPendingPacketTest {
                   && packet.command() == PacketCommand.TURN));
             verify(server, never()).send(eq(1), any(Packet.class));
         }
+    }
+
+    @Test
+    void graveyardReconnectShowsOwnedAndDetectedFormationsOnly() {
+        SBFGameManager manager = new SBFGameManager();
+        SBFGame game = new SBFGame();
+        manager.setGame(game);
+        Player player = new Player(0, "Viewer");
+        game.addPlayer(0, player);
+        game.addPlayer(1, new Player(1, "Enemy"));
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        for (int id = 10; id <= 12; id++) {
+            SBFFormation formation = new SBFFormation();
+            formation.setId(id);
+            formation.setOwnerId(id == 10 ? 0 : 1);
+            game.getGraveyard().add(formation);
+        }
+        game.visibilityHelper().setVisible(0, 11);
+
+        assertEquals(game.getGraveyard().subList(0, 2), manager.createGameStartUnitPacket(player).getObject(1));
+    }
+
+    @Test
+    void formationReportsRequireAllSubjectsToHaveBeenVisibleAtTheTimeOfTheEvent() {
+        SBFGameManager manager = new SBFGameManager();
+        SBFGame game = new SBFGame();
+        Player viewer = new Player(1, "Viewer");
+        Player opponent = new Player(2, "Opponent");
+        game.addPlayer(1, viewer);
+        game.addPlayer(2, opponent);
+        manager.setGame(game);
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        SBFFormation attacker = new SBFFormation();
+        attacker.setId(7);
+        attacker.setOwnerId(1);
+        SBFFormation target = new SBFFormation();
+        target.setId(13);
+        target.setOwnerId(2);
+        game.addUnit(attacker);
+        game.addUnit(target);
+        SBFReportEntry heading = new SBFReportEntry(1000);
+        SBFReportEntry casualty = new SBFReportEntry(3092);
+        SBFReportEntry hiddenAttack = new SBFReportEntry(2001);
+        SBFReportEntry seenAttack = new SBFReportEntry(2001);
+        manager.addReport(heading);
+        manager.addReportFor(casualty, target);
+        manager.addReportFor(hiddenAttack, attacker, target);
+        game.visibilityHelper().setVisible(viewer.getId(), target.getId());
+        manager.addReportFor(seenAttack, attacker, target);
+        game.visibilityHelper().setInvisible(viewer.getId(), target.getId());
+        game.getGameReport().add(3, manager.getPendingReports());
+
+        assertEquals(List.of(heading, seenAttack), manager.createReportPacket(viewer).getObject(0));
+        assertEquals(List.of(heading, casualty), manager.createReportPacket(opponent).getObject(0));
+        assertEquals(List.of(heading, seenAttack), game.getGameReport().createFilteredReport(viewer).get(3));
+        assertEquals(List.of(heading, casualty), game.getGameReport().createFilteredReport(opponent).get(3));
     }
 
     @Test

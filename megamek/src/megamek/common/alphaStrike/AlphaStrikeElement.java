@@ -106,6 +106,16 @@ public class AlphaStrikeElement implements Serializable, ASCardDisplayable, ASSp
     private EntityFluff fluff = new EntityFluff();
 
     private ASUnitType asUnitType;
+    // The AS card combines Beagle and Clan active probes into PRB. IO:BF p. 197 distinguishes them.
+    private boolean clanActiveProbe;
+
+    public boolean hasClanActiveProbe() {
+        return clanActiveProbe;
+    }
+
+    public void setClanActiveProbe(boolean clanActiveProbe) {
+        this.clanActiveProbe = clanActiveProbe;
+    }
     private int size;
     private int tmm;
     private Map<String, Integer> movement = new LinkedHashMap<>();

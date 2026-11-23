@@ -185,7 +185,11 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     @ServerOnly
     public SBFVisibilityStatus getVisibility(int viewingPlayer, int formationID) {
         var target = game.getFormation(formationID);
-        if (target.isPresent() && target.get().isHidden() && !playersSharingVision(viewingPlayer).contains(game.getPlayer(target.get().getOwnerId()))) {
+        if (target.isEmpty()) {
+            target = game.getGraveyard().stream().filter(SBFFormation.class::isInstance).map(SBFFormation.class::cast)
+                  .filter(f -> f.getId() == formationID).findFirst();
+        }
+        if (target.isPresent() && target.get().concealsRoster() && !playersSharingVision(viewingPlayer).contains(game.getPlayer(target.get().getOwnerId()))) {
             return INVISIBLE;
         }
         if (!usesDoubleBlind()) {
