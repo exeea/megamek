@@ -10,22 +10,37 @@ import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Line2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import java.awt.image.IndexColorModel;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.ImageOutputStream;
 
-import com.squareup.gifencoder.GifEncoder;
-import com.squareup.gifencoder.ImageOptions;
+import com.squareup.gifencoder.HashMultiset;
 import com.squareup.gifencoder.MedianCutQuantizer;
-import com.squareup.gifencoder.NearestColorDitherer;
+import com.squareup.gifencoder.Multiset;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.minimap.MinimapUnitSymbols;
@@ -40,7 +55,12 @@ import megamek.common.game.Game;
  * ({@link MinimapUnitSymbols}, in their owners' colours, with facing arrows when the minimap shows them), the way each
  * unit came from where the frame before saw it, the phase's attacks as lines from their units to the hexes they
  * attacked (physical attacks thicker), and the round and phase in the top left corner. One board: the one the most
- * units were seen on. Its terrain is the board as the game ended. Frames are drawn and encoded one at a time.
+ * units were seen on. Its terrain is the board as the game ended.
+ * <p>
+ * Making it is quick: the terrain is painted once; one palette of at most 256 colours, cut once from the terrain and a
+ * few drawn frames, serves every frame, so a frame's pixels only look up their index; frames are drawn and indexed on
+ * all cores; and each frame after the first stores only the rectangle in which it differs from the one before, which
+ * the frame keeps showing around it.
  */
 public final class GameSummaryGif {
     /** A frame's longer side in pixels, as the lobby's board thumbnails. */
@@ -60,6 +80,8 @@ public final class GameSummaryGif {
     private static final float TRAIL_WIDTH = .06f;
     private static final float WEAPON_WIDTH = .06f;
     private static final float PHYSICAL_WIDTH = .14f;
+    private static final String GIF_FORMAT = "javax_imageio_gif_image_1.0";
+    private static final String GIF_STREAM_FORMAT = "javax_imageio_gif_stream_1.0";
 
     private GameSummaryGif() { }
 
@@ -80,20 +102,162 @@ public final class GameSummaryGif {
 
     /** Encodes {@code frames} on {@code board} as an endlessly looping GIF. */
     static void write(List<GameSummary.Frame> frames, Board board, OutputStream out) throws IOException {
-        Painter painter = new Painter(board);
-        int width = painter.base.getWidth();
-        int height = painter.base.getHeight();
-        GifEncoder encoder = new GifEncoder(out, width, height, 0);
-        int[] pixels = null;
-        for (int index = 0; index < frames.size(); index++) {
-            BufferedImage image = painter.paint(frames.get(index), index == 0 ? null : frames.get(index - 1));
-            pixels = image.getRGB(0, 0, width, height, pixels, 0, width);
-            // The terrain's flat colours stay flat: no dithering
-            encoder.addImage(pixels, width, new ImageOptions().setColorQuantizer(MedianCutQuantizer.INSTANCE)
-                  .setDitherer(NearestColorDitherer.INSTANCE)
-                  .setDelay(index == frames.size() - 1 ? LAST_MILLIS : FRAME_MILLIS, TimeUnit.MILLISECONDS));
+        if (frames.isEmpty()) {
+            return;
         }
-        encoder.finishEncoding();
+        Painter terrain = new Painter(board);
+        int width = terrain.base.getWidth();
+        int height = terrain.base.getHeight();
+        Palette palette = Palette.of(terrain, frames);
+        ImageWriter writer = ImageIO.getImageWritersByFormatName("gif").next();
+        int workers = Math.max(1, Math.min(frames.size(), Runtime.getRuntime().availableProcessors()));
+        ExecutorService pool = Executors.newFixedThreadPool(workers, task -> {
+            Thread thread = new Thread(task, "Game summary GIF");
+            thread.setDaemon(true);
+            return thread;
+        });
+        ThreadLocal<Worker> local = ThreadLocal.withInitial(() -> new Worker(terrain, palette));
+        try (ImageOutputStream stream = ImageIO.createImageOutputStream(out)) {
+            writer.setOutput(stream);
+            writer.prepareWriteSequence(streamMetadata(writer, palette, width, height));
+            Deque<Future<byte[]>> pending = new ArrayDeque<>();
+            int submitted = 0;
+            byte[] previous = null;
+            for (int index = 0; index < frames.size(); index++) {
+                // A bounded window of frames in flight: every core busy, memory kept to a few frames
+                while (submitted < frames.size() && submitted < index + 2 * workers) {
+                    int frame = submitted++;
+                    pending.add(pool.submit(() -> local.get().indices(frames.get(frame),
+                          frame == 0 ? null : frames.get(frame - 1))));
+                }
+                byte[] indices = pending.removeFirst().get();
+                writeFrame(writer, palette, indices, previous, width, height,
+                      index == frames.size() - 1 ? LAST_MILLIS : FRAME_MILLIS, index == 0);
+                previous = indices;
+            }
+            writer.endWriteSequence();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while making the game summary GIF", interrupted);
+        } catch (ExecutionException failure) {
+            throw new IOException("Could not draw a game summary GIF frame", failure.getCause());
+        } finally {
+            pool.shutdownNow();
+            writer.dispose();
+        }
+    }
+
+    /** The GIF's screen, {@code width} by {@code height}, and its one colour table, {@code palette}'s. */
+    private static IIOMetadata streamMetadata(ImageWriter writer, Palette palette, int width, int height)
+          throws IOException {
+        IIOMetadata metadata = writer.getDefaultStreamMetadata(null);
+        IIOMetadataNode root = (IIOMetadataNode) metadata.getAsTree(GIF_STREAM_FORMAT);
+        IIOMetadataNode screen = child(root, "LogicalScreenDescriptor");
+        screen.setAttribute("logicalScreenWidth", Integer.toString(width));
+        screen.setAttribute("logicalScreenHeight", Integer.toString(height));
+        screen.setAttribute("colorResolution", "8");
+        screen.setAttribute("pixelAspectRatio", "0");
+        IIOMetadataNode table = child(root, "GlobalColorTable");
+        while (table.hasChildNodes()) {
+            table.removeChild(table.getFirstChild());
+        }
+        table.setAttribute("sizeOfGlobalColorTable", "256");
+        table.setAttribute("backgroundColorIndex", "0");
+        table.setAttribute("sortFlag", "FALSE");
+        for (int index = 0; index < 256; index++) {
+            int rgb = palette.model.getRGB(index);
+            IIOMetadataNode entry = new IIOMetadataNode("ColorTableEntry");
+            entry.setAttribute("index", Integer.toString(index));
+            entry.setAttribute("red", Integer.toString((rgb >> 16) & 0xFF));
+            entry.setAttribute("green", Integer.toString((rgb >> 8) & 0xFF));
+            entry.setAttribute("blue", Integer.toString(rgb & 0xFF));
+            table.appendChild(entry);
+        }
+        metadata.setFromTree(GIF_STREAM_FORMAT, root);
+        return metadata;
+    }
+
+    /**
+     * Writes one frame: the whole image for the first, else the rectangle in which it differs from {@code previous},
+     * over which the image before stays (a frame that changes nothing still holds its time with one pixel).
+     */
+    private static void writeFrame(ImageWriter writer, Palette palette, byte[] indices, byte[] previous, int width,
+          int height, int millis, boolean first) throws IOException {
+        int left = 0, top = 0, right = width - 1, bottom = height - 1;
+        if (previous != null) {
+            left = width;
+            top = height;
+            right = -1;
+            bottom = -1;
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                if (Arrays.equals(indices, row, row + width, previous, row, row + width)) {
+                    continue;
+                }
+                top = Math.min(top, y);
+                bottom = y;
+                for (int x = 0; x < width; x++) {
+                    if (indices[row + x] != previous[row + x]) {
+                        left = Math.min(left, x);
+                        right = Math.max(right, x);
+                    }
+                }
+            }
+            if (right < 0) {
+                left = top = right = bottom = 0;
+            }
+        }
+        int regionWidth = right - left + 1;
+        int regionHeight = bottom - top + 1;
+        byte[] region = new byte[regionWidth * regionHeight];
+        for (int y = 0; y < regionHeight; y++) {
+            System.arraycopy(indices, (top + y) * width + left, region, y * regionWidth, regionWidth);
+        }
+        BufferedImage image = new BufferedImage(regionWidth, regionHeight, BufferedImage.TYPE_BYTE_INDEXED,
+              palette.model);
+        System.arraycopy(region, 0, ((DataBufferByte) image.getRaster().getDataBuffer()).getData(), 0,
+              region.length);
+        IIOMetadata metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), null);
+        IIOMetadataNode root = (IIOMetadataNode) metadata.getAsTree(GIF_FORMAT);
+        // Every frame uses the screen's colour table
+        for (int index = root.getLength() - 1; index >= 0; index--) {
+            if (root.item(index).getNodeName().equals("LocalColorTable")) {
+                root.removeChild(root.item(index));
+            }
+        }
+        IIOMetadataNode control = child(root, "GraphicControlExtension");
+        control.setAttribute("disposalMethod", "doNotDispose");
+        control.setAttribute("userInputFlag", "FALSE");
+        control.setAttribute("transparentColorFlag", "FALSE");
+        control.setAttribute("delayTime", Integer.toString(millis / 10));
+        control.setAttribute("transparentColorIndex", "0");
+        IIOMetadataNode descriptor = child(root, "ImageDescriptor");
+        descriptor.setAttribute("imageLeftPosition", Integer.toString(left));
+        descriptor.setAttribute("imageTopPosition", Integer.toString(top));
+        descriptor.setAttribute("imageWidth", Integer.toString(regionWidth));
+        descriptor.setAttribute("imageHeight", Integer.toString(regionHeight));
+        descriptor.setAttribute("interlaceFlag", "FALSE");
+        if (first) {
+            // NETSCAPE2.0: loop for ever
+            IIOMetadataNode loop = new IIOMetadataNode("ApplicationExtension");
+            loop.setAttribute("applicationID", "NETSCAPE");
+            loop.setAttribute("authenticationCode", "2.0");
+            loop.setUserObject(new byte[] { 1, 0, 0 });
+            child(root, "ApplicationExtensions").appendChild(loop);
+        }
+        metadata.setFromTree(GIF_FORMAT, root);
+        writer.writeToSequence(new IIOImage(image, null, metadata), null);
+    }
+
+    private static IIOMetadataNode child(IIOMetadataNode parent, String name) {
+        for (int index = 0; index < parent.getLength(); index++) {
+            if (parent.item(index).getNodeName().equalsIgnoreCase(name)) {
+                return (IIOMetadataNode) parent.item(index);
+            }
+        }
+        IIOMetadataNode node = new IIOMetadataNode(name);
+        parent.appendChild(node);
+        return node;
     }
 
     /** The board most of the frames' units stood on, or null when none was seen on a board of {@code game}. */
@@ -104,12 +268,147 @@ public final class GameSummaryGif {
               .max(Map.Entry.comparingByValue()).map(entry -> game.getBoard(entry.getKey())).orElse(null);
     }
 
-    /** Draws frames over the board's terrain, baked once; every frame reuses one image. */
+    /**
+     * The GIF's one palette of at most 256 colours, from the terrain and the first, middle and last frames: the
+     * colours that cover a hex or more (terrain fills, symbols, lines) exactly, the antialiased blends by median cut;
+     * any pixel takes its nearest colour, looked up once per colour.
+     */
+    static final class Palette {
+        /** A colour covering one in so many pixels of the sampled images, or more, keeps its exact value. */
+        private static final int FLAT_SHARE = 5000;
+        /** At most this many exact colours; the rest of the 256 entries go to the median cut. */
+        private static final int FLAT_COLOURS = 64;
+        private final int[] rgb;
+        final IndexColorModel model;
+
+        private Palette(int[] rgb) {
+            this.rgb = rgb;
+            // The GIF's colour table has 256 entries: the palette, padded with black; frames use the same table
+            byte[] red = new byte[256], green = new byte[256], blue = new byte[256];
+            for (int index = 0; index < rgb.length; index++) {
+                red[index] = (byte) (rgb[index] >> 16);
+                green[index] = (byte) (rgb[index] >> 8);
+                blue[index] = (byte) rgb[index];
+            }
+            model = new IndexColorModel(8, 256, red, green, blue);
+        }
+
+        static Palette of(Painter terrain, List<GameSummary.Frame> frames) {
+            Map<Integer, Integer> counts = new HashMap<>();
+            count(terrain.base, counts);
+            BufferedImage sample = terrain.newFrame();
+            for (int index : new int[] { 0, frames.size() / 2, frames.size() - 1 }) {
+                terrain.paint(frames.get(index), index == 0 ? null : frames.get(index - 1), sample);
+                count(sample, counts);
+            }
+            // The flat colours (whole hexes, symbols, lines) keep their exact colour; median cut shares the rest,
+            // the edges antialiasing blends, among the entries left
+            int flat = counts.values().stream().mapToInt(Integer::intValue).sum() / FLAT_SHARE;
+            int[] exact = counts.entrySet().stream().filter(entry -> entry.getValue() >= flat)
+                  .sorted(Map.Entry.<Integer, Integer>comparingByValue().reversed()).limit(FLAT_COLOURS)
+                  .mapToInt(Map.Entry::getKey).toArray();
+            Set<Integer> kept = Arrays.stream(exact).boxed().collect(Collectors.toSet());
+            Multiset<com.squareup.gifencoder.Color> blends = new HashMultiset<>();
+            counts.forEach((colour, count) -> {
+                if (!kept.contains(colour)) {
+                    blends.add(com.squareup.gifencoder.Color.fromRgbInt(colour), count);
+                }
+            });
+            int[] cut = blends.isEmpty() ? new int[0]
+                  : MedianCutQuantizer.INSTANCE.quantize(blends, 256 - exact.length).stream()
+                        .mapToInt(com.squareup.gifencoder.Color::getRgbInt).toArray();
+            int[] rgb = Arrays.copyOf(exact, exact.length + cut.length);
+            System.arraycopy(cut, 0, rgb, exact.length, cut.length);
+            return new Palette(rgb);
+        }
+
+        private static void count(BufferedImage image, Map<Integer, Integer> counts) {
+            for (int pixel : image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth())) {
+                counts.merge(pixel & 0xFFFFFF, 1, Integer::sum);
+            }
+        }
+
+        /** The index of the colour nearest {@code colour} (RGB). */
+        int nearest(int colour) {
+            int red = (colour >> 16) & 0xFF, green = (colour >> 8) & 0xFF, blue = colour & 0xFF;
+            int best = 0;
+            int bestDistance = Integer.MAX_VALUE;
+            for (int index = 0; index < rgb.length; index++) {
+                int dr = red - ((rgb[index] >> 16) & 0xFF);
+                int dg = green - ((rgb[index] >> 8) & 0xFF);
+                int db = blue - (rgb[index] & 0xFF);
+                int distance = dr * dr + dg * dg + db * db;
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = index;
+                }
+            }
+            return best;
+        }
+    }
+
+    /** A drawing thread's own frame image, pixel buffer and colour-to-index cache. */
+    private static final class Worker {
+        /** Open addressing over RGB values; -1 marks a free slot. */
+        private static final int CACHE_SIZE = 1 << 16;
+        private final Painter terrain;
+        private final Palette palette;
+        private final BufferedImage frame;
+        private final int[] pixels;
+        private final int[] keys = new int[CACHE_SIZE];
+        private final byte[] values = new byte[CACHE_SIZE];
+        private int filled;
+
+        Worker(Painter terrain, Palette palette) {
+            this.terrain = terrain;
+            this.palette = palette;
+            frame = terrain.newFrame();
+            pixels = new int[frame.getWidth() * frame.getHeight()];
+            Arrays.fill(keys, -1);
+        }
+
+        /** {@code shown}'s pixels as palette indices. */
+        byte[] indices(GameSummary.Frame shown, GameSummary.Frame before) {
+            terrain.paint(shown, before, frame);
+            frame.getRGB(0, 0, frame.getWidth(), frame.getHeight(), pixels, 0, frame.getWidth());
+            byte[] indices = new byte[pixels.length];
+            int last = -1;
+            byte lastIndex = 0;
+            for (int pixel = 0; pixel < pixels.length; pixel++) {
+                int colour = pixels[pixel] & 0xFFFFFF;
+                if (colour != last) {
+                    last = colour;
+                    lastIndex = index(colour);
+                }
+                indices[pixel] = lastIndex;
+            }
+            return indices;
+        }
+
+        private byte index(int colour) {
+            int slot = (colour * 0x9E3779B1) >>> 16;
+            while (keys[slot] != -1) {
+                if (keys[slot] == colour) {
+                    return values[slot];
+                }
+                slot = (slot + 1) & (CACHE_SIZE - 1);
+            }
+            byte index = (byte) palette.nearest(colour);
+            // A full table keeps answering, uncached, rather than growing
+            if (filled < CACHE_SIZE / 2) {
+                keys[slot] = colour;
+                values[slot] = index;
+                filled++;
+            }
+            return index;
+        }
+    }
+
+    /** Draws frames over the board's terrain, painted once; each caller brings the image a frame is drawn into. */
     static final class Painter {
         private final Board board;
         private final double unit;
         final BufferedImage base;
-        private final BufferedImage image;
         private final Font font;
         private final boolean facings = GUIPreferences.getInstance().getDrawFacingArrowsOnMiniMap();
 
@@ -123,12 +422,16 @@ public final class GameSummaryGif {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             LobbyMapThumbnail.paintTerrain(g, board, unit);
             g.dispose();
-            image = new BufferedImage(base.getWidth(), base.getHeight(), BufferedImage.TYPE_INT_ARGB);
             font = new Font(Font.SANS_SERIF, Font.BOLD, Math.max(12, base.getHeight() / 32));
         }
 
+        /** An image a frame can be drawn into, the terrain's size. */
+        BufferedImage newFrame() {
+            return new BufferedImage(base.getWidth(), base.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        }
+
         /** {@code frame} over the terrain, its units' ways from where {@code before} saw them (null for none). */
-        BufferedImage paint(GameSummary.Frame frame, GameSummary.Frame before) {
+        BufferedImage paint(GameSummary.Frame frame, GameSummary.Frame before, BufferedImage image) {
             Graphics2D g = image.createGraphics();
             try {
                 g.drawImage(base, 0, 0, null);

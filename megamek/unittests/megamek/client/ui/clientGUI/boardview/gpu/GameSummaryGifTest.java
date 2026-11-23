@@ -2,8 +2,10 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -21,10 +23,11 @@ import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Node;
 
 /**
- * A summary's GIF is made from its registry alone: one frame per recorded phase end, the size of the board's
- * thumbnail, each frame shown for its time, the units drawn where the registry puts them.
+ * A summary's GIF is made from its registry alone: one frame per recorded phase end on a screen the size of the
+ * board's thumbnail, each shown for its time over the frames before, the units drawn where the registry puts them.
  */
 class GameSummaryGifTest {
     private static final int OWN = 0x2E6BD8;
@@ -51,25 +54,35 @@ class GameSummaryGifTest {
         try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(gif.toByteArray()))) {
             reader.setInput(in);
             assertEquals(frames.size(), reader.getNumImages(true), "one frame per phase end");
+            IIOMetadataNode screen = node(reader.getStreamMetadata().getAsTree("javax_imageio_gif_stream_1.0"),
+                  "LogicalScreenDescriptor");
+            assertEquals(String.valueOf(thumbnail.getWidth()), screen.getAttribute("logicalScreenWidth"));
+            assertEquals(String.valueOf(thumbnail.getHeight()), screen.getAttribute("logicalScreenHeight"));
+            // As a viewer shows it: each frame drawn at its place over the frames before
+            BufferedImage shown = new BufferedImage(thumbnail.getWidth(), thumbnail.getHeight(),
+                  BufferedImage.TYPE_INT_RGB);
             for (int index = 0; index < frames.size(); index++) {
-                BufferedImage frame = reader.read(index);
-                assertEquals(thumbnail.getWidth(), frame.getWidth());
-                assertEquals(thumbnail.getHeight(), frame.getHeight());
-                IIOMetadataNode control = (IIOMetadataNode) ((IIOMetadataNode) reader.getImageMetadata(index)
-                      .getAsTree("javax_imageio_gif_image_1.0")).getElementsByTagName("GraphicControlExtension")
-                      .item(0);
+                Node metadata = reader.getImageMetadata(index).getAsTree("javax_imageio_gif_image_1.0");
+                IIOMetadataNode control = node(metadata, "GraphicControlExtension");
                 int delay = (index == frames.size() - 1 ? GameSummaryGif.LAST_MILLIS : GameSummaryGif.FRAME_MILLIS)
                       / 10;
                 assertEquals(String.valueOf(delay), control.getAttribute("delayTime"), "frame " + index + "'s time");
+                assertEquals("doNotDispose", control.getAttribute("disposalMethod"),
+                      "the frame before stays around it");
+                IIOMetadataNode place = node(metadata, "ImageDescriptor");
+                Graphics2D g = shown.createGraphics();
+                g.drawImage(reader.read(index), Integer.parseInt(place.getAttribute("imageLeftPosition")),
+                      Integer.parseInt(place.getAttribute("imageTopPosition")), null);
+                g.dispose();
+                if (index == 1) {
+                    // The own Atlas has walked from 0512 to 0510: its new hex shows its symbol, its old hex none
+                    assertTrue(near(shown, 5, 10, OWN), "the symbol on its new hex");
+                    assertFalse(near(shown, 5, 12, OWN), "no symbol on its old hex");
+                    File shot = new File("build/gpu-board-review/game-summary-frame.png");
+                    shot.getParentFile().mkdirs();
+                    ImageIO.write(shown, "png", shot);
+                }
             }
-            // The own Atlas has walked from 0512 to 0510: its hex shows its symbol in its colour, its old hex none
-            GameSummaryGif.Painter painter = new GameSummaryGif.Painter(board);
-            BufferedImage moved = painter.paint(frames.get(1), frames.getFirst());
-            assertEquals(OWN, colourNear(moved, 5, 10, OWN), "the symbol on its new hex");
-            assertNotEquals(OWN, colourNear(moved, 5, 12, OWN), "no symbol on its old hex");
-            File shot = new File("build/gpu-board-review/game-summary-frame.png");
-            shot.getParentFile().mkdirs();
-            ImageIO.write(moved, "png", shot);
         } finally {
             reader.dispose();
         }
@@ -89,8 +102,8 @@ class GameSummaryGifTest {
         return new GameSummary.Unit(id, 0, x, y, 2, symbol, colour, true, destroyed);
     }
 
-    /** {@code wanted} when a pixel within a fifth of a hex of hex ({@code x}, {@code y})'s centre has it, else -1. */
-    private static int colourNear(BufferedImage image, int x, int y, int wanted) {
+    /** Whether a pixel within a fifth of a hex of hex ({@code x}, {@code y})'s centre is near {@code wanted}. */
+    private static boolean near(BufferedImage image, int x, int y, int wanted) {
         double unit = LobbyMapThumbnail.unit(16, 17, GameSummaryGif.LONG_SIDE);
         Coords coords = new Coords(x, y);
         int centreX = (int) LobbyMapThumbnail.centreX(coords, unit);
@@ -98,11 +111,20 @@ class GameSummaryGifTest {
         int reach = (int) (unit / 5);
         for (int dx = -reach; dx <= reach; dx++) {
             for (int dy = -reach; dy <= reach; dy++) {
-                if ((image.getRGB(centreX + dx, centreY + dy) & 0xFFFFFF) == wanted) {
-                    return wanted;
+                int rgb = image.getRGB(centreX + dx, centreY + dy);
+                int far = 0;
+                for (int shift = 0; shift <= 16; shift += 8) {
+                    far = Math.max(far, Math.abs(((rgb >> shift) & 0xFF) - ((wanted >> shift) & 0xFF)));
+                }
+                if (far <= 20) {
+                    return true;
                 }
             }
         }
-        return -1;
+        return false;
+    }
+
+    private static IIOMetadataNode node(Node root, String name) {
+        return (IIOMetadataNode) ((IIOMetadataNode) root).getElementsByTagName(name).item(0);
     }
 }
