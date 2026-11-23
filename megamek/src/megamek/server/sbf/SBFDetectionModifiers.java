@@ -37,7 +37,9 @@ import static megamek.common.alphaStrike.BattleForceSUA.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
+import megamek.common.board.BoardLocation;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.TargetRollModifier;
 import megamek.common.strategicBattleSystems.SBFElementType;
@@ -46,7 +48,11 @@ import megamek.common.strategicBattleSystems.SBFFormation;
 public class SBFDetectionModifiers extends TargetRoll {
 
     public SBFDetectionModifiers(SBFFormation viewer, SBFFormation target) {
-        sensorTargetRollModifiers(viewer, target).forEach(this::addModifier);
+        this(viewer, target, target.getPosition());
+    }
+
+    SBFDetectionModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position) {
+        sensorTargetRollModifiers(viewer, target, position).forEach(this::addModifier);
     }
 
     /**
@@ -56,30 +62,36 @@ public class SBFDetectionModifiers extends TargetRoll {
      *
      * @return the sensor range
      */
-    private int sensorRange(SBFFormation formation) {
-        //TODO: this is incomplete as the table is quite unclear
-        int rcnExtension = formation.hasSUA(RCN) ? 2 : 0;
-        if (formation.hasSUA(PRB)) {
-            return 8;
-        } else if (formation.hasSUA(BH)) {
-            return 10;
-        } else if (formation.isType(SBFElementType.BM)) {
-            return 6 + rcnExtension;
-        } else if (formation.isType(SBFElementType.V)) {
-            return 5 + rcnExtension;
-        } else {
-            return 0;
+    static int sensorRange(SBFFormation formation) {
+        int basic = formation.getUnits().stream().filter(unit -> unit.getArmor() == 0 || unit.getCurrentArmor() > 0)
+              .flatMapToInt(unit -> unit.getElements().isEmpty() ? IntStream.of(basicRange(unit.getType()))
+                    : unit.getElements().stream().map(SBFElementType::getUnitType).mapToInt(SBFDetectionModifiers::basicRange))
+              .max()
+              .orElse(basicRange(formation.getType()));
+        if (basic > 0 && formation.hasSUA(RCN)) {
+            basic += 2;
         }
+        int probe = formation.hasSUA(BH) ? 10 : formation.hasSUA(PRB) ? 8
+              : formation.hasAnySUAOf(LPRB, WAT) ? 7 : 0;
+        return Math.max(basic, probe);
     }
 
-    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target) {
+    private static int basicRange(SBFElementType type) {
+        return switch (type) {
+            case BM -> 6;
+            case V, BA -> 5;
+            case null, default -> 0;
+        };
+    }
+
+    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position) {
         List<TargetRollModifier> result = new ArrayList<>();
         int range = sensorRange(viewer);
         int distance = viewer.getPosition().coords()
-              .distance(target.getPosition().coords());
+              .distance(position.coords());
         if (distance < range) {
             result.add(new TargetRollModifier(Math.min(4, range - distance), "distance below sensor range"));
-        } else if (distance > range) {
+        } else if ((range == 0) || (distance > range)) {
             result.add(new TargetRollModifier(TargetRoll.CHECK_FALSE, "distance above sensor range"));
         }
         if (target.hasSUA(AECM) && target.hasAnySUAOf(STL, MAS, LMAS)) {

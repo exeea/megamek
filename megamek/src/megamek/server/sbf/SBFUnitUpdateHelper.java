@@ -33,18 +33,47 @@
 
 package megamek.server.sbf;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
 import megamek.common.game.InGameObject;
 import megamek.common.Player;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFIGotSomethingUnitPlaceholder;
+import megamek.common.strategicBattleSystems.SBFIdentifiedUnitPlaceHolder;
 import megamek.common.strategicBattleSystems.SBFPartialScanUnitPlaceHolder;
 import megamek.common.strategicBattleSystems.SBFSomethingOutThereUnitPlaceHolder;
 import megamek.common.strategicBattleSystems.SBFUnitPlaceHolder;
 import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
 
-record SBFUnitUpdateHelper(SBFGameManager gameManager) implements SBFGameManagerHelper {
+final class SBFUnitUpdateHelper implements SBFGameManagerHelper {
+    private final SBFGameManager gameManager;
+    private final Map<Integer, Set<Integer>> sentIds = new HashMap<>();
+
+    SBFUnitUpdateHelper(SBFGameManager gameManager) {
+        this.gameManager = gameManager;
+    }
+
+    @Override
+    public SBFGameManager gameManager() {
+        return gameManager;
+    }
+
+    /** A full entity snapshot replaces the recipient's roster on connect, reload or casualty resolution. */
+    List<InGameObject> snapshotFor(Player player) {
+        List<InGameObject> visible = game().getInGameObjects().stream()
+              .map(unit -> representationFor(player, unit)).filter(Objects::nonNull).toList();
+        Set<Integer> ids = new HashSet<>();
+        visible.forEach(unit -> ids.add(unit.getId()));
+        sentIds.put(player.getId(), ids);
+        return visible;
+    }
 
     /**
      * Updates all units to all players, taking into account visibility.
@@ -92,16 +121,13 @@ record SBFUnitUpdateHelper(SBFGameManager gameManager) implements SBFGameManager
      * @param unit   The unit to send
      */
     void sendUnitUpdate(Player player, InGameObject unit) {
-        if (unit instanceof SBFFormation formation) {
-            SBFVisibilityStatus visibility = game().getVisibility(player, unit.getId());
-            InGameObject replacement = getReplacement(formation, visibility);
-            if (replacement != null) {
-                send(player.getId(), createUnitPacket(replacement));
-            } else {
-                send(player.getId(), createUnitInvisiblePacket(formation));
-            }
-        } else {
-            send(player.getId(), createUnitPacket(unit));
+        InGameObject visible = representationFor(player, unit);
+        Set<Integer> ids = sentIds.computeIfAbsent(player.getId(), ignored -> new HashSet<>());
+        if (visible != null) {
+            ids.add(unit.getId());
+            send(player.getId(), createUnitPacket(visible));
+        } else if (ids.remove(unit.getId())) {
+            send(player.getId(), createUnitInvisiblePacket(unit));
         }
     }
 
@@ -119,14 +145,19 @@ record SBFUnitUpdateHelper(SBFGameManager gameManager) implements SBFGameManager
         }
     }
 
-    private InGameObject getReplacement(SBFFormation formation, SBFVisibilityStatus visibility) {
+    InGameObject representationFor(Player player, InGameObject unit) {
+        if (!(unit instanceof SBFFormation formation)) {
+            return unit;
+        }
+        SBFVisibilityStatus visibility = game().getVisibility(player, formation.getId());
         return switch (visibility) {
-            case VISIBLE, UNKNOWN -> formation;
-            case INVISIBLE -> null;
-            case BLIP, SENSOR_PING, SENSOR_GHOST -> new SBFUnitPlaceHolder(formation);
+            case VISIBLE -> formation;
+            case UNKNOWN, INVISIBLE, SENSOR_PING, SENSOR_GHOST -> null;
+            case BLIP -> new SBFUnitPlaceHolder(formation);
             case SOMETHING_OUT_THERE -> new SBFSomethingOutThereUnitPlaceHolder(formation);
             case I_GOT_SOMETHING -> new SBFIGotSomethingUnitPlaceholder(formation);
-            case PARTIAL_SCAN_RECON, EYES_ON_TARGET, PARTIAL_SCAN -> new SBFPartialScanUnitPlaceHolder(formation);
+            case PARTIAL_SCAN -> new SBFPartialScanUnitPlaceHolder(formation);
+            case PARTIAL_SCAN_RECON, EYES_ON_TARGET -> new SBFIdentifiedUnitPlaceHolder(formation);
         };
     }
 

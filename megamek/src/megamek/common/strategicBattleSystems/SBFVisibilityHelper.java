@@ -36,15 +36,19 @@ package megamek.common.strategicBattleSystems;
 import static megamek.common.strategicBattleSystems.SBFVisibilityStatus.INVISIBLE;
 import static megamek.common.strategicBattleSystems.SBFVisibilityStatus.VISIBLE;
 
+import java.io.Serializable;
 import java.util.Collection;
+import java.util.List;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import megamek.common.Player;
+import megamek.common.board.BoardLocation;
 import megamek.common.game.InGameObject;
 import megamek.common.interfaces.ServerOnly;
 import megamek.common.options.SBFRuleOptions;
@@ -72,6 +76,60 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
 
     private final SBFGame game;
     private Set<Integer> uncountedMovers;
+
+    private Map<Integer, BoardLocation> exposedUrbanPositions;
+
+    public void exposeUrbanPosition(int formation, BoardLocation location) {
+        if (exposedUrbanPositions == null) {
+            exposedUrbanPositions = new HashMap<>();
+        }
+        exposedUrbanPositions.put(formation, location);
+    }
+
+    public boolean exposedAt(int formation, BoardLocation location) {
+        return exposedUrbanPositions != null && location.equals(exposedUrbanPositions.get(formation));
+    }
+
+    public void leftHex(int formation, BoardLocation location) {
+        if (exposedUrbanPositions != null) {
+            exposedUrbanPositions.remove(formation, location);
+        }
+    }
+
+    private int aerialOrdersRound;
+    private record AerialSortie(List<BoardLocation> path, Set<Integer> targets) implements Serializable { }
+    private Map<Integer, AerialSortie> aerialScanOrders;
+
+    /** Only a Squadron which entered Central this turn can order scans of particular Blips (IO:BF p. 196). */
+    public void enteredCentral(int squadron, List<BoardLocation> path) {
+        if (!usesDoubleBlind()) {
+            return;
+        }
+        if (aerialScanOrders == null || aerialOrdersRound != game.getCurrentRound()) {
+            aerialScanOrders = new HashMap<>();
+            aerialOrdersRound = game.getCurrentRound();
+        }
+        aerialScanOrders.computeIfAbsent(squadron, ignored -> new AerialSortie(List.copyOf(path), new LinkedHashSet<>()));
+    }
+
+    public boolean orderAerialScan(int squadron, int target, int limit) {
+        AerialSortie sortie = aerialOrdersRound == game.getCurrentRound() && aerialScanOrders != null
+              ? aerialScanOrders.get(squadron) : null;
+        return sortie != null && sortie.targets().size() < limit && sortie.targets().add(target);
+    }
+
+    public List<BoardLocation> aerialReconPath(int squadron) {
+        var sortie = aerialScanOrders != null && aerialOrdersRound == game.getCurrentRound() ? aerialScanOrders.get(squadron) : null;
+        return sortie == null ? List.of() : sortie.path();
+    }
+
+    public Set<Integer> takeAerialScans(int squadron) {
+        if (aerialScanOrders == null || aerialOrdersRound != game.getCurrentRound()) {
+            return Set.of();
+        }
+        var orders = aerialScanOrders.remove(squadron);
+        return orders == null ? Set.of() : orders.targets();
+    }
 
     /** Freeze the p. 164 movement ratio before any Formation can gain or lose a contact in transit. */
     public void beginMovement() {
@@ -126,6 +184,10 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
      */
     @ServerOnly
     public SBFVisibilityStatus getVisibility(int viewingPlayer, int formationID) {
+        var target = game.getFormation(formationID);
+        if (target.isPresent() && target.get().isHidden() && !playersSharingVision(viewingPlayer).contains(game.getPlayer(target.get().getOwnerId()))) {
+            return INVISIBLE;
+        }
         if (!usesDoubleBlind()) {
             return VISIBLE;
         } else {

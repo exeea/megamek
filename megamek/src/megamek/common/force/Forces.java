@@ -51,6 +51,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.IntPredicate;
 
 import jakarta.annotation.Nullable;
 import megamek.common.Player;
@@ -440,6 +441,20 @@ public final class Forces implements Serializable {
      */
     public void setGame(IGame g) {
         game = g;
+    }
+
+    /** A recipient's copy of the force hierarchy. Visible children of an omitted parent become top-level forces. */
+    public Forces visibleTo(IntPredicate visibleOwner, IntPredicate visibleUnit) {
+        Forces result = clone();
+        result.forces.values().removeIf(force -> !visibleOwner.test(force.getOwnerId()));
+        for (Force force : result.forces.values()) {
+            if (!result.forces.containsKey(force.getParentId())) {
+                force.setParent(NO_FORCE);
+            }
+            force.getSubForces().stream().filter(id -> !result.forces.containsKey(id)).toList().forEach(force::removeSubForce);
+            force.getEntities().stream().filter(id -> !visibleUnit.test(id)).toList().forEach(id -> force.removeEntity(id.intValue()));
+        }
+        return result;
     }
 
     /**

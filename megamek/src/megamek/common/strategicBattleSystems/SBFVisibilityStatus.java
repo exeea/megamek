@@ -70,6 +70,11 @@ public enum SBFVisibilityStatus {
     // Full Scan
     VISIBLE;
 
+    /** A solid lock places a counter in a specific hex, IO:BF p. 196. */
+    public boolean isLocated() {
+        return ordinal() >= BLIP.ordinal();
+    }
+
     public SBFVisibilityStatus bestOf(SBFVisibilityStatus other) {
         return ordinal() > other.ordinal() ? this : other;
     }
