@@ -522,7 +522,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String LOS_MEK_IN_FIRST = "LOSMekInFirst";
     public static final String LOS_MEK_IN_SECOND = "LOSMekInSecond";
     public static final String SHOW_MAP_SHEETS = "ShowMapSheets";
-    public static final String USE_ISOMETRIC = "UseIsometric";
     public static final String SHOW_UNIT_OVERVIEW = "ShowUnitOverview";
     public static final String SHOW_DAMAGE_LEVEL = "ShowDamageLevel";
     public static final String SHOW_DAMAGE_DECAL = "ShowDamageDecal";
@@ -1076,7 +1075,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SHOW_ARMOR_MINI_VIS_TT, true);
         store.setDefault(SHOW_PILOT_PORTRAIT_TT, true);
 
-        store.setDefault(USE_ISOMETRIC, false);
 
         store.setDefault(WINDOW_SIZE_HEIGHT, 600);
         store.setDefault(WINDOW_SIZE_WIDTH, 800);
@@ -1688,10 +1686,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getPlayerListAutoDisplayNonReportPhase() {
         return store.getInt(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
-    public boolean getIsometricEnabled() {
-        return store.getBoolean(USE_ISOMETRIC);
     }
 
     public int getMinimumSizeHeight() {
@@ -3160,10 +3154,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setShowMapSheets(boolean b) {
         store.setValue(SHOW_MAP_SHEETS, b);
-    }
-
-    public void setIsometricEnabled(boolean b) {
-        store.setValue(USE_ISOMETRIC, b);
     }
 
     public void setShowUnitOverview(boolean b) {

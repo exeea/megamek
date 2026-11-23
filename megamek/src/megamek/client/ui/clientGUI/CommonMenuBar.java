@@ -164,8 +164,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsFloat"));
     private final JRadioButtonMenuItem viewBotCommandsDock =
           new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsDock"));
-    private final JCheckBoxMenuItem toggleIsometric = new JCheckBoxMenuItem(getString(
-          "CommonMenuBar.viewToggleIsometric"));
+    private final JMenuItem toggleTactical = new JMenuItem(getString("GpuBoard.hud.util.tactical"));
     private final JCheckBoxMenuItem toggleHexCoords = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleHexCoords"));
     private final JCheckBoxMenuItem toggleHexTypes = new JCheckBoxMenuItem(getString(
@@ -330,7 +329,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(viewZoomOut, menu, VIEW_ZOOM_OUT);
         initMenuItem(viewZoomReset, menu, VIEW_ZOOM_RESET);
         initMenuItem(viewZoomOverviewToggle, menu, VIEW_ZOOM_OVERVIEW_TOGGLE);
-        initMenuItem(toggleIsometric, menu, VIEW_TOGGLE_ISOMETRIC, VK_T, GUIP.getIsometricEnabled());
+        initMenuItem(toggleTactical, menu, VIEW_TOGGLE_ISOMETRIC, VK_T);
         initMenuItem(toggleHexCoords, menu, VIEW_TOGGLE_HEX_COORDS, VK_G, GUIP.getCoordsEnabled());
         initMenuItem(toggleHexTypes, menu, VIEW_TOGGLE_HEX_TYPES, GUIP.getHexTypesEnabled());
         toggleHexTypes.setToolTipText(Messages.getString("CommonMenuBar.viewToggleHexTypesToolTip"));
@@ -421,7 +420,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         toggleFovSpotting.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.FOV_SPOTTING));
         toggleShowObjects.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.SHOW_OBJECTS));
         toggleFieldOfFire.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.FIELD_FIRE));
-        toggleIsometric.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.TOGGLE_ISO));
+        toggleTactical.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.TOGGLE_ISO));
         viewMovementEnvelope.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.MOVE_ENVELOPE));
         viewMinimap.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.MINIMAP));
         viewLabels.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DRAW_LABELS));
@@ -561,7 +560,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewZoomOut.setEnabled(isInGameBoardView);
         viewZoomReset.setEnabled(isInGameBoardView);
         viewZoomOverviewToggle.setEnabled(isInGameBoardView);
-        toggleIsometric.setEnabled(isInGameBoardView);
+        toggleTactical.setEnabled(isInGameBoardView);
         viewKeybindsOverlay.setEnabled(isInGameBoardView);
         viewPlanetaryConditionsOverlay.setEnabled(isInGameBoardView);
         toggleHexCoords.setEnabled(isInGameBoardView);
@@ -631,7 +630,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     public void preferenceChange(PreferenceChangeEvent e) {
         // Adapt the menu checkboxes to a new state where necessary
         switch (e.getName()) {
-            case GUIPreferences.USE_ISOMETRIC -> toggleIsometric.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_FIELD_OF_FIRE -> toggleFieldOfFire.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_SENSOR_RANGE -> toggleSensorRange.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_UNIT_LINKS -> toggleUnitLinks.setSelected((Boolean) e.getNewValue());

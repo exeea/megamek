@@ -1609,7 +1609,7 @@ public class ClientGUI extends AbstractClientGUI
                 if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OVERVIEW_TOGGLE); }
                 break;
             case VIEW_TOGGLE_ISOMETRIC:
-                GUIP.setIsometricEnabled(!GUIP.getIsometricEnabled());
+                GpuBoardWindow.cameraCommand(this, KeyCommandBind.TOGGLE_ISO);
                 break;
             case VIEW_TOGGLE_FOV_HIGHLIGHT:
                 GUIP.setFovHighlight(!GUIP.getFovHighlight());

@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import javax.swing.JMenu;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JTabbedPane;
@@ -30,6 +31,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
@@ -86,6 +88,12 @@ class BoardViewsContainerTest {
                 JMenu view = Arrays.stream(menu.getComponents()).filter(JMenu.class::isInstance).map(JMenu.class::cast)
                       .filter(group -> group.getText().equals(Messages.getString("CommonMenuBar.ViewMenu")))
                       .findFirst().orElseThrow();
+                JMenuItem tactical = Arrays.stream(view.getMenuComponents()).filter(JMenuItem.class::isInstance)
+                      .map(JMenuItem.class::cast).filter(item -> ClientGUI.VIEW_TOGGLE_ISOMETRIC.equals(item.getActionCommand()))
+                      .findFirst().orElseThrow();
+                assertEquals(KeyCommandBind.keyStroke(KeyCommandBind.TOGGLE_ISO), tactical.getAccelerator());
+                tactical.doClick();
+                gpu.verify(() -> GpuBoardWindow.cameraCommand(gui, KeyCommandBind.TOGGLE_ISO));
                 List<JMenu> renderers = Arrays.stream(view.getMenuComponents()).filter(JMenu.class::isInstance)
                       .map(JMenu.class::cast).filter(group -> group.getText()
                             .equals(Messages.getString("CommonMenuBar.viewRenderer"))).toList();
