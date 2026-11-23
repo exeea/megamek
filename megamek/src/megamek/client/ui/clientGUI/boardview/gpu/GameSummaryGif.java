@@ -57,10 +57,10 @@ import megamek.common.game.Game;
  * attacked (physical attacks thicker), and the round and phase in the top left corner. One board: the one the most
  * units were seen on. Its terrain is the board as the game ended.
  * <p>
- * Making it is quick: the terrain is painted once; one palette of at most 256 colours, cut once from the terrain and a
+ * Making it is quick: the terrain is painted once; one palette of at most 255 colours, cut once from the terrain and a
  * few drawn frames, serves every frame, so a frame's pixels only look up their index; frames are drawn and indexed on
  * all cores; and each frame after the first stores only the rectangle in which it differs from the one before, which
- * the frame keeps showing around it.
+ * the frame keeps showing around it and through the rectangle's unchanged pixels, left transparent.
  */
 public final class GameSummaryGif {
     /** A frame's longer side in pixels, as the lobby's board thumbnails. */
@@ -82,6 +82,8 @@ public final class GameSummaryGif {
     private static final float PHYSICAL_WIDTH = .14f;
     private static final String GIF_FORMAT = "javax_imageio_gif_image_1.0";
     private static final String GIF_STREAM_FORMAT = "javax_imageio_gif_stream_1.0";
+    /** The palette index no colour takes: a frame's pixels that the frame before already shows. */
+    private static final int TRANSPARENT = 255;
 
     private GameSummaryGif() { }
 
@@ -211,10 +213,15 @@ public final class GameSummaryGif {
         int regionHeight = bottom - top + 1;
         byte[] region = new byte[regionWidth * regionHeight];
         for (int y = 0; y < regionHeight; y++) {
-            System.arraycopy(indices, (top + y) * width + left, region, y * regionWidth, regionWidth);
+            int from = (top + y) * width + left;
+            for (int x = 0; x < regionWidth; x++) {
+                // A pixel the frame before already shows is transparent: LZW packs those runs to almost nothing
+                region[y * regionWidth + x] = previous != null && indices[from + x] == previous[from + x]
+                      ? (byte) TRANSPARENT : indices[from + x];
+            }
         }
         BufferedImage image = new BufferedImage(regionWidth, regionHeight, BufferedImage.TYPE_BYTE_INDEXED,
-              palette.model);
+              previous == null ? palette.model : palette.transparentModel);
         System.arraycopy(region, 0, ((DataBufferByte) image.getRaster().getDataBuffer()).getData(), 0,
               region.length);
         IIOMetadata metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), null);
@@ -228,9 +235,9 @@ public final class GameSummaryGif {
         IIOMetadataNode control = child(root, "GraphicControlExtension");
         control.setAttribute("disposalMethod", "doNotDispose");
         control.setAttribute("userInputFlag", "FALSE");
-        control.setAttribute("transparentColorFlag", "FALSE");
+        control.setAttribute("transparentColorFlag", previous == null ? "FALSE" : "TRUE");
         control.setAttribute("delayTime", Integer.toString(millis / 10));
-        control.setAttribute("transparentColorIndex", "0");
+        control.setAttribute("transparentColorIndex", Integer.toString(TRANSPARENT));
         IIOMetadataNode descriptor = child(root, "ImageDescriptor");
         descriptor.setAttribute("imageLeftPosition", Integer.toString(left));
         descriptor.setAttribute("imageTopPosition", Integer.toString(top));
@@ -269,9 +276,9 @@ public final class GameSummaryGif {
     }
 
     /**
-     * The GIF's one palette of at most 256 colours, from the terrain and the first, middle and last frames: the
-     * colours that cover a hex or more (terrain fills, symbols, lines) exactly, the antialiased blends by median cut;
-     * any pixel takes its nearest colour, looked up once per colour.
+     * The GIF's one palette of at most 255 colours (the last index stays transparent), from the terrain and the first,
+     * middle and last frames: the colours that cover a hex or more (terrain fills, symbols, lines) exactly, the
+     * antialiased blends by median cut; any pixel takes its nearest colour, looked up once per colour.
      */
     static final class Palette {
         /** A colour covering one in so many pixels of the sampled images, or more, keeps its exact value. */
@@ -280,6 +287,8 @@ public final class GameSummaryGif {
         private static final int FLAT_COLOURS = 64;
         private final int[] rgb;
         final IndexColorModel model;
+        /** The same colours with {@link #TRANSPARENT} transparent, for the frames after the first. */
+        final IndexColorModel transparentModel;
 
         private Palette(int[] rgb) {
             this.rgb = rgb;
@@ -291,6 +300,7 @@ public final class GameSummaryGif {
                 blue[index] = (byte) rgb[index];
             }
             model = new IndexColorModel(8, 256, red, green, blue);
+            transparentModel = new IndexColorModel(8, 256, red, green, blue, TRANSPARENT);
         }
 
         static Palette of(Painter terrain, List<GameSummary.Frame> frames) {
@@ -315,7 +325,7 @@ public final class GameSummaryGif {
                 }
             });
             int[] cut = blends.isEmpty() ? new int[0]
-                  : MedianCutQuantizer.INSTANCE.quantize(blends, 256 - exact.length).stream()
+                  : MedianCutQuantizer.INSTANCE.quantize(blends, TRANSPARENT - exact.length).stream()
                         .mapToInt(com.squareup.gifencoder.Color::getRgbInt).toArray();
             int[] rgb = Arrays.copyOf(exact, exact.length + cut.length);
             System.arraycopy(cut, 0, rgb, exact.length, cut.length);
