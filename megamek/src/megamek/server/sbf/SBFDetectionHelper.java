@@ -484,11 +484,14 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) && !illuminated(game, target) &&
               (game.getPlanetaryConditions().getLight().isDuskDawn()
                     || game.getPlanetaryConditions().getLight().isMoonlessOrPitchBack())) ? 1 : 0;
+        // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMech/Vehicle column.
+        boolean mekOrVehicle = formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.MX,
+              SBFElementType.PM, SBFElementType.AS);
         return switch (visualLevel(game, target)) {
             case 4 -> srchModifier;
             case 3 -> 1 + srchModifier;
-            case 2 -> srchModifier + (formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.AS) ? 2 : 1);
-            default -> srchModifier + (formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.AS) ? 4 : 2);
+            case 2 -> srchModifier + (mekOrVehicle ? 2 : 1);
+            default -> srchModifier + (mekOrVehicle ? 4 : 2);
         };
     }
 

@@ -57,6 +57,8 @@ import megamek.common.enums.GamePhase;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
 import megamek.common.options.SBFRuleOptions;
+import megamek.common.planetaryConditions.Light;
+import megamek.common.planetaryConditions.Weather;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
@@ -71,6 +73,25 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class SBFDetectionHelperTest {
+
+    @Test
+    void mixedAndProtoMekObserversUseTheBattleMekVehicleVisualColumn() {
+        var game = new SBFGame();
+        var observer = deploy(game, 0, 20);
+        for (var type : List.of(SBFElementType.MX, SBFElementType.PM, SBFElementType.CI, SBFElementType.BA)) {
+            observer.setType(type);
+            game.getPlanetaryConditions().setLight(Light.DAY);
+            game.getPlanetaryConditions().setWeather(Weather.CLEAR);
+            boolean infantry = type == SBFElementType.CI || type == SBFElementType.BA;
+            assertEquals(infantry ? 2 : 4, SBFDetectionHelper.visualRange(game, observer));
+            game.getPlanetaryConditions().setWeather(Weather.LIGHT_RAIN);
+            assertEquals(infantry ? 1 : 2, SBFDetectionHelper.visualRange(game, observer));
+            game.getPlanetaryConditions().setWeather(Weather.SLEET);
+            assertEquals(1, SBFDetectionHelper.visualRange(game, observer));
+            game.getPlanetaryConditions().setLight(Light.PITCH_BLACK);
+            assertEquals(0, SBFDetectionHelper.visualRange(game, observer));
+        }
+    }
 
     @Test
     void bestProbeOrBasicSensorsWinAndReconOnlyExtendsBasicSensors() {
