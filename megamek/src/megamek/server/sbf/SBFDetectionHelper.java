@@ -101,11 +101,12 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                     continue;
                 }
                 int distance = viewingFormation.getPosition().coords().distance(hostileFormation.getPosition().coords());
-                if (distance <= visualRange(game(), viewingFormation)) {
+                if (distance <= visualRange(game(), viewingFormation, hostileFormation.getPosition())) {
                     visibilityStatus = visibilityStatus.bestOf(identifyVisually(game(), viewingFormation,
                           hostileFormation, () -> Compute.d6(2)));
                 }
-                var detectionModifiers = new SBFDetectionModifiers(viewingFormation, hostileFormation);
+                var detectionModifiers = new SBFDetectionModifiers(viewingFormation, hostileFormation, hostileFormation.getPosition(),
+                      game().minefields().inEmp(hostileFormation.getPosition(), game().getCurrentRound()));
                 if (detectionModifiers.getValue() != TargetRoll.CHECK_FALSE) {
                     Roll diceRoll = Compute.rollD6(2);
                     int rollResult = diceRoll.getIntValue() + detectionModifiers.getValue();
@@ -253,12 +254,12 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         int sensor = SBFDetectionModifiers.sensorRange(viewer);
         boolean sensorReach = sensor > 0 && distance <= sensor;
         if (known == SBFVisibilityStatus.BLIP) {
-            return sensorReach && dice.getAsInt() + new SBFDetectionModifiers(viewer, target, entered).getValue() > 6;
+            return sensorReach && dice.getAsInt() + new SBFDetectionModifiers(viewer, target, entered, game().minefields().inEmp(entered, game().getCurrentRound())).getValue() > 6;
         }
         if (concealedInHardenedUrban(game(), target, entered)) {
             return false;
         }
-        boolean visualReach = distance <= visualRange(game(), viewer);
+        boolean visualReach = distance <= visualRange(game(), viewer, entered);
         boolean visualHeld = !visualReach || distance == 0 || dice.getAsInt() + visualModifier(game(), viewer, entered) > 6;
         boolean scanHeld = !sensorReach || dice.getAsInt() + scanModifier(game(), viewer, target, entered, distance) > 6;
         return (visualReach || sensorReach) && visualHeld && scanHeld;
@@ -288,7 +289,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
     /** IO:BF “Visual Identification” and “Recon Scan”, pp. 196–197. */
     static SBFVisibilityStatus identifyVisually(SBFGame game, SBFFormation viewer, SBFFormation target, IntSupplier dice) {
         int distance = viewer.getPosition().coords().distance(target.getPosition().coords());
-        int range = visualRange(game, viewer);
+        int range = visualRange(game, viewer, target.getPosition());
         if (distance > range) {
             return SBFVisibilityStatus.INVISIBLE;
         }
@@ -423,13 +424,13 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
     }
 
     private static int visualModifier(SBFGame game, SBFFormation viewer, BoardLocation target) {
-        return visualRange(game, viewer) - viewer.getPosition().coords().distance(target.coords())
-              + reconModifier(game, viewer, target) - (visualLevel(game.getPlanetaryConditions()) - 1);
+        return visualRange(game, viewer, target) - viewer.getPosition().coords().distance(target.coords())
+              + reconModifier(game, viewer, target) - (visualLevel(game, target) - 1);
     }
 
     private static int scanModifier(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation location, int distance) {
         int probe = viewer.hasAnySUAOf(BattleForceSUA.PRB, BattleForceSUA.BH) ? 1 : 0;
-        if (target.hasAnySUAOf(BattleForceSUA.ECM, BattleForceSUA.AECM)) {
+        if (target.hasAnySUAOf(BattleForceSUA.ECM, BattleForceSUA.AECM) || game.minefields().inEmp(location, game.getCurrentRound())) {
             probe--;
         }
         return SBFDetectionModifiers.sensorRange(viewer) - distance
@@ -462,7 +463,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
             return false;
         }
         int visual = squadron.hasAnySUAOf(BattleForceSUA.PRB, BattleForceSUA.RCN) ? 1
-              : visualLevel(game.getPlanetaryConditions());
+              : visualLevel(game, groundTarget.getPosition());
         if (squadron.getRadarZone() == SBFRadarZone.INNER) {
             return visual <= 2;
         }
@@ -476,10 +477,14 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
 
     /** Ground visual spotting ranges, IO:BF p. 197. */
     static int visualRange(SBFGame game, SBFFormation formation) {
-        int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) &&
+        return visualRange(game, formation, formation.getPosition());
+    }
+
+    static int visualRange(SBFGame game, SBFFormation formation, BoardLocation target) {
+        int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) && !illuminated(game, target) &&
               (game.getPlanetaryConditions().getLight().isDuskDawn()
                     || game.getPlanetaryConditions().getLight().isMoonlessOrPitchBack())) ? 1 : 0;
-        return switch (visualLevel(game.getPlanetaryConditions())) {
+        return switch (visualLevel(game, target)) {
             case 4 -> srchModifier;
             case 3 -> 1 + srchModifier;
             case 2 -> srchModifier + (formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.AS) ? 2 : 1);
@@ -487,8 +492,13 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         };
     }
 
-    private static int visualLevel(PlanetaryConditions conditions) {
-        Light light = conditions.getLight();
+    private static boolean illuminated(SBFGame game, BoardLocation site) {
+        return game.isIlluminated(site);
+    }
+
+    private static int visualLevel(SBFGame game, BoardLocation site) {
+        PlanetaryConditions conditions = game.getPlanetaryConditions();
+        Light light = illuminated(game, site) ? Light.DAY : conditions.getLight();
         Weather weather = conditions.getWeather();
         Fog fog = conditions.getFog();
         boolean sand = conditions.isBlowingSand();

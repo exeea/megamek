@@ -40,6 +40,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import megamek.common.Hex;
+import megamek.common.board.BoardLocation;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.sbf.SBFArtilleryAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
@@ -79,26 +80,37 @@ public class SBFToHitData extends TargetRoll {
         //noinspection OptionalGetWithoutIsPresent
         SBFFormation attackingFormation = game.getFormation(attack.getEntityId()).get();
         SBFToHitData toHit = new SBFToHitData(attackingFormation.getSkill(), "Skill");
-        if (attackingFormation.ambushedIn(game.getCurrentRound())) {
-            toHit.addModifier(2, "attacked from hiding");
-        }
+        processAttackerStatus(toHit, game, attackingFormation);
         SBFUnit firingUnit = attackingFormation.getUnits().get(attack.getUnitNumber());
         if (attackingFormation.isOnRadarMap()
               && game.combatOrders().spottedTarget(attackingFormation.getId()).isPresent()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "aerospace squadron is spotting");
         }
-        if (!attackingFormation.canAttackAfterEngagement()) {
+        if (attackingFormation.unpackingCargo(game.getCurrentRound()) || !attackingFormation.canAttackAfterEngagement()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "cannot fire after evading");
         }
         if (!firingUnit.canFire()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "targeting systems destroyed");
         }
         SBFFormation target = game.getFormation(attack.getTargetId()).orElseThrow();
+        if (attackingFormation.recoveringFighters(game.getCurrentRound())
+              && (firingUnit.hasAnySUAOf(BattleForceSUA.AT, BattleForceSUA.ST)
+              || attackingFormation.getUnits().stream().flatMap(u -> u.getElements().stream())
+                    .noneMatch(AlphaStrikeElement::isDropShip)
+              || !attackingFormation.isEngagedWith(target.getId()))) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "recovering aerospace Squadron");
+        }
+        if (target.recoveringFighters(game.getCurrentRound())) {
+            toHit.addModifier(-1, "target recovering aerospace Squadron");
+        }
+        if (target.capitalSector() != null && target.isCrippled()) {
+            toHit.addModifier(-2, "crippled or drifting space target");
+        }
         if (attackingFormation.inHighDrop() || (target.inHighDrop() && !attackingFormation.isOnRadarMap())) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "high-altitude drop");
         }
-        boolean airToAir = attackingFormation.isOnRadarMap() && target.isOnRadarMap();
-        if (target.isOnRadarMap()) {
+        boolean airToAir = attackingFormation.sharesAerospaceMap(target);
+        if (airToAir) {
             processDefensiveMovement(toHit, target);
         }
         if (firingUnit.getTargetingCrits() > 0) {
@@ -189,6 +201,30 @@ public class SBFToHitData extends TargetRoll {
         if (submerged || torpedo) {
             toHit.addModifier(1, "underwater");
         }
+        processGroundAttacker(toHit, game, attackingFormation, firingUnit);
+        processTargetTerrain(toHit, game, game.getHex(target.getPosition()), target);
+        processGroundTarget(toHit, target, toHit.range, false);
+        switch (target.moraleStatus()) {
+            case SHAKEN -> toHit.addModifier(-1, "shaken");
+            case BROKEN -> toHit.addModifier(-2, "broken");
+            case ROUTED -> toHit.addModifier(-3, "routed");
+            default -> toHit.doNothing();
+        }
+        processDeclarations(toHit, attackingFormation, game, attack, declarations);
+        return toHit;
+    }
+
+    public static void processAttackerStatus(SBFToHitData toHit, SBFGame game, SBFFormation attackingFormation) {
+        if (attackingFormation.ambushedIn(game.getCurrentRound())) {
+            toHit.addModifier(2, "attacked from hiding");
+        }
+        if (attackingFormation.disruptedByEmp(game.getCurrentRound())) {
+            toHit.addModifier(2, "EMP minefield");
+        }
+    }
+
+    /** Ordinary ground weapon modifiers shared by attacks on Formations and on terrain. */
+    public static void processGroundAttacker(SBFToHitData toHit, SBFGame game, SBFFormation attackingFormation, SBFUnit firingUnit) {
         if (game.combatOrders().spottedTarget(attackingFormation.getId()).isPresent()) {
             toHit.addModifier(1, "spotting");
         }
@@ -207,19 +243,9 @@ public class SBFToHitData extends TargetRoll {
         if (firingUnit.hasSUA(BattleForceSUA.SHLD)) {
             toHit.addModifier(1, "shields");
         }
-        processTargetTerrain(toHit, game.getHex(target.getPosition()));
-        processGroundTarget(toHit, target, toHit.range, false);
         if (attackingFormation.getJumpUsedThisTurn() > 0) {
             toHit.addModifier(attackingFormation.getJumpUsedThisTurn(), "attacker JUMP");
         }
-        switch (target.moraleStatus()) {
-            case SHAKEN -> toHit.addModifier(-1, "shaken");
-            case BROKEN -> toHit.addModifier(-2, "broken");
-            case ROUTED -> toHit.addModifier(-3, "routed");
-            default -> toHit.doNothing();
-        }
-        processDeclarations(toHit, attackingFormation, game, attack, declarations);
-        return toHit;
     }
 
     /** IO:BF p. 267: a BA Unit's range modifiers differ from those of other STL-equipped Units. */
@@ -241,9 +267,27 @@ public class SBFToHitData extends TargetRoll {
     }
 
     /** Aerospace To-Hit Modifiers table, IO:BF p. 177. */
+    /** Environmental darkness table, IO:BF pp. 210, 212. */
+    public static void applyDarkness(SBFToHitData toHit, SBFGame game, SBFFormation attacker, BoardLocation aim) {
+        if (attacker.isAerospace() || attacker.hasSearchlight() || game.isIlluminated(aim)) {
+            return;
+        }
+        int modifier = switch (game.getPlanetaryConditions().getLight()) {
+            case DUSK_DAWN -> 1;
+            case FULL_MOON -> 2;
+            case MOONLESS -> 3;
+            case PITCH_BLACK -> 4;
+            default -> 0;
+        };
+        if (modifier > 0) {
+            toHit.addModifier(modifier, "darkness");
+        }
+    }
+
     /** Ground-to-air target and firing system modifiers, including Air Defense Arrow IV (IO:BF pp. 178, 206). */
     public static void processGroundToAir(SBFToHitData toHit, SBFFormation attackingFormation, SBFUnit firingUnit,
           SBFFormation target) {
+        processDefensiveMovement(toHit, target);
         toHit.addModifier(2, "airborne aerospace target");
         if (target.getUnits().stream().flatMap(unit -> unit.getElements().stream())
               .anyMatch(AlphaStrikeElement::isDropShip)) {
@@ -273,19 +317,29 @@ public class SBFToHitData extends TargetRoll {
     }
 
     /** Artillery smoke counts as heavy woods for LOS and accuracy (IO:BF p. 206). */
+    public static int forestDensity(Hex hex) {
+        return hex == null ? 0 : Math.clamp(Math.max(hex.terrainLevel(Terrains.WOODS), hex.terrainLevel(Terrains.JUNGLE)), 0, 3);
+    }
+
     private static int woodsCover(Hex hex) {
-        return hex.containsTerrain(Terrains.SMOKE) ? 2 : Math.clamp(hex.terrainLevel(Terrains.WOODS), 0, 2);
+        return hex.containsTerrain(Terrains.SMOKE) ? 2 : Math.min(2, forestDensity(hex));
     }
 
     /** IO:BF p. 170: target terrain modifiers also apply within the same hex. */
-    public static void processTargetTerrain(SBFToHitData toHit, Hex hex) {
+    public static void processTargetTerrain(SBFToHitData toHit, SBFGame game, Hex hex, SBFFormation target) {
         if (hex == null) {
             return;
         }
-        if (woodsCover(hex) > 0) {
-            toHit.addModifier(woodsCover(hex), "target woods");
+        int woods = game.usesExpandedWoods() ? Math.max(woodsCover(hex), forestDensity(hex)) : woodsCover(hex);
+        if (woods > 0) {
+            toHit.addModifier(woods, "target woods");
         }
-        if (hex.containsTerrain(Terrains.BUILDING)) {
+        if (game.usesAdvancedTerrain() && hex.containsTerrain(Terrains.FIELDS)) {
+            toHit.addModifier(target != null && target.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA) ? 2 : 1, "planted fields");
+        }
+        if (game.usesAdvancedTerrain() && hex.containsTerrain(Terrains.INDUSTRIAL)) {
+            toHit.addModifier(1, "heavy industrial terrain");
+        } else if (hex.containsTerrain(Terrains.BUILDING)) {
             toHit.addModifier(hex.terrainLevel(Terrains.BUILDING) > 2 ? 2 : 1, "target urban terrain");
         }
     }
@@ -296,7 +350,7 @@ public class SBFToHitData extends TargetRoll {
      * no position. Engaged Formations use the winner's chosen range once both sides have maneuvered.
      */
     public static Optional<ASRange> standardAttackRange(SBFGame game, SBFFormation attacker, SBFFormation target) {
-        if (attacker.isOnRadarMap() || target.isOnRadarMap()) {
+        if (attacker.combatZone() != null || target.combatZone() != null) {
             if (!attacker.isOnRadarMap() && (target.getRadarZone() == SBFRadarZone.CENTRAL)
                   && (attacker.getPosition() != null) && (target.getPosition() != null)
                   && attacker.getPosition().isSameBoardAs(target.getPosition())) {
@@ -309,7 +363,8 @@ public class SBFToHitData extends TargetRoll {
                 return distance == 2 ? Optional.of(ASRange.MEDIUM)
                       : distance <= 4 ? Optional.of(ASRange.LONG) : Optional.empty();
             }
-            if (attacker.isOnRadarMap() && target.isOnRadarMap() && attacker.isEngagedWith(target.getId())
+            if (attacker.sharesAerospaceMap(target) && !attacker.waitingForSpaceCombat(game.getCurrentRound())
+                  && !target.waitingForSpaceCombat(game.getCurrentRound()) && attacker.isEngagedWith(target.getId())
                   && SBFCombatOrders.sameEngagementArea(game, attacker, target)) {
                 return game.combatOrders().maneuver(attacker.getId(), target.getId()).map(SBFCombatOrders.Maneuver::range);
             }
@@ -325,11 +380,11 @@ public class SBFToHitData extends TargetRoll {
                       && (m.winner() != target.getId())) {
                     return ASRange.MEDIUM;
                 }
-                return m.range();
+                return SBFCombatOrders.limitTerrainRange(game, attacker, target, m.range());
             });
         }
         return switch (attacker.getPosition().coords().distance(target.getPosition().coords())) {
-            case 0, 1 -> Optional.of(ASRange.LONG);
+            case 0, 1 -> Optional.of(SBFCombatOrders.limitTerrainRange(game, attacker, target, ASRange.LONG));
             case 2 -> Optional.of(ASRange.EXTREME);
             default -> Optional.empty();
         };
@@ -352,7 +407,7 @@ public class SBFToHitData extends TargetRoll {
             toHit.addModifier(-4, "grounded aerospace");
         } else if (target.airDropMovementCost() > 0) {
             toHit.addModifier(3, "air-dropped this turn");
-        } else if ((target.getTmm() > 0) && (!target.isHullDown() || target.getMpSpentThisTurn() > 0)
+        } else if ((target.getTmm() > 0) && !target.isBoggedDown() && (!target.isHullDown() || target.getMpSpentThisTurn() > 0)
               && (!artillery || (target.getMovement() > 0))) {
             toHit.addModifier(target.getTmm(), "TMM");
         }

@@ -53,7 +53,11 @@ public class SBFDetectionModifiers extends TargetRoll {
     }
 
     SBFDetectionModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position) {
-        sensorTargetRollModifiers(viewer, target, position).forEach(this::addModifier);
+        this(viewer, target, position, false);
+    }
+
+    SBFDetectionModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position, boolean empField) {
+        sensorTargetRollModifiers(viewer, target, position, empField).forEach(this::addModifier);
     }
 
     /**
@@ -97,7 +101,7 @@ public class SBFDetectionModifiers extends TargetRoll {
         };
     }
 
-    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position) {
+    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position, boolean empField) {
         List<TargetRollModifier> result = new ArrayList<>();
         int range = sensorRange(viewer);
         int distance = viewer.getPosition().coords()
@@ -115,7 +119,7 @@ public class SBFDetectionModifiers extends TargetRoll {
             result.add(new TargetRollModifier(-1, "target has AECM, viewer has BH"));
         } else if (target.hasSUA(AECM)) {
             result.add(new TargetRollModifier(-2, "target has AECM"));
-        } else if (target.hasAnySUAOf(ECM, WAT, LECM) && !viewer.hasSUA(BH)) {
+        } else if ((empField || target.hasAnySUAOf(ECM, WAT, LECM)) && !viewer.hasSUA(BH)) {
             result.add(new TargetRollModifier(-1, "target has ECM, WAT or LECM"));
         }
         return result;

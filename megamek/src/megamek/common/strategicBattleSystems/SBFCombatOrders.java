@@ -103,9 +103,9 @@ public final class SBFCombatOrders implements Serializable {
     }
 
     public static boolean sameEngagementArea(SBFGame game, SBFFormation first, SBFFormation second) {
-        if (first.isOnRadarMap() || second.isOnRadarMap()) {
+        if (first.combatZone() != null || second.combatZone() != null) {
             // A defender may pass through the contested zone. Resolve the attack at the recorded encounter (p. 177).
-            return first.isOnRadarMap() && second.isOnRadarMap() && ((first.getRadarZone() == second.getRadarZone())
+            return first.sharesAerospaceMap(second) && ((first.combatZone() == second.combatZone())
                   || first.passesAirOpponent(second.getId()) || second.passesAirOpponent(first.getId()));
         }
         return game.onSameBoard(first, second) && first.getPosition().equals(second.getPosition());
@@ -128,8 +128,21 @@ public final class SBFCombatOrders implements Serializable {
         if ((from == null) || (to == null)) {
             return SightControl.OPEN;
         }
-        boolean fromCover = SBFToHitData.isLosCover(from);
-        boolean toCover = SBFToHitData.isLosCover(to);
+        boolean fromCover = SBFToHitData.isLosCover(from) || game.usesAdvancedTerrain() && from.containsTerrain(Terrains.INDUSTRIAL);
+        boolean toCover = SBFToHitData.isLosCover(to) || game.usesAdvancedTerrain() && to.containsTerrain(Terrains.INDUSTRIAL);
+        if (game.usesExpandedWoods()) {
+            int fromForest = SBFToHitData.forestDensity(from);
+            int toForest = SBFToHitData.forestDensity(to);
+            if (fromForest >= 3 || toForest >= 3 || fromForest >= 2 && toForest >= 2) {
+                return SightControl.BLOCKED;
+            }
+            if (fromForest >= 2) {
+                return SightControl.TARGET;
+            }
+            if (toForest >= 2) {
+                return SightControl.OBSERVER;
+            }
+        }
         if (fromCover && toCover) {
             return SightControl.BLOCKED;
         }
@@ -145,6 +158,17 @@ public final class SBFCombatOrders implements Serializable {
         return hex.isClear() || hex.containsTerrain(Terrains.WATER) || hex.hasPavement();
     }
 
+    /** Expanded woods and jungles limit range in the occupied hex (IO:BF pp. 201–203). */
+    public static ASRange limitTerrainRange(SBFGame game, SBFFormation first, SBFFormation second, ASRange range) {
+        if (!game.usesExpandedWoods() || !first.occupiesGroundHex() || !second.occupiesGroundHex()
+              || !first.getPosition().equals(second.getPosition())) {
+            return range;
+        }
+        int density = SBFToHitData.forestDensity(game.getHex(first.getPosition()));
+        ASRange maximum = density >= 3 ? ASRange.SHORT : density >= 2 ? ASRange.MEDIUM : range;
+        return range.compareTo(maximum) > 0 ? maximum : range;
+    }
+
     public static boolean controlsSight(SBFGame game, SBFFormation occupant, SBFFormation other) {
         SightControl control = sightControl(game, occupant.getPosition(), other.getPosition());
         return (control == SightControl.OBSERVER) || (control == SightControl.BOTH);
@@ -152,6 +176,16 @@ public final class SBFCombatOrders implements Serializable {
 
     /** Declaring fire establishes the firing occupant's own LOS decision. Passive observation uses existing decisions. */
     public boolean hasLineOfSight(SBFGame game, BoardLocation observer, BoardLocation target, boolean declaringFire) {
+        if (game.usesExpandedWoods() && observer != null && target != null && observer.isSameBoardAs(target)
+              && observer.coords().distance(target.coords()) == 1) {
+            // The unit adjacent to heavy woods must declare first. Only that declaration establishes mutual LOS.
+            if (SBFToHitData.forestDensity(game.getHex(target)) == 2 && SBFToHitData.forestDensity(game.getHex(observer)) < 2) {
+                return declaringFire || firedSight(observer, target);
+            }
+            if (SBFToHitData.forestDensity(game.getHex(observer)) == 2 && SBFToHitData.forestDensity(game.getHex(target)) < 2) {
+                return firedSight(target, observer);
+            }
+        }
         return switch (sightControl(game, observer, target)) {
             case OPEN -> true;
             case BLOCKED -> false;
@@ -161,8 +195,24 @@ public final class SBFCombatOrders implements Serializable {
         };
     }
 
+    /** An empty target hex has no occupant able to withhold sight of the terrain itself. */
+    public boolean hasTerrainSight(SBFGame game, BoardLocation observer, BoardLocation target, boolean declaringFire) {
+        if (game.getActiveFormationsAt(target).stream().anyMatch(SBFFormation::occupiesGroundHex)) {
+            return hasLineOfSight(game, observer, target, declaringFire);
+        }
+        return switch (sightControl(game, observer, target)) {
+            case OPEN, TARGET -> true;
+            case BOTH, OBSERVER -> declaringFire || grantsSight(observer, target);
+            case BLOCKED -> false;
+        };
+    }
+
     public boolean hasSightDecision(SBFFormation occupant, SBFFormation other) {
         return sight.stream().anyMatch(s -> s.from().equals(occupant.getPosition()) && s.to().equals(other.getPosition()));
+    }
+
+    private boolean firedSight(BoardLocation shooter, BoardLocation target) {
+        return sight.stream().anyMatch(s -> s.from().equals(shooter) && s.to().equals(target) && s.fired());
     }
 
     private boolean grantsSight(BoardLocation occupant, BoardLocation other) {

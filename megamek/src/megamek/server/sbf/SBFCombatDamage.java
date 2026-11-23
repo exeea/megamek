@@ -85,15 +85,28 @@ final class SBFCombatDamage {
 
     /** Advanced artillery uses a separate 1d6 allocation decision for each hit, IO:BF p. 204. */
     static void recordArtilleryHit(SBFGameManager manager, SBFFormation attacker, SBFFormation target, int damage) {
-        if (target.getUnits().size() == 1 || manager.getGame().getOptions().booleanOption(SBFRuleOptions.BASE_SIMPLIFIED_DAMAGE)) {
-            recordRandomHit(manager, attacker, target, damage, LossCause.ARTILLERY_OR_BOMB);
+        recordArtilleryHit(manager, attacker, target, damage, false, false);
+    }
+
+    static void recordArtilleryHit(SBFGameManager manager, SBFFormation attacker, SBFFormation target, int damage,
+          boolean flechette, boolean scatter) {
+        List<Integer> eligible = eligibleUnits(manager.getGame(), attacker, target);
+        if (damage <= 0 || eligible.isEmpty()) {
+            return;
+        }
+        boolean random = scatter || (eligible.size() == 1) || manager.getGame().getOptions().booleanOption(SBFRuleOptions.BASE_SIMPLIFIED_DAMAGE);
+        if (random) {
+            int index = eligible.get(Compute.randomInt(eligible.size()));
+            if (!flechette || target.getUnits().get(index).isType(megamek.common.strategicBattleSystems.SBFElementType.CI)) {
+                recordHit(manager, attacker, target, index, damage, LossCause.ARTILLERY_OR_BOMB);
+            }
             return;
         }
         int chooser = Compute.d6() <= 3 ? target.getOwnerId() : attacker.getOwnerId();
         List<Allocation> queue = manager.getGame().getDamageAllocations();
         int exchange = 1 + queue.stream().mapToInt(Allocation::artilleryExchange).max().orElse(0);
         queue.add(new Allocation(attacker.getId(), target.getId(), chooser, damage, -1, List.of(),
-              LossCause.ARTILLERY_OR_BOMB, exchange));
+              LossCause.ARTILLERY_OR_BOMB, exchange, flechette));
         manager.sendServerChat(chooser, "You choose the Unit hit by artillery. Use /sbfallocate during the firing report.");
     }
 
@@ -172,8 +185,8 @@ final class SBFCombatDamage {
             if (!hit.isFor(attackerId, targetId, artilleryExchange)) {
                 continue;
             }
-            int index = hit.chooserId() >= 0 ? indices.get(choice++) : randomTarget(hit, counts);
-            if ((index < 0) || (index >= counts.length) || !canAllocate(counts, index)) {
+            int index = hit.chooserId() >= 0 ? indices.get(choice++) : randomTarget(game, target, hit, counts, updated.subList(0, i));
+            if ((index < 0) || (index >= counts.length) || !canAllocateTo(game, target, counts, index, updated.subList(0, i))) {
                 return false;
             }
             counts[index]++;
@@ -185,11 +198,13 @@ final class SBFCombatDamage {
             // Different winners may answer in either order. Armor and critical checks always follow firing order.
             for (Allocation hit : queue) {
                 SBFFormation recipient = game.getFormation(hit.targetId()).orElseThrow();
-                int index = hit.unitIndex() >= 0 ? hit.unitIndex() : randomTarget(hit,
-                      recordedCounts(game, hit.attackerId(), recipient));
+                int index = hit.unitIndex() >= 0 ? hit.unitIndex() : randomTarget(game, recipient, hit,
+                      recordedCounts(game, hit.attackerId(), recipient), List.of());
                 SBFFormation attacker = SBFScenarioResolution.roster(game).stream().filter(f -> f.getId() == hit.attackerId())
                       .findFirst().orElseThrow();
-                recordHit(manager, attacker, recipient, index, hit.damage(), hit.cause());
+                if (!hit.flechette() || recipient.getUnits().get(index).isType(megamek.common.strategicBattleSystems.SBFElementType.CI)) {
+                    recordHit(manager, attacker, recipient, index, hit.damage(), hit.cause());
+                }
             }
             queue.clear();
         }
@@ -203,7 +218,33 @@ final class SBFCombatDamage {
     /** A Unit may absorb two hits in an exchange before every other Unit has absorbed two (IO:BF p. 170). */
     static List<Integer> eligibleUnits(SBFGame game, SBFFormation attacker, SBFFormation target) {
         int[] counts = recordedCounts(game, attacker.getId(), target);
-        return IntStream.range(0, counts.length).filter(index -> canAllocate(counts, index)).boxed().toList();
+        return IntStream.range(0, counts.length).filter(index -> canAllocateTo(game, target, counts, index, List.of())).boxed().toList();
+    }
+
+    private static boolean canAllocateTo(SBFGame game, SBFFormation target, int[] counts, int index, List<Allocation> prior) {
+        if (!builderAvailable(game, target, index, prior)) {
+            return false;
+        }
+        return canAllocate(counts, index) || IntStream.range(0, counts.length).noneMatch(other -> counts[other] < 2
+              && builderAvailable(game, target, other, prior));
+    }
+
+    /** IO:BF p. 220. The other Units screen the builder until one of them actually takes damage. */
+    static boolean builderAvailable(SBFGame game, SBFFormation target, int index, List<Allocation> prior) {
+        if (target.constructionUnit() != target.getUnits().get(index) || target.getUnits().size() == 1) {
+            return true;
+        }
+        return game.getPendingHits().stream().anyMatch(hit -> hit.targetId() == target.getId()
+              && hit.unitIndex() != index && hit.damage() > 0)
+              || prior.stream().anyMatch(hit -> hit.targetId() == target.getId() && hit.unitIndex() >= 0
+              && hit.unitIndex() != index && armorDamage(target, target.getUnits().get(hit.unitIndex()), hit.damage()) > 0);
+    }
+
+    private static int armorDamage(SBFFormation target, SBFUnit unit, int damage) {
+        if (target.isHullDown()) {
+            damage /= 2; // IO:BF, Hull Down, p. 199.
+        }
+        return unit.hasSUA(BattleForceSUA.SHLD) ? Math.max(0, damage - 1) : damage;
     }
 
     private static int[] recordedCounts(SBFGame game, int attackerId, SBFFormation target) {
@@ -216,11 +257,12 @@ final class SBFCombatDamage {
         return counts;
     }
 
-    private static int randomTarget(Allocation hit, int[] counts) {
+    private static int randomTarget(SBFGame game, SBFFormation target, Allocation hit, int[] counts, List<Allocation> prior) {
         if (hit.unitIndex() >= 0) {
             return hit.unitIndex();
         }
-        return hit.randomOrder().stream().filter(index -> canAllocate(counts, index)).findFirst().orElseThrow();
+        return hit.randomOrder().stream().filter(index -> canAllocateTo(game, target, counts, index, prior))
+              .findFirst().orElseThrow();
     }
 
     /** IO:BF pp. 170-171: record each hit individually. The table is rolled again on each further armor loss. */
@@ -261,14 +303,35 @@ final class SBFCombatDamage {
         }
     }
 
+    /** Damage or a critical check already explicitly specified by a terrain effect. */
+    static void applyTerrainEffects(SBFGameManager manager, SBFFormation target, List<PendingHit> hits) {
+        if (!hits.isEmpty()) {
+            manager.getGame().getImmediateLosses().add(applyHits(manager, target, hits));
+            manager.entityAllUpdate();
+        }
+    }
+
+    /** A scenario hazard may have an owning Force without a firing Formation. Retain that owner for victory. */
+    static void applyHazardHits(SBFGameManager manager, SBFFormation target, int owner, int[] damageByUnit) {
+        List<PendingHit> hits = new ArrayList<>();
+        for (int i = 0; i < damageByUnit.length; i++) {
+            if (damageByUnit[i] > 0) {
+                PendingHit hit = rollHit(manager, null, target, i, damageByUnit[i], 0, LossCause.COMBAT);
+                hits.add(new PendingHit(hit.attackerId(), hit.targetId(), i, hit.damage(), hit.criticalRoll(), hit.additionalRolls(),
+                      hit.cause(), owner));
+            }
+        }
+        if (!hits.isEmpty()) {
+            manager.getGame().getImmediateLosses().add(applyHits(manager, target, hits));
+            manager.entityAllUpdate();
+        }
+    }
+
     private static PendingHit rollHit(SBFGameManager manager, SBFFormation attacker, SBFFormation target, int index,
           int damage, int previousDamage, LossCause cause) {
         SBFUnit unit = target.getUnits().get(index);
         int armorBefore = Math.max(0, unit.getCurrentArmor() - previousDamage);
-        if (target.isHullDown()) {
-            damage /= 2; // IO:BF, Hull Down, p. 199.
-        }
-        int applied = unit.hasSUA(BattleForceSUA.SHLD) ? Math.max(0, damage - 1) : damage;
+        int applied = armorDamage(target, unit, damage);
         int armorAfter = Math.max(0, armorBefore - applied);
         manager.addReportFor(new SBFReportEntry(3100).add(unit.getName()).add(applied).add(armorAfter), target);
         List<Integer> rolls = new ArrayList<>();
@@ -292,7 +355,7 @@ final class SBFCombatDamage {
             }
         }
         int firstRoll = rolls.isEmpty() ? 0 : rolls.removeFirst();
-        return new PendingHit(attacker.getId(), target.getId(), index, applied, firstRoll, rolls, cause);
+        return new PendingHit(attacker == null ? Player.PLAYER_NONE : attacker.getId(), target.getId(), index, applied, firstRoll, rolls, cause);
     }
 
     /** IO:BF p. 171 Critical Hit Table. A roll of zero means that the attack did not generate a critical check. */
@@ -374,7 +437,7 @@ final class SBFCombatDamage {
             boolean crossedHalf = before * 2 >= unit.getArmor() && unit.getCurrentArmor() * 2 < unit.getArmor();
             boolean killed = before > 0 && unit.getCurrentArmor() == 0;
             if (crossedHalf || killed) {
-                int attackerOwner = SBFScenarioResolution.roster(manager.getGame()).stream()
+                int attackerOwner = hit.hazardOwner() != null ? hit.hazardOwner() : SBFScenarioResolution.roster(manager.getGame()).stream()
                       .filter(f -> f.getId() == hit.attackerId()).mapToInt(SBFFormation::getOwnerId)
                       .findFirst().orElse(Player.PLAYER_NONE);
                 if (crossedHalf) {

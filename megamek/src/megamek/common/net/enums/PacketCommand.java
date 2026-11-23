@@ -338,7 +338,8 @@ public enum PacketCommand {
      * <p>Packet commands travel as their position in this list, so new commands must always be added at the end;
      * inserting one earlier would shift the handshake commands and break the version check against older builds.</p>
      */
-    PLAYER_REFUSED_DIFFERENT_VERSION;
+    PLAYER_REFUSED_DIFFERENT_VERSION,
+    SBF_COMBAT_ORDERS;
     //endregion Enum Declarations
 
     //region Boolean Comparison Methods

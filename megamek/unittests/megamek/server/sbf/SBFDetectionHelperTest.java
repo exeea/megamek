@@ -388,7 +388,11 @@ class SBFDetectionHelperTest {
         assertEquals(2, game.getForces().getTopLevelForces().size());
         var hostileRoot = game.getForces().getTopLevelForces().stream().filter(f -> f.getOwnerId() == 1).findFirst().orElseThrow();
         int child = game.getForces().addSubForce(new Force("Detached ally", 0, viewer.getCamouflage()), hostileRoot);
-        game.getForces().getForce(child).setOwnerId(0);
+        // Forming a combined allied force is legal. Losing the alliance later must protect both rosters.
+        viewer.setTeam(1);
+        game.getPlayer(1).setTeam(1);
+        game.getForces().assignForceOnly(game.getForces().getForce(child), viewer);
+        game.getPlayer(1).setTeam(2);
         var rebuilt = assertInstanceOf(Forces.class, manager.createGameStartUnitPacket(viewer).getObject(2));
         assertEquals(2, rebuilt.getTopLevelForces().size());
         assertTrue(rebuilt.getForce(child).isTopLevel());

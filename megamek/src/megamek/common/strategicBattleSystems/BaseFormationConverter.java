@@ -148,7 +148,9 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
         report.addLine("Movement:",
               "Average of " + units.stream().map(u -> u.getMovement() + "").collect(joining(", ")),
               "= " + formationMove);
-        formation.setMovement(formationMove);
+        int printedMove = formationMovement(formation, units.stream().mapToInt(SBFUnit::getMovement));
+        formation.setMovement(printedMove);
+        formation.setCurrentMovement(formationMove);
         setMovementMode();
 
         int trspMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getTrspMovement).average().orElse(0));
@@ -195,7 +197,7 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
         addFormationSpasIf2Thirds(formation, AC3, PRB, AECM, ECM, ENG, LPRB, LECM, ORO, RCN, SRCH, SHLD, TAG, WAT);
         addFormationSpasIfAll(formation, SPC, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL, RBT, UMU);
         sumFormationSpas(SBF_OMNI, CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
-              VTS, AT, BOMB, DT, MT, PT, ST, SCR, PNT, IF, MHQ,
+              VTS, AT, ATxD, BOMB, DT, MT, PT, ST, STxD, SCR, PNT, IF, MHQ,
               ARTAIS, ARTAC, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12, ARTLT, ARTS, ARTT);
 
         var fuel = formation.getUnits().stream().filter(SBFUnit::isAerospace).mapToInt(SBFUnit::getFUEL).min();
@@ -314,7 +316,10 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
 
     /** IO:BF pp. 171, 258: recalculate MP from the surviving Units using their current movement. */
     public static int formationMovement(SBFFormation formation, List<SBFUnit> units) {
-        var movement = units.stream().mapToInt(SBFUnit::getCurrentMovement);
+        return formationMovement(formation, units.stream().mapToInt(SBFUnit::getCurrentMovement));
+    }
+
+    private static int formationMovement(SBFFormation formation, java.util.stream.IntStream movement) {
         return formation.isAerospace() ? movement.min().orElse(0) : (int) Math.round(movement.average().orElse(0));
     }
 

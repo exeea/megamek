@@ -50,8 +50,12 @@ public interface SBFRuleOptionsUser {
     SBFRuleOptions getOptions();
 
     /** Expanded Woods and Jungle terrain, IO:BF pp. 200–203. */
+    default boolean usesAdvancedTerrain() {
+        return getOptions().booleanOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN);
+    }
+
     default boolean usesExpandedWoods() {
-        return getOptions().booleanOption(SBFRuleOptions.MOVE_EXPANDED_WOODS);
+        return usesAdvancedTerrain() || getOptions().booleanOption(SBFRuleOptions.MOVE_EXPANDED_WOODS);
     }
 
     /** Detection and Reconnaissance, IO:BF p. 195. */

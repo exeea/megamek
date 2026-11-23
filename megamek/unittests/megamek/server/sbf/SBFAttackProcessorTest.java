@@ -33,10 +33,12 @@ import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFToHitData;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
+import megamek.server.Server;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -163,10 +165,29 @@ class SBFAttackProcessorTest {
     }
 
     @Test
-    void hiddenTargetRejectsWithReconEnabled() {
+    void sensorPingCannotBeTargetedByGuessingItsId() {
         game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
-        game.visibilityHelper().setVisibility(OWNER_ID, TARGET_ID, SBFVisibilityStatus.PARTIAL_SCAN);
+        game.visibilityHelper().setVisibility(OWNER_ID, TARGET_ID, SBFVisibilityStatus.SENSOR_PING);
         assertRejected(List.of(attack(0, target, ASRange.LONG)));
+    }
+
+    @Test
+    void chatOrderCanFireAtALocatedBlipWithoutMakingItsIdentityVisible() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        game.visibilityHelper().setVisibility(OWNER_ID, TARGET_ID, SBFVisibilityStatus.BLIP);
+        formation.setDeployed(true);
+        game.setTurns(List.of(new SBFFormationTurn(OWNER_ID)));
+        game.setTurnIndex(0, Player.PLAYER_NONE);
+        var command = new SBFCombatCommand(mock(Server.class), gameManager);
+        String[] order = {"sbfcombat", "fire", "17", "1", "20"};
+        command.run(ENEMY_ID, order);
+        assertTrue(game.getActionsVector().isEmpty());
+        command.run(OWNER_ID, order);
+        assertEquals(1, game.getActionsVector().size());
+        assertEquals(TARGET_ID, ((SBFStandardUnitAttack) game.getActionsVector().getFirst()).getTargetId());
+        assertFalse(formation.isDone());
+        assertFalse(game.isVisible(OWNER_ID, TARGET_ID));
+        assertTrue(processor.processAttacks(List.of(), formation));
     }
 
     @Test

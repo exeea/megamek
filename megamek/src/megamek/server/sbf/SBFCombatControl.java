@@ -70,7 +70,7 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
     }
 
     Maneuver rollManeuver(SBFFormation first, SBFFormation second) {
-        boolean inAir = first.isOnRadarMap() && second.isOnRadarMap();
+        boolean inAir = first.sharesAerospaceMap(second);
         int firstTN = first.getTactics() - (!inAir && (first.getMpSpentThisTurn() < first.getMovement()) ? 1 : 0);
         int secondTN = second.getTactics() - (!inAir && (second.getMpSpentThisTurn() < second.getMovement()) ? 1 : 0);
         while (true) {
@@ -83,8 +83,9 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
             String rolls = "Maneuver " + first.getId() + " rolled " + a + " against " + firstTN + ", "
                   + second.getId() + " rolled " + b + " against " + secondTN + ". ";
             if (!firstSucceeded && !secondSucceeded) {
-                tellPair(first, second, rolls + "Both failed; range is Long.");
-                return new Maneuver(first.getId(), second.getId(), -1, -1, ASRange.LONG);
+                ASRange range = SBFCombatOrders.limitTerrainRange(manager.getGame(), first, second, ASRange.LONG);
+                tellPair(first, second, rolls + "Both failed; range is " + range + ".");
+                return new Maneuver(first.getId(), second.getId(), -1, -1, range);
             }
             int comparison = Boolean.compare(firstSucceeded, secondSucceeded);
             if (comparison == 0) {
@@ -132,7 +133,7 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
     void remind(Player player) {
         SBFGame game = manager.getGame();
         for (SBFFormation own : game.getActiveFormations()) {
-            if ((own.getOwnerId() != player.getId()) || ((own.getPosition() == null) && !own.isOnRadarMap())) {
+            if ((own.getOwnerId() != player.getId()) || ((own.getPosition() == null) && own.combatZone() == null)) {
                 continue;
             }
             for (SBFFormation other : game.getActiveFormations()) {
@@ -142,7 +143,7 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
                 var maneuver = game.combatOrders().maneuver(own.getId(), other.getId());
                 if (maneuver.isPresent() && (maneuver.get().winner() == own.getId()) && (maneuver.get().range() == null)) {
                     manager.sendServerChat(player.getId(), "Choose the engagement range with /sbfcombat range "
-                          + own.getId() + " " + other.getId() + (own.isOnRadarMap() ? " short|medium|long|extreme."
+                          + own.getId() + " " + other.getId() + (own.combatZone() != null ? " short|medium|long|extreme."
                                 : " short|medium|long."));
                 }
                 if (SBFCombatOrders.controlsSight(game, own, other) && !game.combatOrders().hasSightDecision(own, other)) {
@@ -170,7 +171,7 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
         var spotter = game.getFormation(spotterId).orElse(null);
         var target = game.getFormation(targetId).orElse(null);
         if (!game.getPhase().isFiring() || (spotter == null) || (target == null) || (spotter.getOwnerId() != playerId)
-              || !spotter.isDeployed() || !target.isDeployed() || spotter.isEmbarked() || target.isEmbarked()
+              || spotter.unpackingCargo(game.getCurrentRound()) || !spotter.isDeployed() || !target.isDeployed() || spotter.isEmbarked() || target.isEmbarked()
               || target.isOnRadarMap() || spotter.hasSprintedThisTurn()
               || !game.getVisibility(game.getPlayer(playerId), targetId).isLocated() || !game.areHostile(target, game.getPlayer(playerId))
               || game.combatOrders().spottedTarget(spotterId).filter(id -> id != targetId).isPresent()) {
@@ -204,10 +205,11 @@ record SBFCombatControl(SBFGameManager manager, IntSupplier roll2d6) {
                 case "short" -> ASRange.SHORT;
                 case "medium" -> ASRange.MEDIUM;
                 case "long" -> ASRange.LONG;
-                case "extreme" -> own.isOnRadarMap() ? ASRange.EXTREME : null;
+                case "extreme" -> own.combatZone() != null ? ASRange.EXTREME : null;
                 default -> null;
             };
-            if ((result == null) || (result.winner() != firstId) || (result.range() != null) || (range == null)) {
+            if ((result == null) || (result.winner() != firstId) || (result.range() != null) || (range == null)
+                  || range != SBFCombatOrders.limitTerrainRange(game, own, other, range)) {
                 return false;
             }
             game.combatOrders().setManeuver(new Maneuver(result.first(), result.second(), firstId,

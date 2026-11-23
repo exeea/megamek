@@ -43,6 +43,7 @@ import megamek.common.interfaces.ForceAssignable;
 import megamek.common.game.InGameObject;
 import megamek.common.Report;
 import megamek.common.actions.EntityAction;
+import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.force.Forces;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.InvalidPacketDataException;
@@ -50,6 +51,7 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.strategicBattleSystems.SBFCombatOrders;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
@@ -99,6 +101,15 @@ public class SBFClient extends AbstractClient {
                     if (packet.getObject(0) instanceof SBFRuleOptions options) {
                         game.receiveOptions(options);
                     }
+                    break;
+                case SBF_COMBAT_ORDERS:
+                    if (packet.getObject(0) instanceof SBFCombatOrders orders) {
+                        game.receiveCombatOrders(orders);
+                    }
+                    break;
+                case UPDATE_GROUND_OBJECTS:
+                    game.setGroundObjects(packet.getCoordsWithGroundObjectListMap(0));
+                    game.fireGameEvent(new GameBoardChangeEvent(this));
                     break;
                 case SENDING_ENTITIES:
                     receiveEntities(packet);

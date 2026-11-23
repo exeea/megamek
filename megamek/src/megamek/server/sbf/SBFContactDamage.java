@@ -65,7 +65,7 @@ record SBFContactDamage(SBFGameManager manager, IntSupplier dice) {
         if (formation.evasiveModifier() > 0) {
             return 0;
         }
-        return formation.getUnits().stream().filter(unit -> unit.getCurrentArmor() > 0)
+        return formation.getUnits().stream().filter(unit -> unit.getCurrentArmor() > 0 && !unit.isConstructing())
               .mapToInt(unit -> unit.getCurrentDamage().getDamage(range).damage).sum();
     }
 
@@ -96,7 +96,7 @@ record SBFContactDamage(SBFGameManager manager, IntSupplier dice) {
                     int damage = SBFStandardUnitAttack.standardWeaponDamage(game, other, unit, range);
                     if (unit.canFire() && unit.getCurrentArmor() > 0 && damage > 0) {
                         var tn = new SBFToHitData(other.getSkill() + unit.getTargetingCrits(), "ambush");
-                        SBFToHitData.processTargetTerrain(tn, game.getHex(contact));
+                        SBFToHitData.processTargetTerrain(tn, game, game.getHex(contact), mover);
                         SBFToHitData.processDefensiveMovement(tn, mover);
                         int roll = dice.getAsInt();
                         String report = other.generalName() + " ambushed at " + range + " and rolled " + roll + " against " + tn.getValue() + ".";
