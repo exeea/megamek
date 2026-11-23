@@ -51,6 +51,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import megamek.client.ui.clientGUI.calculationReport.CalculationReport;
 import megamek.client.ui.clientGUI.calculationReport.DummyCalculationReport;
+import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.alphaStrike.ASDamageVector;
 import megamek.common.alphaStrike.ASSpecialAbilityCollection;
@@ -62,6 +63,7 @@ import megamek.common.force.Force;
 import megamek.common.interfaces.ForceAssignable;
 import megamek.common.jacksonAdapters.SBFFormationDeserializer;
 import megamek.common.jacksonAdapters.SBFFormationSerializer;
+import megamek.common.units.Terrains;
 import megamek.common.units.Deployable;
 import megamek.common.units.Entity;
 
@@ -98,16 +100,259 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private int ownerId = Player.PLAYER_NONE;
 
     /** Hidden deployment (not unseen) */
-    private final boolean isHidden = false;
+    private boolean isHidden;
+    // The gamemaster's front arc for Sensor Ghost reports (IO:BF p. 196). Ground movement has no facing.
+    private int reconFacing;
+
+    public int getReconFacing() {
+        return reconFacing;
+    }
+
+    public void setReconFacing(int direction) {
+        if (direction < 0 || direction >= 6) {
+            throw new IllegalArgumentException("Recon facing must be a hex direction from 0 to 5.");
+        }
+        reconFacing = direction;
+    }
+
+    private Integer lastAmbushRound;
+
+    public void markAmbush(int round) {
+        lastAmbushRound = round;
+    }
+
+    public boolean ambushedIn(int round) {
+        return lastAmbushRound != null && lastAmbushRound == round;
+    }
+    // ID of the Formation from which these Units split. Detachments share their parent's movement turn.
+    private Integer originalFormation;
+    private boolean movesWithParent;
+    private Integer reformPenaltyRound;
+    private Integer reunionRound;
+    private BoardLocation reunionLocation;
+
+    public void planReunion(BoardLocation location, int round) {
+        reunionLocation = location;
+        reunionRound = round;
+    }
+
+    public BoardLocation reunionIn(int round) {
+        return reunionRound != null && reunionRound == round ? reunionLocation : null;
+    }
+    private Integer adHocInactiveRound;
+
+    public int originalFormationId() {
+        return originalFormation == null ? getId() : originalFormation;
+    }
+
+    public int movementGroup() {
+        return movesWithParent ? originalFormationId() : getId();
+    }
+
+    public void replaceOriginalCounter(int id) {
+        originalFormation = id;
+    }
+
+    public void assignOrigin(int formation, boolean detached) {
+        originalFormation = formation;
+        movesWithParent = detached;
+    }
+
+    public void markReformed(int nextRound) {
+        originalFormation = null;
+        movesWithParent = false;
+        reformPenaltyRound = nextRound;
+        clearReunion();
+    }
+
+    public void clearReunion() {
+        reunionLocation = null;
+        reunionRound = null;
+    }
+
+    public void markAdHoc(int nextRound) {
+        clearReunion();
+        originalFormation = null;
+        movesWithParent = false;
+        adHocInactiveRound = nextRound;
+    }
+
+    public boolean inactiveAfterAssembly(int round) {
+        return adHocInactiveRound != null && adHocInactiveRound == round;
+    }
+
+    public int reformMovementPenalty(int round) {
+        return reformPenaltyRound != null && reformPenaltyRound == round ? 1 : 0;
+    }
+
+    /** A damaged Unit may detach and withdraw while its healthy parent continues (IO:BF p. 172). */
+    public void updateForcedWithdrawalAfterAdjustment() {
+        forcedWithdrawal = isCrippled();
+    }
+
     private boolean isDeployed = false;
     private int deployRound = 0;
     private BoardLocation position;
     private boolean isDone = false;
     private int jumpUsedThisTurn = 0;
     private boolean sprintedThisTurn = false;
+    private boolean searchlightsOn;
+
+    public boolean hasSearchlight() {
+        return !isAerospace() && (isType(SBFElementType.BM) || hasSUA(BattleForceSUA.SRCH));
+    }
+
+    public boolean searchlightsOn() {
+        return searchlightsOn && hasSearchlight();
+    }
+
+    public void setSearchlightsOn(boolean on) {
+        searchlightsOn = on;
+    }
+
+    private Integer empRound;
+    private Integer infernoMoveEnd;
+
+    public void hitByEmp(int round) {
+        empRound = round;
+    }
+
+    public boolean disruptedByEmp(int round) {
+        return empRound != null && empRound == round;
+    }
+
+    public void hitByInferno(int round) {
+        infernoMoveEnd = round + 1;
+    }
+
+    public boolean slowedByInferno(int round) {
+        return infernoMoveEnd != null && round <= infernoMoveEnd;
+    }
+
     private Integer transportId;
+    private double packedCargoTons;
+    private Integer cargoTransferRound;
+    private Integer cargoReadyRound;
+
+    public double packedCargoTons() {
+        return packedCargoTons;
+    }
+
+    public boolean handledCargo(int round) {
+        return cargoTransferRound != null && cargoTransferRound == round;
+    }
+
+    public void recordCargoTransfer(int round) {
+        cargoTransferRound = round;
+    }
+
+    public boolean unpackingCargo(int round) {
+        return cargoReadyRound != null && round < cargoReadyRound;
+    }
+
+    public void packAsCargo(int carrier, double cargoTons) {
+        embark(carrier, false);
+        packedCargoTons = cargoTons;
+    }
+
     private boolean externallyMounted;
+    private boolean flightLanded;
+    private Integer highDropRound;
+    private BoardLocation plannedLowDrop;
+
+    public BoardLocation plannedLowDrop() {
+        return plannedLowDrop;
+    }
+
+    public void planLowDrop(BoardLocation site) {
+        plannedLowDrop = site;
+    }
+
+    private BoardLocation dropDestination;
+    private boolean landingFromHighDrop;
+    private int airDropMovementCost;
+
+    public boolean isAirVehicle() {
+        return (movementMode == SBFMovementMode.VTOL) || (movementMode == SBFMovementMode.WIGE)
+              || (movementMode == SBFMovementMode.AIRSHIP);
+    }
+
+    public boolean isAirVehicleLanded() {
+        return flightLanded;
+    }
+
+    public void setAirVehicleLanded(boolean landed) {
+        flightLanded = landed;
+    }
+
+    public void beginHighDrop(int round) {
+        transportId = null;
+        externallyMounted = false;
+        highDropRound = round;
+        dropDestination = null;
+        setRadarPosition(SBFRadarZone.CENTRAL, List.of());
+        setDone(true);
+    }
+
+    public boolean inHighDrop() {
+        return highDropRound != null;
+    }
+
+    public boolean canLandHighDrop(int round) {
+        return inHighDrop() && (round > highDropRound) && (dropDestination == null);
+    }
+
+    public void aimDrop(BoardLocation destination, boolean high) {
+        transportId = null;
+        externallyMounted = false;
+        position = null;
+        dropDestination = destination;
+        landingFromHighDrop = high;
+        setDone(true);
+    }
+
+    public BoardLocation getDropDestination() {
+        return dropDestination;
+    }
+
+    public boolean landingFromHighDrop() {
+        return landingFromHighDrop;
+    }
+
+    public void finishDrop(BoardLocation destination, int round) {
+        setRadarPosition(null, List.of());
+        highDropRound = null;
+        dropDestination = null;
+        airDropMovementCost = landingFromHighDrop ? 3 : 2;
+        dismount(destination, round);
+        setDone(false);
+    }
+
+    public int airDropMovementCost() {
+        return airDropMovementCost;
+    }
+
     private Integer dismountRound;
+    private boolean dismountedFromBay;
+    private Integer bayUseRound;
+    private int bayDoorsUsed;
+
+    public int bayDoorsUsed(int round) {
+        return (bayUseRound != null) && (bayUseRound == round) ? bayDoorsUsed : 0;
+    }
+
+    public void useBayDoors(int round, int doors) {
+        bayDoorsUsed = bayDoorsUsed(round) + doors;
+        bayUseRound = round;
+    }
+
+    public int dismountCost(int round) {
+        if (dismountedIn(round) && (airDropMovementCost > 0)) {
+            return airDropMovementCost;
+        }
+        return dismountedIn(round) ? (dismountedFromBay || !isAnyTypeOf(SBFElementType.BA, SBFElementType.CI) ? 4 : 1) : 0;
+    }
+
     private boolean forcedWithdrawal;
     private boolean withdrawn;
     private int reconMpSpent;
@@ -338,6 +583,15 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return isType(type) || Arrays.stream(types).anyMatch(this::isType);
     }
 
+    /** IO:BF p. 221. Only ratings for abilities granted to the Formation can contribute. */
+    public int woodlandClearingRating() {
+        boolean saw = hasSUA(BattleForceSUA.SAW);
+        boolean engineer = hasSUA(BattleForceSUA.ENG);
+        return getUnits().stream().filter(unit -> unit.getCurrentArmor() > 0)
+              .mapToInt(unit -> Math.max(saw ? unit.clearingRating(BattleForceSUA.SAW) : 0,
+                    engineer ? unit.clearingRating(BattleForceSUA.ENG) : 0)).sum();
+    }
+
     @Override
     public boolean hasSUA(BattleForceSUA sua) {
         return specialAbilities.hasSUA(sua);
@@ -520,8 +774,25 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return position;
     }
 
+    private Integer passageEntrance;
+
+    public int passageEntrance() {
+        return passageEntrance == null ? -1 : passageEntrance;
+    }
+
+    public void setPassageEntrance(int side) {
+        passageEntrance = side < 0 ? null : side;
+    }
+
     public void setPosition(BoardLocation boardLocation) {
+        if (!java.util.Objects.equals(position, boardLocation)) {
+            passageEntrance = null;
+        }
         position = boardLocation;
+    }
+
+    public void setHidden(boolean hidden) {
+        isHidden = hidden;
     }
 
     public boolean isHidden() {
@@ -535,6 +806,75 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private boolean wasOverrunThisTurn;
     private boolean evadedThisTurn;
     private boolean failedEvadeThisTurn;
+    private boolean movingEvasively;
+    private boolean boggedDown;
+    private Integer boggedRound;
+
+    public boolean isBoggedDown() {
+        return boggedDown;
+    }
+
+    public boolean boggedIn(int round) {
+        return boggedDown && boggedRound != null && boggedRound == round;
+    }
+
+    public void resolveBogCheck(boolean stuck, int round) {
+        boggedRound = stuck ? round : null;
+        boggedDown = stuck;
+    }
+
+    private BoardLocation hullDownPosition;
+    private BoardLocation constructionSite;
+    private SBFUnit constructionUnit;
+    private int constructionLevel;
+
+    public SBFUnit constructionUnit() {
+        return constructionUnit;
+    }
+
+    public BoardLocation constructionSite() {
+        return constructionSite;
+    }
+
+    public int constructionLevel() {
+        return constructionLevel;
+    }
+
+    /** IO:BF p. 220. Engineering Units work while other members of the Formation may still fire. */
+    public void beginFieldConstruction(SBFUnit builder, int level) {
+        constructionSite = position;
+        constructionLevel = level;
+        constructionUnit = builder;
+        getUnits().stream().filter(u -> u.hasAnySUAOf(BattleForceSUA.ENG, BattleForceSUA.TRN))
+              .forEach(u -> u.setConstructing(true));
+        builder.setConstructing(true);
+    }
+
+    public void finishFieldConstruction() {
+        getUnits().forEach(u -> u.setConstructing(false));
+        constructionSite = null;
+        constructionLevel = 0;
+        constructionUnit = null;
+    }
+
+
+    /** Optional evasive movement, distinct from evading an engagement (IO:BF pp. 198–199). */
+    public int evasiveModifier() {
+        return !movingEvasively ? 0 : skill <= 2 ? 4 : skill <= 4 ? 3 : skill == 5 ? 2 : 1;
+    }
+
+    public void moveEvasively() {
+        movingEvasively = true;
+    }
+
+    public boolean isHullDown() {
+        return hullDownPosition != null && hullDownPosition.equals(position);
+    }
+
+    public void setHullDown(boolean hullDown) {
+        hullDownPosition = hullDown ? position : null;
+    }
+
 
     public int getMpSpentThisTurn() {
         return mpSpentThisTurn;
@@ -546,10 +886,12 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public void resetEngagementMovement() {
         jumpUsedThisTurn = 0;
+        airDropMovementCost = 0;
+        movingEvasively = false;
         airAttackOpponent = null;
         airPasses = new ArrayList<>();
         reservedAirReturns = new ArrayList<>();
-        mpSpentThisTurn = 0;
+        mpSpentThisTurn = isDeployed && !isEmbarked() && (movement > 0) && usesWiGE() ? 1 : 0;
         overranThisTurn = false;
         wasOverrunThisTurn = false;
         evadedThisTurn = false;
@@ -582,7 +924,8 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public boolean canAttackAfterEngagement() {
-        return !overranThisTurn && (!evadedThisTurn || failedEvadeThisTurn);
+        return !movingEvasively && !inHighDrop() && ((airDropMovementCost != 3) || (mpSpentThisTurn == 0))
+              && !overranThisTurn && (!evadedThisTurn || failedEvadeThisTurn);
     }
 
     public int getEngagementAttackModifier() {
@@ -638,7 +981,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private List<Integer> reservedAirReturns = new ArrayList<>();
 
     public boolean mayAttackAirOpponent(int id) {
-        return !reservedAirReturn(id) && ((airAttackOpponent == null) || (airAttackOpponent == id));
+        return !inHighDrop() && !reservedAirReturn(id) && ((airAttackOpponent == null) || (airAttackOpponent == id));
     }
 
     public void commitAirAttack(int id) {
@@ -668,6 +1011,188 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return (reservedAirReturns != null) && reservedAirReturns.contains(attacker);
     }
 
+    private SBFCapitalSector capitalSector;
+    private SBFRadarZone engagementZone;
+    private Integer engagementEntryRound;
+    private String phaseCombatArea;
+    private Integer spaceFuel;
+    private Integer spaceManeuverRound;
+    private Integer spaceFuelResolvedRound;
+    private Integer spaceRefuelRound;
+    private Integer spaceRecoveryRound;
+    private Integer gravityFallRound;
+    private SBFRadarZone gravityBearing;
+    private BoardLocation crashAim;
+
+    public SBFCapitalSector capitalSector() {
+        return capitalSector;
+    }
+
+    public SBFRadarZone engagementZone() {
+        return engagementZone;
+    }
+
+    public void enterEngagementMap(SBFRadarZone zone, int round) {
+        engagementZone = zone;
+        engagementEntryRound = round;
+    }
+
+    /** Snapshot at turn-order creation so dismantling a sector map cannot invalidate an unspent turn (p. 186). */
+    public String assignPhaseCombatArea(int round) {
+        return assignPhaseCombatArea(round, this);
+    }
+
+    public String assignPhaseCombatArea(int round, SBFFormation position) {
+        phaseCombatArea = position.engagementZone != null && !position.waitingForSpaceCombat(round) ? "0-" + position.capitalSector
+              : position.capitalSector != null ? "1-capital" : "2-atmosphere-ground";
+        return phaseCombatArea;
+    }
+
+    public boolean assignedToCombatArea(String area) {
+        return area == null || area.equals(phaseCombatArea);
+    }
+
+    public boolean waitingForSpaceCombat(int round) {
+        return engagementZone != null && Integer.valueOf(round).equals(engagementEntryRound);
+    }
+
+    public void setEngagementZone(SBFRadarZone zone) {
+        engagementZone = zone;
+    }
+
+    public SBFRadarZone combatZone() {
+        return engagementZone == null ? radarZone : engagementZone;
+    }
+
+    public boolean sharesAerospaceMap(SBFFormation other) {
+        if (engagementZone != null || other.engagementZone != null) {
+            return engagementZone != null && other.engagementZone != null && capitalSector.equals(other.capitalSector);
+        }
+        return isOnRadarMap() && other.isOnRadarMap();
+    }
+
+    public void setCapitalSector(SBFCapitalSector sector) {
+        setRadarPosition(null, List.of());
+        capitalSector = sector;
+    }
+
+    /** Central on a ground-centered capital map and the atmospheric Outer Ring occupy the same space (p. 184). */
+    public void enterCapitalAtmosphere(SBFRadarZone outer) {
+        if (!outer.isOuter()) {
+            throw new IllegalArgumentException("Capital Central meets the atmospheric Outer Ring.");
+        }
+        setRadarPosition(outer, List.of());
+        capitalSector = new SBFCapitalSector(SBFCapitalSector.Ring.CENTRAL, 1);
+        gravityFallRound = null;
+    }
+
+    public int spaceFuel() {
+        return spaceFuel == null ? fighterFuelCapacity() : spaceFuel;
+    }
+
+    public int fighterFuelCapacity() {
+        return getUnits().stream().filter(this::hasFuelLimitedFighters).mapToInt(SBFUnit::getFUEL).min().orElse(0);
+    }
+
+    /** Only fighter Flights track fuel. An abstract AS roster can explicitly provide FUEL# instead of Elements. */
+    public boolean usesFighterFuel() {
+        return getUnits().stream().anyMatch(this::hasFuelLimitedFighters);
+    }
+
+    private boolean hasFuelLimitedFighters(SBFUnit unit) {
+        return unit.getElements().isEmpty() ? unit.isType(SBFElementType.AS) && unit.getFUEL() > 0
+              : unit.getElements().stream().anyMatch(e -> e.getASUnitType() != null && e.isAerospaceFighter());
+    }
+
+    public boolean canDescendIntoAtmosphere() {
+        return getUnits().stream().noneMatch(unit -> unit.getMovementMode() == SBFMovementMode.WARSHIP
+              || unit.getMovementMode() == SBFMovementMode.STATION_KEEPING);
+    }
+
+    public int fighterSlots() {
+        return getUnits().stream().mapToInt(u -> u.getElements().isEmpty() ? 1 : u.getElements().size()).sum();
+    }
+
+    public void recoverForRefueling(SBFFormation carrier, int round) {
+        setCapitalSector(null);
+        embark(carrier.getId(), false);
+        spaceRefuelRound = round;
+        carrier.spaceRecoveryRound = round;
+    }
+
+    public boolean recoveringFighters(int round) {
+        return Integer.valueOf(round).equals(spaceRecoveryRound);
+    }
+
+    public boolean readyToLaunch(int round) {
+        return isEmbarked() && spaceRefuelRound != null && round >= spaceRefuelRound + 3;
+    }
+
+    public void launchRefueled(SBFFormation carrier, int round) {
+        dismount(null, round);
+        spaceFuel = null;
+        spaceRefuelRound = null;
+        setCapitalSector(carrier.capitalSector());
+        if (carrier.engagementZone() != null) {
+            enterEngagementMap(carrier.engagementZone(), round);
+        } else if (carrier.isOnRadarMap()) {
+            enterCapitalAtmosphere(carrier.getRadarZone());
+        }
+        setDone(true); // Launching movement must end in the carrier's zone (IO:BF p. 183).
+    }
+
+    public void setGravityBearing(SBFRadarZone outer) {
+        if (!outer.isOuter()) {
+            throw new IllegalArgumentException("An Outer Ring zone is required.");
+        }
+        gravityBearing = outer;
+    }
+
+    public void fallIntoAtmosphere(int round) {
+        SBFRadarZone destination = gravityBearing != null ? gravityBearing
+              : isOnRadarMap() ? getRadarZone() : SBFRadarZone.OUTER_12;
+        setRadarPosition(destination, List.of());
+        gravityFallRound = round;
+    }
+
+    public boolean fallingFromOrbit() {
+        return gravityFallRound != null && isOnRadarMap() && getRadarZone().isOuter() && capitalSector == null;
+    }
+
+    public BoardLocation crashAim() {
+        return crashAim;
+    }
+
+    public void setCrashAim(BoardLocation aim) {
+        crashAim = aim;
+    }
+
+    public boolean fellThisRound(int round) {
+        return Integer.valueOf(round).equals(gravityFallRound);
+    }
+
+    public boolean isDrifting() {
+        return capitalSector != null && usesFighterFuel() && spaceFuel() <= 0;
+    }
+
+    public int capitalThrust() {
+        return isDrifting() || getMovementMode() == SBFMovementMode.STATION_KEEPING ? 0
+              : Math.max(0, getMovement() - highExplosiveBombs - clusterBombs);
+    }
+
+    public void markSpaceManeuver(int round) {
+        spaceManeuverRound = round;
+    }
+
+    /** Charge the destination's cost once in End Phase, including a maneuver returning to the same sector. */
+    public void expendSpaceFuel(int round) {
+        if (capitalSector != null && Integer.valueOf(round).equals(spaceManeuverRound)
+              && !Integer.valueOf(round).equals(spaceFuelResolvedRound) && usesFighterFuel()) {
+            spaceFuel = Math.max(0, spaceFuel() - capitalSector.ring().fuelCost);
+            spaceFuelResolvedRound = round;
+        }
+    }
+
     private SBFRadarZone radarZone;
     private SBFRadarZone radarHome;
 
@@ -687,6 +1212,47 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return isDeployed() && !isEmbarked() && !isOnRadarMap() && getPosition() != null;
     }
 
+    /** A scenario battery may fire indirectly from outside the board (IO:BF pp. 204–205). */
+    private BoardLocation offMapArtilleryPosition;
+
+    public BoardLocation getArtilleryPosition() {
+        return isOffMapArtillery() ? offMapArtilleryPosition : getPosition();
+    }
+
+    public boolean isOffMapArtillery() {
+        return offMapArtilleryPosition != null;
+    }
+
+    public void deployOffMapArtillery(BoardLocation position) {
+        offMapArtilleryPosition = position;
+        setPosition(null);
+        setDeployed(true);
+    }
+
+    public boolean concealsRoster() {
+        return isHidden() || isOffMapArtillery();
+    }
+
+    private boolean submarineSurfaced;
+
+    public boolean isSubmarineSurfaced() {
+        return submarineSurfaced;
+    }
+
+    public void setSubmarineSurfaced(boolean surfaced) {
+        submarineSurfaced = surfaced;
+    }
+
+    public boolean usesWiGE() {
+        return SBFTerrainMovement.of(this).anyMatch(mover -> mover.mode() == SBFMovementMode.WIGE);
+    }
+
+    public boolean canChangeSubmarineDepth(Hex hex, boolean surface) {
+        return (hex != null) && (hex.terrainLevel(Terrains.WATER) > 0)
+              && SBFTerrainMovement.of(this).anyMatch(mover -> mover.mode() == SBFMovementMode.SUBMARINE)
+              && (surface || SBFTerrainMovement.isFullWater(hex));
+    }
+
     public boolean isOnRadarMap() {
         return radarZone != null;
     }
@@ -700,6 +1266,8 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public void setRadarPosition(SBFRadarZone zone, List<BoardLocation> flightPath) {
+        capitalSector = null;
+        engagementZone = null;
         radarZone = zone;
         groundFlightPath = List.copyOf(flightPath);
         setPosition(groundFlightPath.isEmpty() ? null : groundFlightPath.getLast());
@@ -720,14 +1288,20 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     /** Loaded bombs reduce atmospheric Thrust, to a minimum of one for a mobile craft (IO:BF p. 176). */
     public int getCurrentThrust() {
+        if (fallingFromOrbit() && ((spaceFuel != null && spaceFuel == 0)
+              || getMovementMode() == SBFMovementMode.STATION_KEEPING)) {
+            return 0;
+        }
         return getMovement() <= 0 ? 0 : Math.max(1, getMovement() - highExplosiveBombs - clusterBombs);
     }
 
     public boolean isEligibleForPhase(GamePhase phase) {
         // A sprinting Formation may not make attacks (IO:BF p.199)
         return !isDone && !isEmbarked() && !(phase.isFiring() && (sprintedThisTurn || !canAttackAfterEngagement())) && switch (phase) {
-            case MOVEMENT -> isDeployed && (getEngagedOpponents().isEmpty()
-                  || (isOnRadarMap() && getEngagedOpponents().stream().allMatch(this::passesAirOpponent)));
+            case FIRING -> isDeployed && !isHidden && !inHighDrop() && (dropDestination == null)
+                  && ((airDropMovementCost != 3) || (mpSpentThisTurn == 0));
+            case MOVEMENT -> isDeployed && !isHidden && !isOffMapArtillery() && (inHighDrop() || getEngagedOpponents().isEmpty()
+                  || (combatZone() != null && getEngagedOpponents().stream().allMatch(this::passesAirOpponent)));
             case PREMOVEMENT, PRE_FIRING -> isHidden;
             default -> isDeployed;
         };
@@ -764,7 +1338,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
             return false;
         }
         int half = (units.size() + 1) / 2;
-        return ((getStartingMovement() > 2) && (movement <= 1))
+        return isDrifting() || ((getStartingMovement() > 2) && (movement <= 1))
               || (units.stream().filter(u -> u.getDamage().hasDamage() && !u.getCurrentDamage().hasDamage())
                     .count() >= half)
               || (units.stream().filter(u -> (u.getArmor() > 0) && (u.getCurrentArmor() <= u.getArmor() / 5))
@@ -777,6 +1351,10 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return transportId != null;
     }
 
+    public Integer carrierId() {
+        return transportId;
+    }
+
     public boolean isCarriedBy(int carrierId) {
         return (transportId != null) && (transportId == carrierId);
     }
@@ -786,6 +1364,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public void embark(int carrierId, boolean external) {
+        setHullDown(false);
         transportId = carrierId;
         externallyMounted = external;
         position = null;
@@ -794,8 +1373,18 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     public void dismount(BoardLocation location, int round) {
         transportId = null;
         externallyMounted = false;
+        if (packedCargoTons > 0) {
+            cargoReadyRound = round + 3;
+            packedCargoTons = 0;
+        }
+        dismountedFromBay = false;
         dismountRound = round;
         position = location;
+    }
+
+    public void dismountFromBay(BoardLocation location, int round) {
+        dismount(location, round);
+        dismountedFromBay = true;
     }
 
     public boolean dismountedIn(int round) {
@@ -834,6 +1423,27 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return isShaken() || isBroken() || isRouted();
     }
 
+    private boolean underArtilleryFire;
+    private Integer lastCruiseMissileAttack;
+
+    /** Attack, including a miss, triggers infantry morale. Cruise missiles also affect the following turn (p. 173). */
+    public void recordArtilleryAttack(SBFFormation attacker, int round, boolean cruise) {
+        recordAttack(attacker);
+        underArtilleryFire = true;
+        if (cruise) {
+            lastCruiseMissileAttack = round;
+        }
+    }
+
+    public boolean mustCheckArtilleryMorale(int round) {
+        return (underArtilleryFire && isAnyTypeOf(SBFElementType.BA, SBFElementType.CI))
+              || (lastCruiseMissileAttack != null && lastCruiseMissileAttack == round);
+    }
+
+    public boolean recentCruiseMissileAttack(int round) {
+        return (lastCruiseMissileAttack != null) && (round >= lastCruiseMissileAttack) && (round - lastCruiseMissileAttack < 2);
+    }
+
     public void recordAttack(SBFFormation attacker) {
         attackedThisTurn = true;
         attackedByMekThisTurn |= attacker.isType(SBFElementType.BM);
@@ -853,6 +1463,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public void clearMoraleEvents() {
+        underArtilleryFire = false;
         attackedThisTurn = false;
         attackedByMekThisTurn = false;
         hostileEnteredHex = false;

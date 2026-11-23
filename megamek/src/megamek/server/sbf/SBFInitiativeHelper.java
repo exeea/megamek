@@ -107,10 +107,24 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
         if (phase.isMovement()) {
             game().visibilityHelper().beginMovement();
         }
+        if ((phase.isMovement() || phase.isFiring()) && game().getOptions().booleanOption(SBFRuleOptions.CAPITAL_AEROSPACE)
+              && game().getActiveFormations().stream().anyMatch(f -> f.capitalSector() != null)) {
+            var areas = game().getActiveFormations().stream().map(f -> f.assignPhaseCombatArea(game().getCurrentRound(),
+                        f.carrierId() == null ? f : game().getFormation(f.carrierId()).orElse(f)))
+                  .distinct().sorted().toList();
+            return areas.stream().flatMap(area -> formationTurns(phase, winnerFirst, reconMovement, area).stream()).toList();
+        }
+        return formationTurns(phase, winnerFirst, reconMovement, null);
+    }
+
+    private List<SBFTurn> formationTurns(GamePhase phase, boolean winnerFirst, boolean reconMovement, String area) {
+        java.util.Set<Integer> movementGroups = new java.util.HashSet<>();
         Map<Integer, List<SBFFormationTurn>> byOwner = game().getActiveFormations().stream()
+              .filter(f -> f.assignedToCombatArea(area))
               .filter(f -> !reconMovement || !game().visibilityHelper().isUncountedMover(f.getId()))
               .filter(f -> SBFFormationTurn.isEligible(f, phase, game().getCurrentRound()))
-              .map(f -> new SBFFormationTurn(f.getOwnerId()))
+              .filter(f -> !phase.isMovement() || movementGroups.add(f.movementGroup()))
+              .map(f -> new SBFFormationTurn(f.getOwnerId(), area))
               .collect(Collectors.groupingBy(SBFFormationTurn::playerId));
         List<ArrayDeque<SBFTurn>> sides = new ArrayList<>();
         List<SBFTurn> remainingMovers = new ArrayList<>();
@@ -122,7 +136,7 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                       side.addAll(byOwner.getOrDefault(player.getId(), List.of()));
                       if (reconMovement) {
                           // One opportunity per owner, independent of how many private counters exist.
-                          remainingMovers.add(new SBFFormationTurn(player.getId()));
+                          remainingMovers.add(new SBFFormationTurn(player.getId(), area));
                       }
                   });
             if (!side.isEmpty()) {

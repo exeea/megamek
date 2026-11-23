@@ -76,6 +76,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
 
     private final SBFGame game;
     private Set<Integer> uncountedMovers;
+    private Set<Integer> countedMovementGroups;
 
     private Map<Integer, BoardLocation> exposedUrbanPositions;
 
@@ -134,16 +135,25 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     /** Freeze the p. 164 movement ratio before any Formation can gain or lose a contact in transit. */
     public void beginMovement() {
         uncountedMovers = null;
+        countedMovementGroups = null;
         if (usesDoubleBlind()) {
+            countedMovementGroups = new HashSet<>();
             uncountedMovers = new HashSet<>();
             for (SBFFormation formation : game.getActiveFormations()) {
                 if (formation.occupiesGroundHex() && game.getPlayersList().stream().filter(p -> !p.isObserver())
                       .filter(p -> game.areHostile(formation, p))
                       .noneMatch(p -> getVisibility(p.getId(), formation.getId()).isLocated())) {
                     uncountedMovers.add(formation.getId());
+                } else if (SBFFormationTurn.isEligible(formation, megamek.common.enums.GamePhase.MOVEMENT, game.getCurrentRound())) {
+                    countedMovementGroups.add(formation.movementGroup());
                 }
             }
         }
+    }
+
+    public boolean isUncountedMovementGroup(SBFFormation formation) {
+        return countedMovementGroups == null ? isUncountedMover(formation.getId())
+              : !countedMovementGroups.contains(formation.movementGroup());
     }
 
     public boolean isUncountedMover(int formation) {

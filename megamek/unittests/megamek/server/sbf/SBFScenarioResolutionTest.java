@@ -38,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayDeque;
@@ -64,6 +66,8 @@ import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.common.strategicBattleSystems.SBFRadarZone;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
+import megamek.server.GameManagerSaveHelper;
+import megamek.server.Server;
 import megamek.server.trigger.TriggerSituation;
 import megamek.server.victory.VictoryResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,6 +98,126 @@ class SBFScenarioResolutionTest {
         marker.setName("Relay");
         marker.setVictoryPointValue(5);
         game.placeGroundObject(objectiveHex.coords(), marker);
+    }
+
+    @Test
+    void aStationaryDetachedUnitCapturesWhenItsParentRejoinsIt() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(true);
+        game.setPhase(GamePhase.END);
+        blue.addUnit(unit(10));
+        assertTrue(SBFFormationCommand.detach(game, blue.getOwnerId(), blue, List.of(2), false));
+        var child = game.originalFamily(blue).stream().filter(f -> f != blue).findFirst().orElseThrow();
+        blue.setPosition(red.getPosition());
+        observe(1);
+        game.setPhase(GamePhase.MOVEMENT);
+        game.setCurrentRound(2);
+        assertTrue(SBFFormationCommand.planReunion(game, blue.getOwnerId(), blue, objectiveHex));
+        blue.setPosition(objectiveHex);
+        game.setPhase(GamePhase.END);
+        SBFFormationCommand.finishReunions(game);
+        assertTrue(game.getFormation(child.getId()).isEmpty());
+        observe(2);
+        assertTrue(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+    }
+
+    @Test
+    void anAdHocTransferWithinTheObjectiveHexPreservesTheClaim() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(true);
+        game.setPhase(GamePhase.END);
+        var receiver = formation(13, blue.getOwnerId(), BoardLocation.of(new Coords(2, 1), 0));
+        observe(1);
+        receiver.setPosition(objectiveHex);
+        assertTrue(SBFFormationCommand.assemble(game, blue.getOwnerId(), receiver, List.of("11:1")));
+        observe(2);
+        assertTrue(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+    }
+
+    @Test
+    void anAdHocTransferAcrossAHexsideBreaksTheTransferredUnitsClaim() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(true);
+        game.setPhase(GamePhase.END);
+        var receiver = formation(13, blue.getOwnerId(), BoardLocation.of(new Coords(2, 1), 0));
+        observe(1);
+        assertTrue(SBFFormationCommand.assemble(game, blue.getOwnerId(), receiver, List.of("11:1")));
+        receiver.setPosition(objectiveHex);
+        observe(2);
+        assertFalse(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+        observe(3);
+        assertTrue(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+    }
+
+    @Test
+    void deferredEngagementPublishesTheMergedRosterAfterBothSidesFinishEndOrders() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(true);
+        game.setPhase(GamePhase.END);
+        blue.addUnit(unit(10));
+        assertTrue(SBFFormationCommand.detach(game, blue.getOwnerId(), blue, List.of(2), false));
+        var child = game.originalFamily(blue).stream().filter(f -> f != blue).findFirst().orElseThrow();
+        red.setPosition(objectiveHex);
+        game.setPhase(GamePhase.MOVEMENT);
+        assertTrue(SBFFormationCommand.planReunion(game, blue.getOwnerId(), blue, objectiveHex));
+        game.setPhase(GamePhase.END);
+        SBFEngagementControl.setEngaged(child, red, true);
+        game.engagementOrders().order(child.getId(), red.getId(), megamek.common.strategicBattleSystems.SBFEngagementOrders.Order.ASK);
+        game.engagementOrders().order(red.getId(), child.getId(), megamek.common.strategicBattleSystems.SBFEngagementOrders.Order.AVOID);
+        var server = mock(Server.class);
+        when(server.getGame()).thenReturn(game);
+        try (var saves = mockConstruction(GameManagerSaveHelper.class); var servers = mockStatic(Server.class)) {
+            var live = new SBFGameManager();
+            live.setGame(game);
+            servers.when(Server::getServerInstance).thenReturn(server);
+            child.setTactics(4);
+            red.setTactics(9);
+            var control = new SBFEngagementControl(live, () -> 7);
+            control.endEngagements();
+            assertFalse(game.engagementOrders().remainingEnds().isEmpty(), () -> "Expected a deferred ASK decision; "
+                  + child.getId() + " and " + red.getId() + " at " + child.getPosition() + " / " + red.getPosition()
+                  + ", intents " + game.engagementOrders().intent(child.getId(), red.getId()) + " / "
+                  + game.engagementOrders().intent(red.getId(), child.getId()) + ", forced: " + child.mustWithdraw());
+            control.submitOrder(blue.getOwnerId(), child.getId(), red.getId(), true);
+            assertTrue(game.engagementOrders().remainingEnds().isEmpty());
+            assertTrue(game.getFormation(child.getId()).isPresent());
+            var command = new SBFFormationCommand(server, live);
+            command.run(blue.getOwnerId(), new String[]{"sbfform", "done"});
+            command.run(red.getOwnerId(), new String[]{"sbfform", "done"});
+            var packets = org.mockito.ArgumentCaptor.forClass(megamek.common.net.packets.Packet.class);
+            org.mockito.Mockito.verify(server, org.mockito.Mockito.atLeastOnce()).send(org.mockito.ArgumentMatchers.eq(blue.getOwnerId()), packets.capture());
+            var packet = packets.getAllValues().stream()
+                  .filter(p -> p.command() == megamek.common.net.enums.PacketCommand.MULTI_PACKET)
+                  .flatMap(p -> ((List<?>) p.getObject(0)).stream()).map(megamek.common.net.packets.Packet.class::cast)
+                  .filter(p -> p.command() == megamek.common.net.enums.PacketCommand.SENDING_ENTITIES).toList().getLast();
+            var counters = ((List<?>) packet.getObject(0)).stream().filter(SBFFormation.class::isInstance)
+                  .map(SBFFormation.class::cast).toList();
+            assertFalse(counters.stream().anyMatch(f -> f.getId() == child.getId()));
+            assertTrue(counters.stream().anyMatch(f -> f.getId() == blue.getId() && f.isEngagedWith(red.getId())));
+            assertTrue(counters.stream().anyMatch(f -> f.getId() == red.getId() && f.isEngagedWith(blue.getId())));
+        }
+    }
+
+    @Test
+    void endPhaseTransfersResolveBeforeObjectiveCaptureAndVictory() {
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(true);
+        var receiver = formation(13, blue.getOwnerId(), BoardLocation.of(new Coords(2, 1), 0));
+        observe(1);
+        game.setCurrentRound(2);
+        var server = mock(Server.class);
+        when(server.getGame()).thenReturn(game);
+        try (var saves = mockConstruction(GameManagerSaveHelper.class); var servers = mockStatic(Server.class)) {
+            var live = new SBFGameManager();
+            live.setGame(game);
+            servers.when(Server::getServerInstance).thenReturn(server);
+            live.changePhase(GamePhase.END);
+            assertFalse(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+            var command = new SBFFormationCommand(server, live);
+            command.run(blue.getOwnerId(), new String[]{"sbfform", "assemble", "13", "11:1"});
+            assertEquals(2, receiver.getUnits().size());
+            command.run(blue.getOwnerId(), new String[]{"sbfform", "done"});
+            command.run(red.getOwnerId(), new String[]{"sbfform", "done"});
+            assertFalse(game.getPhase().isEnd());
+            assertFalse(game.scenarioProgress().hasCaptured(marker.generalName(), blue.getOwnerId()));
+            assertTrue(game.getGroundObjects().get(objectiveHex.coords()).contains(marker));
+            assertEquals(25L, score(blue.getOwnerId()));
+        }
     }
 
     @Test

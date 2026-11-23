@@ -35,6 +35,7 @@ package megamek.common.strategicBattleSystems;
 
 import java.io.Serializable;
 import java.util.EnumMap;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -224,7 +225,7 @@ public final class SBFScenarioProgress implements Serializable {
     }
 
     public enum LossCause {
-        COMBAT, MISSION_KILL, ARTILLERY_OR_BOMB, CRASH, ROUT, SCATTER, TRANSPORT, FORCED_WITHDRAWAL, VOLUNTARY_WITHDRAWAL
+        COMBAT, MISSION_KILL, ARTILLERY_OR_BOMB, CRASH, TERRAIN, ROUT, SCATTER, TRANSPORT, FORCED_WITHDRAWAL, VOLUNTARY_WITHDRAWAL
     }
 
     public record Loss(int formationId, int ownerId, int attackerOwnerId, SBFUnit unit, LossCause cause, int round)
@@ -330,7 +331,11 @@ public final class SBFScenarioProgress implements Serializable {
 
     /** Leaving and returning to the same hex between End Phases interrupts every constituent Unit's claim. */
     public void interruptOccupation(SBFFormation formation) {
-        objectives.values().forEach(o -> formation.getUnits().forEach(o.occupants::remove));
+        formation.getUnits().forEach(this::interruptOccupation);
+    }
+
+    public void interruptOccupation(SBFUnit unit) {
+        objectives.values().forEach(objective -> objective.occupants.remove(unit));
     }
 
     public void recordLoss(int round, SBFFormation formation, SBFUnit unit, int attackerOwnerId, LossCause cause) {
@@ -359,7 +364,16 @@ public final class SBFScenarioProgress implements Serializable {
                 claim.occupiedSides.forEach(side -> totals.merge(side, 5L * marker.getVictoryPointValue(), Long::sum));
             }
         });
-        for (Loss loss : unitLosses.values()) {
+        // A fuel-depleted Squadron still in play counts as destroyed while it is drifting (IO:BF p. 185).
+        var scoredLosses = new ArrayList<>(unitLosses.values());
+        for (SBFFormation formation : game.getActiveFormations()) {
+            if (formation.isDrifting()) {
+                formation.getUnits().stream().filter(u -> !unitLosses.containsKey(u)).forEach(u ->
+                      scoredLosses.add(new Loss(formation.getId(), formation.getOwnerId(), Player.PLAYER_NONE, u,
+                            LossCause.MISSION_KILL, game.getCurrentRound())));
+            }
+        }
+        for (Loss loss : scoredLosses) {
             if (loss.cause() == LossCause.VOLUNTARY_WITHDRAWAL) {
                 continue;
             }

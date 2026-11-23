@@ -94,6 +94,85 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     private final List<InGameObject> graveyard = new ArrayList<>();
     private SBFScenarioProgress scenarioProgress;
 
+    private Integer activeMovementGroup;
+
+    public boolean mayMoveWithActiveGroup(SBFFormation formation) {
+        return activeMovementGroup == null || activeMovementGroup == formation.movementGroup();
+    }
+
+    /** Detached counters move consecutively within a single proportional movement turn (IO:BF p. 198). */
+    public boolean continueDetachmentMovement(SBFFormation justMoved) {
+        activeMovementGroup = justMoved.movementGroup();
+        if (getActiveFormations().stream().anyMatch(f -> f.getId() != justMoved.getId()
+              && f.getOwnerId() == justMoved.getOwnerId() && mayMoveWithActiveGroup(f)
+              && SBFFormationTurn.isEligible(f, GamePhase.MOVEMENT, getCurrentRound()))) {
+            return true;
+        }
+        activeMovementGroup = null;
+        return false;
+    }
+
+    // Each split counter points to the original record sheet. Units keep their identity when transferred.
+    private Map<Integer, List<SBFUnit>> splitRosters;
+
+    public void recordSplit(SBFFormation parent, SBFFormation child) {
+        rememberSplitRoster(parent, originalFamily(parent));
+        splitRosters.put(child.getId(), splitRosters.get(parent.getId()));
+    }
+
+    public void rememberExistingSplit(SBFFormation parent) {
+        var relatives = originalFamily(parent);
+        if (relatives.size() > 1) {
+            rememberSplitRoster(parent, relatives);
+        }
+    }
+
+    private void rememberSplitRoster(SBFFormation parent, List<SBFFormation> relatives) {
+        if (splitRosters == null) {
+            splitRosters = new java.util.HashMap<>();
+        }
+        var roster = splitRosters.get(parent.getId());
+        if (roster == null) {
+            roster = relatives.stream().flatMap(f -> f.getUnits().stream()).toList();
+            for (var relative : relatives) {
+                splitRosters.put(relative.getId(), roster);
+            }
+        }
+    }
+
+    public void leaveSplitRoster(SBFFormation counter) {
+        if (splitRosters != null) {
+            splitRosters.remove(counter.getId());
+        }
+    }
+
+    public boolean hasOriginalSurvivors(List<SBFFormation> present) {
+        if (splitRosters != null) {
+            var rosters = present.stream().map(f -> splitRosters.get(f.getId()))
+                  .filter(java.util.Objects::nonNull).distinct().toList();
+            if (!rosters.isEmpty()) {
+                var gathered = present.stream().flatMap(f -> f.getUnits().stream()).toList();
+                return rosters.stream().anyMatch(roster -> roster.containsAll(gathered)
+                      && getActiveFormations().stream().flatMap(f -> f.getUnits().stream())
+                            .filter(roster::contains).allMatch(gathered::contains));
+            }
+        }
+        var relatives = originalFamily(present.getFirst());
+        return relatives.size() == present.size() && relatives.containsAll(present);
+    }
+
+    public List<SBFFormation> originalFamily(SBFFormation member) {
+        return getActiveFormations().stream().filter(f -> f.getOwnerId() == member.getOwnerId()
+              && f.originalFormationId() == member.originalFormationId()
+              && (splitRosters == null || java.util.Objects.equals(splitRosters.get(member.getId()), splitRosters.get(f.getId()))))
+              .sorted(java.util.Comparator.comparingInt(SBFFormation::getId)).toList();
+    }
+
+    public boolean takingAdjustmentOrders() {
+        return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS) && getPlayersList().stream()
+              .anyMatch(p -> !p.isObserver() && !p.isGhost() && !p.isDone());
+    }
+
     public SBFScenarioProgress scenarioProgress() {
         if (scenarioProgress == null) {
             scenarioProgress = new SBFScenarioProgress();
@@ -103,7 +182,12 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
 
     /** One recorded Combat Phase hit, retained across the firing report and save/load until the End Phase. */
     public record PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll,
-          List<Integer> additionalRolls, LossCause cause) implements Serializable {
+          List<Integer> additionalRolls, LossCause cause, Integer hazardOwner) implements Serializable {
+        public PendingHit(int attackerId, int targetId, int unitIndex, int damage, int criticalRoll,
+              List<Integer> additionalRolls, LossCause cause) {
+            this(attackerId, targetId, unitIndex, damage, criticalRoll, additionalRolls, cause, null);
+        }
+
         public PendingHit {
             cause = cause == null ? LossCause.COMBAT : cause;
             additionalRolls = additionalRolls == null ? new ArrayList<>() : new ArrayList<>(additionalRolls);
@@ -125,22 +209,31 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
 
     /** Successful standard hit awaiting allocation; a negative Unit index is an outstanding player choice. */
     public record Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex,
-          List<Integer> randomOrder, LossCause cause) implements Serializable {
+          List<Integer> randomOrder, LossCause cause, int artilleryExchange, boolean flechette) implements Serializable {
+        public Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex,
+              List<Integer> randomOrder, LossCause cause, int artilleryExchange) {
+            this(attackerId, targetId, chooserId, damage, unitIndex, randomOrder, cause, artilleryExchange, false);
+        }
+
         public Allocation {
             cause = cause == null ? LossCause.COMBAT : cause;
             randomOrder = randomOrder == null ? new ArrayList<>() : new ArrayList<>(randomOrder);
         }
 
         public Allocation(int attackerId, int targetId, int chooserId, int damage, int unitIndex) {
-            this(attackerId, targetId, chooserId, damage, unitIndex, List.of(), LossCause.COMBAT);
+            this(attackerId, targetId, chooserId, damage, unitIndex, List.of(), LossCause.COMBAT, 0);
         }
 
         public Allocation assignedTo(int index) {
-            return new Allocation(attackerId, targetId, chooserId, damage, index, randomOrder, cause);
+            return new Allocation(attackerId, targetId, chooserId, damage, index, randomOrder, cause, artilleryExchange, flechette);
         }
 
         public boolean isFor(int attacker, int target) {
-            return (attackerId == attacker) && (targetId == target);
+            return isFor(attacker, target, 0);
+        }
+
+        public boolean isFor(int attacker, int target, int exchange) {
+            return (attackerId == attacker) && (targetId == target) && (artilleryExchange == exchange);
         }
     }
 
@@ -180,6 +273,31 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         return pendingHits;
     }
 
+    /** Local flares and searchlight illumination, IO:BF pp. 206, 210. */
+    public boolean isIlluminated(BoardLocation location) {
+        var hex = getHex(location);
+        return hex != null && (hex.isStrategicallyIlluminated(getCurrentRound()) || getActiveFormationsAt(location).stream()
+              .anyMatch(f -> f.occupiesGroundHex() && f.searchlightsOn()));
+    }
+
+    private SBFMinefields minefields;
+
+    public SBFMinefields minefields() {
+        if (minefields == null) {
+            minefields = new SBFMinefields();
+        }
+        return minefields;
+    }
+
+    private SBFArtilleryState artillery;
+
+    public SBFArtilleryState artillery() {
+        if (artillery == null) {
+            artillery = new SBFArtilleryState();
+        }
+        return artillery;
+    }
+
     private SBFCombatOrders combatOrders;
 
     public SBFCombatOrders combatOrders() {
@@ -212,7 +330,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         if ((centralOccupants == null) || (centralOccupancyRound != getCurrentRound())) {
             centralOccupants = new java.util.HashMap<>();
             centralOccupancyRound = getCurrentRound();
-            getActiveFormations().stream().filter(f -> f.getRadarZone() == SBFRadarZone.CENTRAL)
+            getActiveFormations().stream().filter(f -> (f.getRadarZone() == SBFRadarZone.CENTRAL) && !f.inHighDrop())
                   .forEach(f -> centralOccupants.put(f.getId(), f.getOwnerId()));
         }
         Player player = getPlayer(squadron.getOwnerId());
@@ -293,7 +411,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     @Override
     public boolean isCurrentPhasePlayable() {
         return switch (phase) {
-            case END -> !engagementOrders().remainingEnds().isEmpty();
+            case END -> !engagementOrders().remainingEnds().isEmpty() || takingAdjustmentOrders();
             case INITIATIVE, TARGETING, PHYSICAL, OFFBOARD, OFFBOARD_REPORT, SBF_DETECTION ->
                   false;
             case DEPLOYMENT,
@@ -575,7 +693,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
 
     public boolean isHostileActiveFormationAt(BoardLocation location, SBFFormation formation) {
         Player owner = getPlayer(formation.getOwnerId());
-        return getActiveFormationsAt(location).stream()
+        return getActiveFormationsAt(location).stream().filter(f -> !f.isHidden())
               .map(f -> getPlayer(f.getOwnerId()))
               .anyMatch(owner::isEnemyOf);
     }

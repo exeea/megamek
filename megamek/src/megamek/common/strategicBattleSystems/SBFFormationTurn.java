@@ -48,7 +48,14 @@ public class SBFFormationTurn extends SBFTurn {
      * @param playerId The player who has to take action
      */
     public SBFFormationTurn(int playerId) {
+        this(playerId, null);
+    }
+
+    private final String combatArea;
+
+    public SBFFormationTurn(int playerId, String combatArea) {
         super(playerId);
+        this.combatArea = combatArea;
     }
 
     @Override
@@ -59,11 +66,13 @@ public class SBFFormationTurn extends SBFTurn {
     @Override
     public boolean isValidEntity(InGameObject unit, IGame game) {
         return (unit.getOwnerId() == playerId()) && unit instanceof SBFFormation formation
-              && isEligible(formation, game.getPhase(), game.getCurrentRound());
+              && (!game.getPhase().isMovement() || !(game instanceof SBFGame sbf) || sbf.mayMoveWithActiveGroup(formation))
+              && formation.assignedToCombatArea(combatArea) && isEligible(formation, game.getPhase(), game.getCurrentRound());
     }
 
     public static boolean isEligible(SBFFormation formation, GamePhase phase, int round) {
         return phase.isDeployment() ? !formation.isDeployed() && formation.getDeployRound() == round
-              : formation.isDeployed() && formation.isEligibleForPhase(phase);
+              : formation.isDeployed() && !formation.unpackingCargo(round) && !formation.inactiveAfterAssembly(round) && (formation.isEligibleForPhase(phase)
+                    || (phase.isMovement() && !formation.isDone() && formation.readyToLaunch(round)));
     }
 }

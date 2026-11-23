@@ -33,10 +33,13 @@
 
 package megamek.server.sbf;
 
+import java.util.ArrayList;
+
 import megamek.MegaMek;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.InGameObject;
 import megamek.common.options.OptionsConstants;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.logging.MMLogger;
 
@@ -85,22 +88,43 @@ record SBFPhasePreparationManager(SBFGameManager gameManager) implements SBFGame
             case TARGETING:
             case OFFBOARD:
                 // IO BF p204 offboard is a thing in SBF
+                if (game().getPhase().isMovement()) {
+                    gameManager.movementProcessor.removeImmobileWiGEs();
+                }
                 resetEntityPhase(game().getPhase());
                 gameManager.transmitAllPlayerUpdates();
                 gameManager.initiativeHelper.determineTurnOrder(game().getPhase());
                 gameManager.unitUpdateHelper.sendAllUnitUpdate();
                 gameManager.clearPendingReports();
+                if (game().getPhase().isFiring()) {
+                    new SBFCombatControl(gameManager).startFiring();
+                }
                 break;
             case END:
                 resetEntityPhase(game().getPhase());
                 gameManager.clearPendingReports();
+                var losses = new ArrayList<>(SBFCombatDamage.applyEndPhase(gameManager));
+                SBFSpaceCommand.endTurn(gameManager);
+                losses.addAll(new SBFAerospace(gameManager).removeCrashedSquadrons());
+                SBFMoraleResolver.resolveEndPhase(gameManager, losses);
+                new SBFEngagementControl(gameManager).endEngagements();
+                if (game().getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)) {
+                    gameManager.resetActivePlayersDone();
+                    gameManager.sendServerChat(SBFFormationCommand.HELP);
+                }
+                SBFFieldFortification.finish(gameManager);
+                SBFMinefieldControl.finishConstruction(gameManager);
                 gameManager.transmitAllPlayerUpdates();
                 gameManager.entityAllUpdate();
                 break;
             case SBF_DETECTION:
+                gameManager.clearPendingReports();
                 gameManager.detectionHelper.performSensorDetection();
                 gameManager.unitUpdateHelper.sendAllUnitUpdate();
+                gameManager.addPendingReportsToGame();
+                break;
             case SBF_DETECTION_REPORT:
+                gameManager.sendServerChat(SBFReconCommand.HELP);
             case INITIATIVE_REPORT:
                 gameManager.autoSave();
             case TARGETING_REPORT:
@@ -116,8 +140,7 @@ record SBFPhasePreparationManager(SBFGameManager gameManager) implements SBFGame
                 }
                 break;
             case VICTORY:
-                gameManager.clearPendingReports();
-                gameManager.addPendingReportsToGame();
+                gameManager.sendReport();
                 break;
             default:
                 break;
@@ -130,6 +153,8 @@ record SBFPhasePreparationManager(SBFGameManager gameManager) implements SBFGame
                 formation.setDone(false);
                 if (phase.isInitiative()) {
                     formation.setSprintedThisTurn(false);
+                    formation.resetReconMp();
+                    formation.resetEngagementMovement();
                 }
             }
         }

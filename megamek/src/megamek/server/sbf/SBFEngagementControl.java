@@ -65,6 +65,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         SBFEngagementOrders orders = game.engagementOrders();
         orders.startRound(game.getCurrentRound());
         if (route.getSteps().isEmpty()) {
+            SBFMovementHazards.stops(manager, mover, mover.getPosition(), route, 0, dice);
             return route;
         }
         SBFMovePath traveled = new SBFMovePath(mover.getId(), mover.getPosition(), game);
@@ -80,6 +81,10 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                 }
                 mover.setHullDown(false);
                 traveled = extended;
+            }
+            boolean stoppedByTerrain = SBFMovementHazards.stops(manager, mover, traveled.getLastPosition(), route, i, dice);
+            if (game.getFormation(mover.getId()).isEmpty() || (i == 0 && stoppedByTerrain)) {
+                return traveled;
             }
             if (i > 0 && !orders.alreadyVisited(i)) {
                 if (!resolveAmbushes(mover, route, traveled.getLastPosition(), i)) {
@@ -135,6 +140,10 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
                     return traveled;
                 }
                 orders.decline(mover.getId(), other.getId());
+            }
+            if (stoppedByTerrain) {
+                traveled.setJumpUsed(route.getJumpUsed());
+                return traveled;
             }
         }
         return route;
@@ -459,7 +468,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         manager.sendServerChat(side.getOwnerId(), "Movement is waiting for your engagement order. Use /sbfengage "
               + side.getId() + " engage " + other.getId() + " or /sbfengage " + side.getId() + " avoid "
               + other.getId() + ". Use ask to choose after winning."
-              + (side.isOnRadarMap() ? "" : " Ground orders also include force, overrun and evade."));
+              + (side.combatZone() != null ? "" : " Ground orders also include force, overrun and evade."));
     }
 
     private SBFFormation rollWinner(SBFFormation first, SBFFormation second, int firstModifier, int secondModifier) {
@@ -508,7 +517,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     }
 
     private int atmosphereModifier(SBFFormation squadron, SBFFormation other) {
-        if (!squadron.isOnRadarMap() || !other.isOnRadarMap()) {
+        if (!squadron.sharesAerospaceMap(other)) {
             return 0;
         }
         SBFGame game = manager.getGame();
@@ -527,7 +536,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         manager.sendServerChat(second.getOwnerId(), text);
     }
 
-    private void setEngaged(SBFFormation first, SBFFormation second, boolean engaged) {
+    static void setEngaged(SBFFormation first, SBFFormation second, boolean engaged) {
         first.setEngagedWith(second.getId(), engaged);
         second.setEngagedWith(first.getId(), engaged);
     }
@@ -540,8 +549,8 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
         for (SBFFormation first : game.getActiveFormations()) {
             for (int opponentId : first.getEngagedOpponents()) {
                 SBFFormation second = game.getFormation(opponentId).orElse(null);
-                boolean sameLocation = (second != null) && (first.isOnRadarMap()
-                      ? first.getRadarZone() == second.getRadarZone()
+                boolean sameLocation = (second != null) && (first.combatZone() != null
+                      ? first.sharesAerospaceMap(second) && first.combatZone() == second.combatZone()
                       : ((first.getPosition() != null) && first.getPosition().equals(second.getPosition())));
                 if (!sameLocation) {
                     first.setEngagedWith(opponentId, false);
@@ -644,7 +653,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     private void resumeEnds() {
         resolveEnds();
         manager.entityAllUpdate();
-        if (manager.getGame().engagementOrders().remainingEnds().isEmpty()) {
+        if (manager.getGame().engagementOrders().remainingEnds().isEmpty() && !manager.getGame().takingAdjustmentOrders()) {
             manager.endCurrentPhase();
         }
         manager.sendPendingPackets();
@@ -675,7 +684,7 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
             manager.sendServerChat(playerId, "Choose a current engagement opponent or omit the opponent ID.");
             return;
         }
-        if (side.isOnRadarMap() && !airOrder(order)) {
+        if (side.combatZone() != null && !airOrder(order)) {
             manager.sendServerChat(playerId, "Air-to-air orders are engage, avoid or ask.");
             return;
         }
