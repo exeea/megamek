@@ -112,7 +112,7 @@ final class GpuLogPanel implements GpuHud.Component {
     private int filter = ALL_EVENTS;
     private boolean searching;
     /** An earlier round the player picked (K13), or 0 for the current one; a new round shows itself again. */
-    private int pickedRound;
+    private int pickedRound = -1;
     private int currentRound;
     /** A card of no step that the player opened (it shows Locate), until the cursor moves; or null. */
     private Object opened;
@@ -165,7 +165,11 @@ final class GpuLogPanel implements GpuHud.Component {
         tabs.buttons.get(FULL_LOG).setName("log-tab-full");
         onChange(tabs.buttons.get(SUMMARY), () -> tab = SUMMARY);
         onChange(tabs.buttons.get(FULL_LOG), () -> tab = FULL_LOG);
-        root.add(tabs).growX().row();
+        if (source.strategic()) {
+            tab = FULL_LOG;
+        } else {
+            root.add(tabs).growX().row();
+        }
 
         filters = ui.segmented("hud-seg", true, text("GpuBoard.hud.log.allEvents"), text("GpuBoard.hud.log.myForce"),
               text("GpuBoard.hud.log.critical"));
@@ -176,7 +180,9 @@ final class GpuLogPanel implements GpuHud.Component {
             filters.buttons.get(index).setName("log-filter-" + index);
             onChange(filters.buttons.get(index), () -> filter = choice);
         }
-        root.add(filters).growX().row();
+        if (!source.strategic()) {
+            root.add(filters).growX().row();
+        }
 
         // .fq, and below it MegaMek's report keywords: find (N / Shift+N) and the keyword filter (Shift+F).
         search = ui.search(text("GpuBoard.hud.log.searchPlaceholder"));
@@ -253,7 +259,7 @@ final class GpuLogPanel implements GpuHud.Component {
         GpuReportLog.Snapshot log = inputs.frame().reports();
         if (log.round() != currentRound) {
             currentRound = log.round();
-            pickedRound = 0;
+            pickedRound = -1;
         }
         friendly();
         preferences(inputs.preferences());
@@ -319,24 +325,28 @@ final class GpuLogPanel implements GpuHud.Component {
 
     /** The round the log shows: the current one, or an earlier round the player picked (K13). */
     private int round(GpuReportLog.Snapshot log) {
-        int current = Math.max(1, log.round());
-        return pickedRound > 0 && pickedRound < current ? pickedRound : current;
+        int current = currentRound(log);
+        return pickedRound >= 0 && pickedRound < current ? pickedRound : current;
     }
 
     private void pickRound() {
         GpuReportLog.Snapshot log = inputs.frame().reports();
-        int current = Math.max(1, log.round());
+        int current = currentRound(log);
         List<Integer> rounds = rounds(log);
         menu.list(roundSelect, rounds.stream().map(round -> text("GpuBoard.hud.log.roundSelect", round)).toList(),
-              rounds.indexOf(round(log)), index -> pickedRound = rounds.get(index) == current ? 0 : rounds.get(index));
+              rounds.indexOf(round(log)), index -> pickedRound = rounds.get(index) == current ? -1 : rounds.get(index));
     }
 
     /** The log's rounds, newest first; the current round is one of them. */
-    private static List<Integer> rounds(GpuReportLog.Snapshot log) {
+    private List<Integer> rounds(GpuReportLog.Snapshot log) {
         Set<Integer> rounds = new HashSet<>();
-        rounds.add(Math.max(1, log.round()));
+        rounds.add(currentRound(log));
         log.entries().forEach(entry -> rounds.add(entry.round()));
         return rounds.stream().sorted((first, second) -> second - first).toList();
+    }
+
+    private int currentRound(GpuReportLog.Snapshot log) {
+        return Math.max(source.strategic() ? 0 : 1, log.round());
     }
 
     /** The keyword filter's list: no filter, then the configured filter keywords. */
@@ -389,7 +399,7 @@ final class GpuLogPanel implements GpuHud.Component {
 
     private void rebuild() {
         GpuReportLog.Snapshot log = shown.log();
-        boolean earlier = shown.round() < Math.max(1, log.round());
+        boolean earlier = shown.round() < currentRound(log);
         GamePhase phase = log.phase();
         String title = text(earlier || phase.isEnd() || phase.isEndReport() || phase.isVictory()
               ? "GpuBoard.hud.log.battleReport" : "GpuBoard.hud.log.combatLog", shown.round());
@@ -408,8 +418,9 @@ final class GpuLogPanel implements GpuHud.Component {
         keywordCell.setActor(shown.keywords() ? keywordRow : null);
         keywordSelect.setText(shown.keyword());
         filterSelect.setText(shown.filterKeyword().isEmpty() ? text(KEYWORD_FILTER) : shown.filterKeyword());
-        totalsCell.setActor(earlier ? null : totals);
-        if (!earlier) {
+        boolean showTotals = !earlier && !source.strategic();
+        totalsCell.setActor(showTotals ? totals : null);
+        if (showTotals) {
             totals(log);
         }
 
@@ -422,6 +433,21 @@ final class GpuLogPanel implements GpuHud.Component {
         list.clearChildren();
         if (listed.isEmpty() && artillery.isEmpty()) {
             ui.empty(list, text(all.isEmpty() ? "GpuBoard.hud.log.noEvents" : "GpuBoard.hud.log.noMatch"));
+        } else if (source.strategic()) {
+            // Strategic BattleForce sends the player's report as narrative sections.
+            for (Card card : listed.reversed()) {
+                if (card.source() instanceof Entry entry) {
+                    cards.add(card);
+                    section(entry.heading(), "");
+                    Label report = ui.label(entry.text(), "hud-small", 12, UiTheme.MUTED);
+                    report.setName("sbf-report-text");
+                    report.setWrap(true);
+                    list.add(report).growX().minWidth(0).left().pad(0, 14, 6, 14).row();
+                    if (card.matched() && scrollToMatch) {
+                        scrollTarget = report;
+                    }
+                }
+            }
         } else if (shown.tab() == FULL_LOG) {
             listed.forEach(card -> add(card, cards));
         } else {

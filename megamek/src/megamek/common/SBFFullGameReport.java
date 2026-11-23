@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 
 import megamek.common.interfaces.FullGameReport;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 
 /**
  * This class gathers the full game report for an SBF game.
@@ -89,6 +90,20 @@ public class SBFFullGameReport implements FullGameReport<SBFReportEntry> {
             audiences = new HashMap<>(); // Games saved before report visibility was recorded.
         }
         audiences.put(entry, new HashSet<>(recipientIds));
+    }
+
+    /** Introduce the leading narrative for exactly the players who can read at least one entry in it. */
+    public void prependSectionHeader(List<SBFReportEntry> reports, int messageId) {
+        var narrative = reports.stream().takeWhile(entry -> !(entry instanceof SBFReportHeader)).toList();
+        if (narrative.isEmpty()) {
+            return;
+        }
+        var header = new SBFReportHeader(messageId);
+        if (audiences != null && narrative.stream().allMatch(audiences::containsKey)) {
+            restrictTo(header, narrative.stream().flatMap(entry -> audiences.get(entry).stream())
+                  .collect(Collectors.toSet()));
+        }
+        reports.addFirst(header);
     }
 
     /** Uses the visibility at the time of the event, including when serving historical reports on reconnect. */

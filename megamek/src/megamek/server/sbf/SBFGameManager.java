@@ -54,6 +54,7 @@ import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFRuleOptionsUser;
 import megamek.common.strategicBattleSystems.SBFTurn;
 import megamek.common.turns.TurnOrdered;
@@ -281,8 +282,7 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
                 game.setupDeployment();
                 break;
             case MOVEMENT:
-                // write Movement Phase header to report
-                addReport(new SBFReportEntry(2000)); // , Report.PUBLIC));
+                addReport(new SBFReportHeader(2000));
                 // intentional fall through
             case PREMOVEMENT:
             case SET_ARTILLERY_AUTO_HIT_HEXES:
@@ -368,6 +368,9 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
     }
 
     void addPendingReportsToGame() {
+        if (game.getPhase().isEnd()) {
+            game.getGameReport().prependSectionHeader(pendingReports, 3399);
+        }
         game.addReports(pendingReports);
     }
 

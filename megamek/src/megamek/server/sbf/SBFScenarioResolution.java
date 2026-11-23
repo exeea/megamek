@@ -53,6 +53,7 @@ import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFScenarioProgress;
 import megamek.common.strategicBattleSystems.SBFScenarioProgress.Claim;
 import megamek.common.strategicBattleSystems.SBFScenarioProgress.Loss;
@@ -144,6 +145,7 @@ final class SBFScenarioResolution {
     }
 
     static void reportFinal(SBFGameManager manager, VictoryResult result, IntSupplier roll2d6) {
+        manager.addReport(new SBFReportHeader(3502));
         SBFGame game = manager.getGame();
         if (game.getOptions().booleanOption(SBFRuleOptions.BASE_VICTORY_POINTS)) {
             List<Player> sides = sides(game);

@@ -49,6 +49,9 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFPublicReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -89,7 +92,12 @@ class GpuLogPanelSmokeTest {
         GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
 
         Panel(GpuHudTestStage hud) {
+            this(hud, false);
+        }
+
+        Panel(GpuHudTestStage hud, boolean strategic) {
             hud.window.clearChildren();
+            when(source.strategic()).thenReturn(strategic);
             log = new GpuLogPanel(hud.kit, source, state, menu);
             root = (Table) log.actor();
             hud.window.addActor(root);
@@ -149,6 +157,36 @@ class GpuLogPanelSmokeTest {
         UiButton card(int index) {
             return cardActors().get(index);
         }
+    }
+
+    @Test
+    void strategicReportShowsSetupAndTheBattleOutcomeInTheNativeLog() {
+        GpuHudTestStage.run(hud -> {
+            Panel panel = new Panel(hud, true);
+            SBFGame game = new SBFGame();
+            GpuSbfCapture capture = new GpuSbfCapture(game, () -> 1);
+            game.setCurrentRound(0);
+            game.setPhase(GamePhase.DEPLOYMENT);
+            game.addReports(List.of(new SBFReportHeader(1005), new SBFPublicReportEntry(1068).add("Blue").add(9)));
+            panel.show(hud, status(GamePhase.DEPLOYMENT, 0), capture.reports());
+            assertEquals(List.of("INITIATIVE PHASE FOR START OF GAME DEPLOYMENT", "Blue has initiative 9."),
+                  panel.list());
+
+            game.setCurrentRound(1);
+            game.setPhase(GamePhase.VICTORY);
+            game.addReports(List.of(new SBFReportHeader(2000), new SBFPublicReportEntry(3404).add("Scout"),
+                  new SBFReportHeader(3000), new SBFPublicReportEntry(2012),
+                  new SBFReportHeader(3399), new SBFPublicReportEntry(3403).add("Red").add("Scout"),
+                  new SBFReportHeader(3502), new SBFPublicReportEntry(3501).add("Blue")));
+            panel.show(hud, status(GamePhase.VICTORY, 1), capture.reports());
+            assertEquals("Blue wins the battle.", panel.<Label>find("sbf-report-text").getText().toString());
+            assertEquals(List.of("BATTLE OUTCOME", "Blue wins the battle.", "END PHASE", "Red routs and loses Scout.",
+                  "COMBAT RESOLUTION", "Attack missed.", "MOVEMENT PHASE", "Scout withdraws at its home map edge."),
+                  panel.list());
+            assertNull(panel.find("log-tabs"));
+            assertNull(panel.find("log-filters"));
+            assertNull(panel.find("log-totals"));
+        });
     }
 
     @Test

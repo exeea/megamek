@@ -35,6 +35,7 @@ package megamek.server.sbf;
 
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
 
 public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameManagerHelper {
@@ -105,7 +106,7 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                 gameManager.changePhase(GamePhase.FIRING);
                 break;
             case FIRING:
-                addReport(new SBFReportEntry(3000));
+                addReport(new SBFReportHeader(3000));
                 gameManager.actionsProcessor.handleActions();
                 goToDependingOnReport(GamePhase.FIRING_REPORT, GamePhase.END);
                 break;
