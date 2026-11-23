@@ -38,3 +38,7 @@ Paths name Java classes under `megamek/src/megamek`; server classes are in `serv
 ## Implementation log
 
 This initial ledger precedes implementation. Subsequent entries distinguish verified live behavior from remaining rules and interfaces. A successful compile or a game opening is insufficient evidence for a full ruleset. No changes have been pushed.
+
+### Phase sequence and reconnect
+
+IO:BF “Playing the Game”, pp. 163–164, and “Detection and Reconnaissance Phase”, p. 195. The optional phase is “after the Initiative Phase”. Each phase completion now makes one transition. Reconnaissance no longer re-enters deployment or starts multiple movement phases, and a targeting report waits for its normal acknowledgement. A reconnect sends the current turn (including the last one) only to its recipient and cannot consume a turn or phase. Pending report packets retain their contents when the next phase clears its work list. Regression coverage: SBFPhaseEndManagerTest and SBFGameManagerPendingPacketTest.

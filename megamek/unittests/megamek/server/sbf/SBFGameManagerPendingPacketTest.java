@@ -34,6 +34,7 @@
 package megamek.server.sbf;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -45,8 +46,10 @@ import static org.mockito.Mockito.verify;
 import java.util.List;
 
 import megamek.common.Player;
+import megamek.common.enums.GamePhase;
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
+import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.server.Server;
 import org.junit.jupiter.api.Test;
@@ -55,6 +58,31 @@ import org.mockito.MockedStatic;
 
 /** Tests recipient filtering and empty-envelope suppression in SBF packet batching. */
 class SBFGameManagerPendingPacketTest {
+
+    @Test
+    void reconnectDuringLastMovementTurnResendsItOnlyToReturningPlayer() {
+        SBFGameManager manager = new SBFGameManager();
+        SBFGame game = new SBFGame();
+        manager.setGame(game);
+        game.addPlayer(0, new Player(0, "Returning"));
+        game.addPlayer(1, new Player(1, "Other"));
+        game.setPhase(GamePhase.MOVEMENT);
+        game.setTurns(List.of(new SBFFormationTurn(0)));
+        game.changeToNextTurn();
+        Server server = mock(Server.class);
+        try (MockedStatic<Server> serverStatic = mockStatic(Server.class)) {
+            serverStatic.when(Server::getServerInstance).thenReturn(server);
+            manager.sendCurrentInfo(0);
+            assertEquals(GamePhase.MOVEMENT, game.getPhase());
+            assertEquals(0, game.getTurnIndex());
+            ArgumentCaptor<Packet> envelopes = ArgumentCaptor.forClass(Packet.class);
+            verify(server).send(eq(0), envelopes.capture());
+            List<?> packets = (List<?>) envelopes.getValue().getObject(0);
+            assertTrue(packets.stream().anyMatch(p -> p instanceof Packet packet
+                  && packet.command() == PacketCommand.TURN));
+            verify(server, never()).send(eq(1), any(Packet.class));
+        }
+    }
 
     @Test
     void targetedPacketDoesNotSendEmptyEnvelopeToOtherPlayers() {

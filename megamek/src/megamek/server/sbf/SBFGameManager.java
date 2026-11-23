@@ -246,13 +246,9 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
             }
 
             send(connId, packetHelper.createPlanetaryConditionsPacket());
-            //
-            //
-            if (getGame().getPhase().usesTurns() && getGame().hasMoreTurns()) {
-                send(packetHelper.createTurnListPacket());
-                addPendingPacket(packetHelper.createTurnIndexPacket(connId));
-            } else if (!getGame().getPhase().isLounge() && !getGame().getPhase().isStartingScenario()) {
-                endCurrentPhase();
+            if (getGame().getPhase().usesTurns() && getGame().getTurn() != null) {
+                send(connId, packetHelper.createTurnListPacket());
+                send(connId, packetHelper.createTurnIndexPacket(Player.PLAYER_NONE));
             }
 
             // This method is not called through normal packet handling, so it must send
@@ -362,7 +358,7 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
     }
 
     private Packet createReportPacket(Player recipient) {
-        return new Packet(PacketCommand.SENDING_REPORTS, pendingReports);
+        return new Packet(PacketCommand.SENDING_REPORTS, new ArrayList<>(pendingReports));
     }
 
     public void clearPendingReports() {
