@@ -34,6 +34,7 @@
 package megamek.server;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import megamek.server.Server.ReceivedPacket;
@@ -82,16 +83,16 @@ class PacketPauseGate {
     }
 
     /**
-     * Unpauses packet handling and hands back the packets held during the pause, in the order they arrived, for the
-     * caller to process.
+     * Unpauses packet handling and hands the packets held during the pause, in the order they arrived, to the queue
+     * they are processed from. This happens under the gate's lock, so a packet received meanwhile waits in
+     * {@link #holdIfPaused} and is queued after every held packet.
      *
-     * @return the held packets; empty if none were held
+     * @param queue the queue of packets to process
      */
-    synchronized List<ReceivedPacket> unpause() {
-        isPaused = false;
-        List<ReceivedPacket> releasedPackets = new ArrayList<>(heldPackets);
+    synchronized void unpause(Collection<ReceivedPacket> queue) {
+        queue.addAll(heldPackets);
         heldPackets.clear();
-        return releasedPackets;
+        isPaused = false;
     }
 
     /**

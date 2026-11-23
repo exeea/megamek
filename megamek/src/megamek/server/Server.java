@@ -302,7 +302,7 @@ public class Server implements Runnable {
                     LOGGER.info("Unpause packet received - resuming packet handling");
                     sendServerChat("Game is resumed.");
                 }
-                packetQueue.addAll(pauseGate.unpause());
+                pauseGate.unpause(packetQueue);
                 break;
             default:
                 if (!pauseGate.holdIfPaused(rp)) {
