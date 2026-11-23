@@ -56,8 +56,6 @@ import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
-import megamek.client.ui.clientGUI.boardview.sprite.HexSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
@@ -162,9 +160,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     /** EDT: the hex pick that takes this board's clicks, or null. */
     private BoardHexPick hexPick;
     final LinkedHashSet<IDisplayable> overlays = new LinkedHashSet<>();
-    final TreeSet<Sprite> allSprites = new TreeSet<>();
-    final TreeSet<Sprite> overTerrainSprites = new TreeSet<>();
-    final TreeSet<HexSprite> behindTerrainHexSprites = new TreeSet<>();
     private final List<TacticalMark> published = new ArrayList<>();
     private List<TacticalMark.Step> pathSteps = List.of();
     private List<TacticalMark.FlightPath> flightPath = List.of();
@@ -441,8 +436,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void drawHexPlugins(Graphics2D graphics, Coords coords) {
         for (HexDrawPlugin plugin : hexDrawPlugins) { plugin.draw(graphics, getBoard().getHex(coords), game, coords, this); }
     }
-    public void addSprite(Sprite sprite) { addSprites(List.of(sprite)); }
-    public void removeSprite(Sprite sprite) { removeSprites(List.of(sprite)); }
     /** The marks handlers and dialogs published, in the order they were added. */
     public List<TacticalMark> getMarks() { return List.copyOf(published); }
     /** The planned move's shown steps: their arrows, costs and announcements. */
@@ -465,18 +458,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
     /** Whether the board shows the units' movement vectors (advanced vector movement, Movement phase). */
     public boolean showsMovementVectors() { return game.useVectorMove() && game.getPhase().isMovement(); }
-    public void addSprites(Collection<? extends Sprite> sprites) {
-        allSprites.addAll(sprites);
-        for (Sprite sprite : sprites) {
-            if (sprite instanceof HexSprite hex && hex.isBehindTerrain()) { behindTerrainHexSprites.add(hex); }
-            else { overTerrainSprites.add(sprite); }
-        }
-        repaint();
-    }
-    public void removeSprites(Collection<? extends Sprite> sprites) {
-        allSprites.removeAll(sprites); overTerrainSprites.removeAll(sprites); behindTerrainHexSprites.removeAll(sprites);
-        repaint();
-    }
     /** Shows {@code marks} until they are removed by {@link #removeMarks} (the same instances). */
     public void addMarks(Collection<? extends TacticalMark> marks) {
         published.addAll(marks);
@@ -2230,10 +2211,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         clearAllMoveVectors();
 
         published.clear();
-        overTerrainSprites.clear();
-        behindTerrainHexSprites.clear();
 
-        allSprites.clear();
         repaint();
     }
 

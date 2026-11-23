@@ -114,6 +114,22 @@ class GpuFireOrdersTest {
                   "Badge[targetId=44, value=4, odds=91.6, reason=]"), List.of(badges(badged),
                   String.valueOf(badged.hoverBest())), "The Medium Laser (RA) on each enemy but the focused Archer,"
                   + " best first; the best weapon on the hovered Crab");
+            var preferences = GUIPreferences.getInstance();
+            boolean previous = preferences.getShowFiringSolutions();
+            try {
+                GpuFireOrders.Snapshot hidden = onSwing(() -> {
+                    preferences.setShowFiringSolutions(false);
+                    return firing.board.source.fire().capture(firing.display, crab.getPosition());
+                });
+                assertEquals(List.of(), hidden.badges());
+                assertEquals(badged.hoverBest(), hidden.hoverBest());
+                assertEquals(badged.solution(), hidden.solution());
+            } finally {
+                onSwing(() -> {
+                    preferences.setShowFiringSolutions(previous);
+                    return null;
+                });
+            }
             // Both in one EDT event: the source's 100 ms timer captures without the hovered hex in between
             List<GpuFireOrders.Snapshot> again = onSwing(() -> List.of(
                   firing.board.source.fire().capture(firing.display, crab.getPosition()),

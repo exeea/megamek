@@ -604,7 +604,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
             logger.error("Tried to select non-existent entity {}", en);
         }
 
-        clientgui.showFiringSolutions(currentEntity());
     }
 
     /**

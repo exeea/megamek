@@ -72,6 +72,7 @@ final class GpuFiringFixture implements AutoCloseable {
     final UnitDisplayState unitDisplay;
     final FiringDisplay display;
     private final MockedStatic<MegaMekGUI> keys;
+    private final boolean firingSolutions = GUIPreferences.getInstance().getShowFiringSolutions();
     private final boolean autoEndFiring = GUIPreferences.getInstance().getAutoEndFiring();
     private final boolean autoSearchlight = GUIPreferences.getInstance().getAutoDeclareSearchlight();
 
@@ -99,6 +100,7 @@ final class GpuFiringFixture implements AutoCloseable {
         try {
             unitDisplay = new UnitDisplayState(gui);
             display = onSwing(() -> {
+                GUIPreferences.getInstance().setShowFiringSolutions(true);
                 GUIPreferences.getInstance().setAutoEndFiring(false);
                 GUIPreferences.getInstance().setAutoDeclareSearchlight(false);
                 keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(controller);
@@ -183,6 +185,7 @@ final class GpuFiringFixture implements AutoCloseable {
     }
 
     private void restorePreferences() {
+        GUIPreferences.getInstance().setShowFiringSolutions(firingSolutions);
         GUIPreferences.getInstance().setAutoEndFiring(autoEndFiring);
         GUIPreferences.getInstance().setAutoDeclareSearchlight(autoSearchlight);
     }

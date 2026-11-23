@@ -356,7 +356,6 @@ public class ClientGUI extends AbstractClientGUI
     private CollapseWarningSpriteHandler collapseWarningSpriteHandler;
     private SawClearingSpriteHandler sawClearingSpriteHandler;
     private GroundObjectSpriteHandler groundObjectSpriteHandler;
-    private FiringSolutionSpriteHandler firingSolutionSpriteHandler;
     private FiringArcSpriteHandler firingArcSpriteHandler;
 
     private JPanel panTop;
@@ -974,7 +973,6 @@ public class ClientGUI extends AbstractClientGUI
         BridgeDeploySpriteHandler bridgeDeploySpriteHandler = new BridgeDeploySpriteHandler(this, client.getGame());
         groundObjectSpriteHandler = new GroundObjectSpriteHandler(this, client.getGame());
         ScanSpriteHandler scanSpriteHandler = new ScanSpriteHandler(this, client);
-        firingSolutionSpriteHandler = new FiringSolutionSpriteHandler(this, client);
         firingArcSpriteHandler = new FiringArcSpriteHandler(this);
         fleeZoneSpriteHandler = new FleeZoneSpriteHandler(this);
         BotRouteSpriteHandler botRouteSpriteHandler = new BotRouteSpriteHandler(this, client.getGame());
@@ -995,7 +993,6 @@ public class ClientGUI extends AbstractClientGUI
               bridgeDeploySpriteHandler,
               groundObjectSpriteHandler,
               scanSpriteHandler,
-              firingSolutionSpriteHandler,
               firingArcSpriteHandler,
               fleeZoneSpriteHandler,
               botRouteSpriteHandler,
@@ -4820,7 +4817,6 @@ public class ClientGUI extends AbstractClientGUI
         movementModifierSpriteHandler.clear();
         sensorRangeSpriteHandler.clear();
         collapseWarningSpriteHandler.clear();
-        firingSolutionSpriteHandler.clear();
         firingArcSpriteHandler.clear();
     }
 
@@ -4879,15 +4875,6 @@ public class ClientGUI extends AbstractClientGUI
      */
     public void showGroundObjects(Map<Coords, List<ICarryable>> groundObjectList) {
         groundObjectSpriteHandler.setGroundObjectSprites(groundObjectList);
-    }
-
-    /**
-     * Shows firing solutions from the viewpoint of the given entity on targets
-     *
-     * @param entity The attacking entity
-     */
-    public void showFiringSolutions(Entity entity) {
-        firingSolutionSpriteHandler.showFiringSolutions(entity, getDisplayedWeapon(), getDisplayedAmmo());
     }
 
     public JPanel getMainPanel() {
@@ -4966,7 +4953,6 @@ public class ClientGUI extends AbstractClientGUI
         // not in an ActionPhase - or - the unit is not the acting unit:
         // show for viewed entity, no move or actions to be taken into account
         firingArcSpriteHandler.update(entity, getDisplayedWeapon().get());
-        showFiringSolutions(entity);
     }
 
     /**

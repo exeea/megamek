@@ -17,6 +17,7 @@ import javax.swing.SwingUtilities;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
@@ -484,7 +485,8 @@ final class GpuFireOrders implements AutoCloseable {
               (selected == null) ? null : solution(game, actor, selected, selectedNum, shots.get(selectedNum),
                     shown, actor.isUseNaturalAptitudeGunnery(game, selected)),
               ((selected == null) && shown) ? frontArc(game, actor) : null,
-              badges(badgeKey(fd, actor, queue, focusKey), carded),
+              GUIPreferences.getInstance().getShowFiringSolutions()
+                    ? badges(badgeKey(fd, actor, queue, focusKey), carded) : List.of(),
               hoverBest(game, fd, actor, hover, queue, carded), drafted(actor.getId()),
               GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining,
               aimChoice(game, fd, actor, queue)));

@@ -39,15 +39,12 @@ import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
-import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.RangeType;
-import megamek.common.ToHitData;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
 import megamek.common.game.GameTurn;
-import megamek.common.util.FiringSolution;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,33 +57,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuSwingCutTest {
-
-    /**
-     * G4: the native frame leaves MegaMek's firing solution out (the board labels' to-hit badges stand for it), and the
-     * sprite stays shown for the Legacy 2D board.
-     */
-    @Test
-    void theNativeFrameLeavesOutMegaMeksFiringSolutions() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            FiringSolutionSprite solution = onSwing(() -> {
-                ToHitData toHit = new ToHitData(4, "test");
-                toHit.setLocation(new Coords(8, 5));
-                toHit.setRange(3);
-                FiringSolutionSprite sprite = new FiringSolutionSprite(fixture.view, new FiringSolution(toHit, true));
-                fixture.view.addSprites(List.of(sprite));
-                return sprite;
-            });
-            List<BoardTactical> captures = onSwing(() -> {
-                fixture.view.removeSprites(List.of(solution));
-                BoardTactical without = new BoardTacticalMarks().capture(fixture.view, false);
-                fixture.view.addSprites(List.of(solution));
-                fixture.source.refresh();
-                return List.of(without, fixture.source.takeFrame().scene().tactical());
-            });
-            assertEquals(captures.get(0), captures.get(1), "The native frame draws everything else, and no solution");
-            assertFalse(onSwing(solution::isHidden), "The sprite stays shown for the Legacy 2D board");
-        }
-    }
 
     /**
      * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope and the zones,

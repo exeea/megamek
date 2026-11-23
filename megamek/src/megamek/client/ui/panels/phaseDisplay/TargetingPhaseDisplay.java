@@ -450,10 +450,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
 
             setFireModeEnabled(true);
 
-            if (!entity.isOffBoard()) {
-                clientgui.showFiringSolutions(entity);
-            }
-
             updateClearWeaponJam();
 
         } else {

@@ -37,15 +37,12 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 import javax.swing.JPanel;
 import javax.swing.Scrollable;
 
 import megamek.client.event.BoardViewListener;
 import megamek.client.ui.IDisplayable;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 
@@ -203,38 +200,6 @@ public interface IBoardView {
      * @see JPanel#repaint()
      */
     void repaint();
-
-    /**
-     * Adds a {@link Sprite} to be shown on this BoardView to its set of sprites.
-     *
-     * @param sprite the Sprite to show
-     */
-    default void addSprite(Sprite sprite) {
-        addSprites(List.of(sprite));
-    }
-
-    /**
-     * Adds the given collection of {@link Sprite} to be shown on this BoardView to its set of sprites.
-     *
-     * @param sprites the Sprites to show
-     */
-    void addSprites(Collection<? extends Sprite> sprites);
-
-    /**
-     * Removes the given {@link Sprite} from this BoardView's set of sprites.
-     *
-     * @param sprite the Sprites to remove
-     */
-    default void removeSprite(Sprite sprite) {
-        removeSprites(List.of(sprite));
-    }
-
-    /**
-     * Removes the given collection of {@link Sprite} from this BoardView's set of sprites.
-     *
-     * @param sprites the Sprites to remove
-     */
-    void removeSprites(Collection<? extends Sprite> sprites);
 
     /**
      * Highlights the given coords, if they are on the board. When coords is null, remove the highlight. Note that a

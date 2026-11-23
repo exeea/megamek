@@ -95,6 +95,7 @@ class GpuBoardLabelsSmokeTest {
         final Table panel;
 
         Labels(GpuHudTestStage hud, BoardCamera camera) {
+            state.contactsPinned = true; // These captures interact with the expanded contact rows.
             GpuBoardSource source = mock(GpuBoardSource.class);
             // The HUD's selection rule inspects an enemy (GpuHud.select): a row's click hands it the row's unit.
             contacts = new GpuContactsPanel(hud.kit, source, state, mock(GpuContextMenu.class),

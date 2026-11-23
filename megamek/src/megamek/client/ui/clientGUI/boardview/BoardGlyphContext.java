@@ -11,7 +11,6 @@ import java.awt.Point;
 import java.awt.Shape;
 import java.awt.image.BufferedImage;
 
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -21,8 +20,6 @@ import megamek.common.units.Entity;
 
 /** Drawing inputs for shared tactical symbols and unit labels, independent of a board window. */
 public interface BoardGlyphContext {
-    default BoardGlyphContext glyphContext() { return this; }
-    void addSprite(Sprite sprite);
     void drawHexBorder(Graphics2D graphics, Point point, Color color, double padding, double lineWidth);
     Game getGame();
     Board getBoard();
