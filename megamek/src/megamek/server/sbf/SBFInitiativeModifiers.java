@@ -83,7 +83,7 @@ final class SBFInitiativeModifiers {
             long recon = units().mapToLong(u -> u.getElements().isEmpty() ? (u.hasSUA(RCN) ? 2 : 0)
                   : u.getElements().stream().filter(SBFUnitConverter::isReconElement).count()).sum();
             if (!intel) {
-                int mhq = units().mapToInt(SBFUnit::getMHQ).max().orElse(0);
+                int mhq = units().mapToInt(SBFUnit::getMHQ).sum();
                 result += (mhq >= 7 ? 2 : mhq >= 3 ? 1 : 0) * (recon >= 4 ? 2 : 1);
             }
             result += battlefieldBonus() + leadershipBonus() + statusPenalty(recon);

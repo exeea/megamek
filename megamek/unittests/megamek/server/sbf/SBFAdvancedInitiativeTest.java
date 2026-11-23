@@ -119,6 +119,24 @@ class SBFAdvancedInitiativeTest {
     }
 
     @Test
+    void forceWideMhqSelectsOneAdvancedInitiativeModifier() {
+        enable(INIT_MODIFIERS);
+        var hq = formation(10, blue).getUnits().getFirst();
+        hq.getSpecialAbilities().setSUA(RCN); // Avoid the separate no-Recon penalty.
+        hq.getSpecialAbilities().mergeSUA(MHQ, 2);
+        var alliedHq = formation(11, ally).getUnits().getFirst();
+        formation(12, red).getUnits().getFirst().getSpecialAbilities().mergeSUA(MHQ, 7);
+        assertEquals(0, modifiers(blue).total());
+
+        alliedHq.getSpecialAbilities().mergeSUA(MHQ, 2);
+        assertEquals(1, modifiers(blue).total());
+        alliedHq.getSpecialAbilities().replaceSUA(MHQ, 5);
+        assertEquals(2, modifiers(ally).total());
+        alliedHq.setCurrentArmor(0);
+        assertEquals(0, modifiers(blue).total());
+    }
+
+    @Test
     void worstStatusOnlyAndEnemyCapturedHQPersistsAfterFollowingTurn() {
         enable(INIT_MODIFIERS);
         SBFFormation scout = formation(11, blue);
