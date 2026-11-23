@@ -53,12 +53,14 @@ import megamek.common.alphaStrike.ASRange;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.Weather;
+import megamek.common.rolls.Roll;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
@@ -71,6 +73,7 @@ import megamek.common.strategicBattleSystems.SBFVisibilityStatus;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class SBFDetectionHelperTest {
 
@@ -385,6 +388,80 @@ class SBFDetectionHelperTest {
         assertEquals(10, SBFDetectionModifiers.sensorRange(f));
         f.removeUnit(scout);
         assertEquals(6, SBFDetectionModifiers.sensorRange(f));
+    }
+
+    @Test
+    void sensorPingNamesTheObserverAndTheSideOrVertexSeenFromItsHex() {
+        var observer = new SBFFormation();
+        observer.setName("Scout");
+        var sides = List.of("N", "NE", "SE", "S", "SW", "NW");
+        for (var origin : List.of(new Coords(6, 6), new Coords(7, 6))) {
+            observer.setPosition(BoardLocation.of(origin, 0));
+            for (int side = 0; side < sides.size(); side++) {
+                int next = (side + 1) % sides.size();
+                var across = origin.translated(side);
+                assertTrue(SBFDetectionHelper.sensorPing(observer, BoardLocation.of(across, 0)).text()
+                      .contains("Scout detects a sensor ping toward the " + sides.get(side) + " hexside."));
+                assertTrue(SBFDetectionHelper.sensorPing(observer, BoardLocation.of(across.translated(next), 0)).text()
+                      .contains("Scout detects a sensor ping toward the point between the " + sides.get(side)
+                            + " and " + sides.get(next) + " hexsides."));
+            }
+        }
+    }
+
+    @Test
+    void onlyFreshPingsReportBearingsToTheDetectingPlayer() {
+        var game = new SBFGame();
+        var manager = new SBFGameManager();
+        manager.setGame(game);
+        game.setBoard(0, Board.createEmptyBoard(18, 18));
+        game.getOptions().getOption(SBFRuleOptions.BASE_RECON).setValue(true);
+        var targetHex = new Coords(8, 8);
+        var observer = deploy(game, 0, 20);
+        observer.setName("North scout");
+        observer.setPosition(BoardLocation.of(targetHex.translated(0, 6), 0));
+        var second = deploy(game, 0, 21);
+        second.setName("South scout");
+        second.setPosition(BoardLocation.of(targetHex.translated(3, 6), 0));
+        var target = deploy(game, 1, 22);
+        target.setPosition(BoardLocation.of(targetHex, 0));
+        target.setType(SBFElementType.CI);
+        var owner = game.getPlayer(0);
+        var roll = Mockito.mock(Roll.class);
+        try (var dice = Mockito.mockStatic(Compute.class, Mockito.CALLS_REAL_METHODS)) {
+            dice.when(() -> Compute.rollD6(2)).thenReturn(roll);
+            Mockito.when(roll.getIntValue()).thenReturn(6);
+            manager.detectionHelper.performSensorDetection();
+            assertEquals(SBFVisibilityStatus.SENSOR_PING, game.getVisibility(owner, 22));
+            var reports = manager.getPendingReports();
+            var visible = game.getGameReport().visibleTo(owner, reports);
+            assertEquals(2, visible.size());
+            assertTrue(visible.stream().anyMatch(r -> r.text().contains("North scout detects a sensor ping toward the S hexside.")));
+            assertTrue(visible.stream().anyMatch(r -> r.text().contains("South scout detects a sensor ping toward the N hexside.")));
+            assertTrue(game.getGameReport().visibleTo(game.getPlayer(1), reports).isEmpty());
+            assertNull(manager.unitUpdateHelper.representationFor(owner, target));
+
+            manager.clearPendingReports();
+            Mockito.when(roll.getIntValue()).thenReturn(2);
+            manager.detectionHelper.performSensorDetection();
+            assertEquals(SBFVisibilityStatus.SENSOR_PING, game.getVisibility(owner, 22));
+            assertTrue(manager.getPendingReports().isEmpty());
+
+            // At night, only the closer scout's +3 range modifier converts a roll of 2 into a Ping.
+            game.getPlanetaryConditions().setLight(Light.PITCH_BLACK);
+            second.setPosition(BoardLocation.of(targetHex.translated(3, 3), 0));
+            manager.detectionHelper.performSensorDetection();
+            visible = game.getGameReport().visibleTo(owner, manager.getPendingReports());
+            assertEquals(1, visible.size());
+            assertTrue(visible.getFirst().text().contains("South scout detects a sensor ping toward the N hexside."));
+
+            // A roll of 6 gives the northern scout a Ping and the southern scout a Solid Lock.
+            manager.clearPendingReports();
+            Mockito.when(roll.getIntValue()).thenReturn(6);
+            manager.detectionHelper.performSensorDetection();
+            assertEquals(SBFVisibilityStatus.BLIP, game.getVisibility(owner, 22));
+            assertTrue(manager.getPendingReports().isEmpty());
+        }
     }
 
     @Test

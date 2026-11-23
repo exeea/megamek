@@ -33,16 +33,19 @@
 
 package megamek.server.sbf;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.IntSupplier;
 
+import megamek.common.Facing;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.actions.sbf.SBFAirGroundAttack;
 import megamek.common.actions.sbf.SBFAttackAction;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
@@ -94,6 +97,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
 
         for (SBFFormation hostileFormation : hostileFormations) {
             SBFFormation ghostObserver = null;
+            List<SBFFormation> pingObservers = new ArrayList<>();
             SBFVisibilityStatus visibilityStatus = game().visibilityHelper().getObservedVisibility(viewingPlayer.getId(),
                   hostileFormation.getId());
             for (SBFFormation viewingFormation : viewingFormations) {
@@ -121,21 +125,39 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                     }
                     if (detectionResult == SBFVisibilityStatus.SENSOR_GHOST) {
                         ghostObserver = viewingFormation;
+                    } else if (detectionResult == SBFVisibilityStatus.SENSOR_PING) {
+                        pingObservers.add(viewingFormation);
                     }
                     visibilityStatus = visibilityStatus.bestOf(detectionResult);
                 }
             }
             game().visibilityHelper().setVisibility(viewingPlayer.getId(), hostileFormation.getId(), visibilityStatus);
-            if (visibilityStatus == SBFVisibilityStatus.SENSOR_PING
-                  || (visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST && ghostObserver != null)) {
-                SBFReportEntry report = visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST
-                      ? new SBFReportEntry(inFrontOf(ghostObserver, hostileFormation.getPosition()) ? 3600 : 3602)
-                            .add(ghostObserver.generalName())
-                      : new SBFReportEntry(3601).add(hostileFormation.getPosition().coords().getY() + 1);
-                game().getGameReport().restrictTo(report, Set.of(viewingPlayer.getId()));
-                addReport(report);
+            if (visibilityStatus == SBFVisibilityStatus.SENSOR_PING) {
+                for (SBFFormation observer : pingObservers) {
+                    reportTo(viewingPlayer, sensorPing(observer, hostileFormation.getPosition()));
+                }
+            } else if (visibilityStatus == SBFVisibilityStatus.SENSOR_GHOST && ghostObserver != null) {
+                reportTo(viewingPlayer, new SBFReportEntry(inFrontOf(ghostObserver, hostileFormation.getPosition())
+                      ? 3600 : 3602).add(ghostObserver.generalName()));
             }
         }
+    }
+
+    private void reportTo(Player player, SBFReportEntry report) {
+        game().getGameReport().restrictTo(report, Set.of(player.getId()));
+        addReport(report);
+    }
+
+    /** IO:BF p. 196. Report the nearest hexside or vertex seen from this observer. */
+    static SBFReportEntry sensorPing(SBFFormation observer, BoardLocation target) {
+        double bearing = observer.getPosition().coords().radian(target.coords());
+        int spoke = (int) Math.round(bearing / (Coords.HEX_SIDE / 2));
+        int side = spoke / 2;
+        String facing = Facing.valueOfInt(side).name();
+        if (spoke % 2 == 0) {
+            return new SBFReportEntry(3603).add(observer.generalName()).add(facing);
+        }
+        return new SBFReportEntry(3604).add(observer.generalName()).add(facing).add(Facing.valueOfInt(side + 1).name());
     }
 
     static boolean inFrontOf(SBFFormation observer, BoardLocation position) {
@@ -484,7 +506,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) && !illuminated(game, target) &&
               (game.getPlanetaryConditions().getLight().isDuskDawn()
                     || game.getPlanetaryConditions().getLight().isMoonlessOrPitchBack())) ? 1 : 0;
-        // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMech/Vehicle column.
+        // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMek/Vehicle column.
         boolean mekOrVehicle = formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.MX,
               SBFElementType.PM, SBFElementType.AS);
         return switch (visualLevel(game, target)) {

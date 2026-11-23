@@ -47,27 +47,27 @@ The user supplied the writer’s answers for the third printing on 23 November 2
 | Aerospace Movement, p. 176 | IMPLEMENTED for standard movement | Eligible atmospheric and ground Formations share the player’s movement slots in SBFInitiativeHelper and SBFFormationTurn. The optional capital combat-area sequence has its own rules. |
 | Advanced Initiative, pp. 194–195 | IMPLEMENTED for force-wide MHQ | SBFInitiativeModifiers.total sums surviving friendly Unit ratings and applies one Special Ability table entry. Two MHQ2 Units qualify for +1. MHQ2 and MHQ5 qualify for +2 before the four-Recon-Element adjustment. SBFAdvancedInitiativeTest covers allied ratings, casualties and enemy exclusion. |
 | Playing the Game and Detecting Hostile Forces, p. 195 | IMPLEMENTED for ordinary ground sensor detection | SBFPhasePreparationManager starts detection in the Detection Phase. SBFDetectionHelper rolls for each eligible observer and each hostile Formation within range every round. Movement may identify an already located Blip in the same hex under p. 196. |
-| Sensor Ping, p. 196 | PARTIAL | The writer reports a bearing from the detecting Formation toward a hexside or the point between two sides. SBFDetectionHelper sends the target’s absolute board row in report 3601 and omits the observer. |
+| Sensor Ping, p. 196 | IMPLEMENTED | For a Ping contact, SBFDetectionHelper privately reports each observer’s fresh result as a bearing toward a hexside or the point between two sides. Previously saved reports retain their original message format. |
 | Visual Spotting Range Table, p. 197 | IMPLEMENTED for clarified types and weather | The writer assigns MX and PM to the BattleMech/Vehicle column. SBFDetectionHelper.visualRange now gives both types 4/2 hexes at Visual 1/2. Conventional infantry and battle armor keep their 2/1 ranges. Sleet, both severities of hail, lightning storms and ice storms all select Visual 3. Darker lighting and searchlights retain their usual effects. |
 
 The p. 195 answer addresses total MHQ rating. The p. 207 Battlefield Intelligence question counts qualifying Units. Joshua has four Formations and two qualifying Units (MHQ6 and MHQ5). The outstanding question is whether he earns the extra network +1 in addition to his MHQ3+ headquarters bonus.
 
 ### Resume checkpoint for the four rules-writer fixes
 
-Saved on 23 November 2026 at the user's request. Work in `C:\Projects\megamek\megamek_temp` on `UI_terraincompression`. Keep commits local. Other workers have unrelated changes in this checkout.
+Updated 23 November 2026. All four rules-writer corrections are implemented on the local `UI_terraincompression` branch in `C:\Projects\megamek\megamek_temp`.
 
-1. **Force-wide MHQ, p. 195.** Local commit `e79e29c464` contains the production fix, the test `SBFAdvancedInitiativeTest.forceWideMhqSelectsOneAdvancedInitiativeModifier`, and the updated table entry above. The new test exercises distributed MHQ2 + MHQ2, the MHQ7 threshold, enemy exclusion, and a destroyed allied Unit. The commit passed `git diff --check`. Gradle has not yet run on this commit. Independent reviewer `/root/sbf_advanced` signed off on the calculation, ordinary server roll, regression fixture and p. 207 separation. The remaining step for this item is running the regression. The previous 316-test result predates these four fixes.
-2. **Sensor Ping, p. 196.** Implementation and tests are pending. Start with `SBFDetectionHelper.performSensorDetection(Player)`. It still formats the target's Y coordinate into report 3601. Retain the observer that actually rolled each reported Ping, report a direction toward a hexside or the point between two hexsides, and keep the result private to the detecting player. Use the existing board geometry in `Coords.radian`. Preserve old saved report 3601 with its existing arguments by giving the new text a fresh report ID. Cover side and vertex bearings, wraparound, two observers, no fresh roll, and report privacy.
-3. **MX/PM visual spotting, p. 197.** The range-column correction and regression for all four visual classes are in the checkout, awaiting verification.
-4. **Storm visual classes, p. 197.** The four weather settings and their daylight, dusk and pitch-black regressions are in the checkout, awaiting verification.
+| Rule | Regression and independent review |
+| --- | --- |
+| Force-wide MHQ, p. 195 | `e79e29c464`. SBFAdvancedInitiativeTest covers distributed MHQ2 + MHQ2, the MHQ7 threshold, enemy exclusion and the loss of an allied Unit. Independent review signed off. |
+| Sensor Ping, p. 196 | SBFDetectionHelperTest checks each hexside and vertex on both column parities, multiple observers, a retained Ping following misses, mixed rolls, stronger contacts, recipient filtering and omission of the target counter. Independent review signed off on the implementation and requested the mixed-result assertions. |
+| MX/PM visual spotting, p. 197 | `9980f9b8bd`. SBFDetectionHelperTest exercises MX and PM across all four visual classes, with infantry and battle armor as controls. Independent review signed off. |
+| Storm visual classes, p. 197 | `f06cd65873`. SBFDetectionHelperTest covers light and heavy hail, lightning storms and ice storms in daylight, dusk and pitch black, including searchlight effects. Independent review signed off. |
 
-Resume with the focused tests below. Then run the integrated SBF tests, verify the private detection report on the native 3D board, and record independent review for each completed part here. The existing two-player native harness is in `work/sbf-3d`.
+**Native 3D verification.** Two clients connected to a real SBF server. Northern Watch saw the point between NE and SE in its Detection Report. Eastern Watch received the reciprocal SW/NW bearing. Each client received only its own report, and neither received the enemy counter. The local capture is `work/sbf-3d/out/sbf-writer-ping-01/01-private-sensor-ping.png`.
 
-```powershell
-.\gradlew.bat :megamek:test --tests '*SBFAdvancedInitiativeTest' --tests '*SBFDetectionHelperTest' --offline --console=plain
-```
+**Verification in progress.** Rerun the integrated SBF and native capture unit tests plus Checkstyle after the last mixed-roll assertions. The previous 316-test result predates these fixes.
 
-The p. 165 generic infantry interpretation and p. 207 Battlefield Intelligence density are separate unresolved questions. The current four fixes can proceed independently.
+The p. 165 generic infantry interpretation and p. 207 Battlefield Intelligence density remain separate unresolved questions.
 
 ## Current play and independent reviews
 
