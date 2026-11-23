@@ -302,8 +302,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_TOOLTIP_QUIRK_COLOR = "UnitToolTipQuirkColor";
 
     public static final String SPLIT_PANE_A_DIVIDER_LOCATION = "SplitPaneADividerLocation";
-    public static final String GAME_SUMMARY_BOARD_VIEW = "GameSummaryBoardView";
-    public static final String GAME_SUMMARY_MINIMAP = "GameSummaryMinimap";
     public static final String GIF_GAME_SUMMARY_MINIMAP = "GifGameSummaryMinimap";
     public static final String GIF_GAME_SUMMARY_RECORDING = "GifGameSummaryRecording";
     public static final String GIF_GAME_SUMMARY_SAVE_DIRECTORY = "GifGameSummarySaveDirectory";
@@ -927,7 +925,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(UNIT_TOOLTIP_WEAPON_COLOR, new Color(0x9696D2));
         setDefault(UNIT_TOOLTIP_QUIRK_COLOR, new Color(0x64B4B4));
 
-        store.setDefault(GAME_SUMMARY_BOARD_VIEW, false);
         store.setDefault(ENTITY_OWNER_LABEL_COLOR, true);
         store.setDefault(UNIT_LABEL_BORDER, true);
         store.setDefault(UNIT_LABEL_STYLE, LabelDisplayStyle.NICKNAME_AND_ABBREVIATED.name());
@@ -995,7 +992,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
                         ? GifRecordingMode.ALWAYS.name()
                         : GifRecordingMode.NEVER.name());
         }
-        store.setDefault(GAME_SUMMARY_MINIMAP, false);
         store.setDefault(SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP, false);
         store.setDefault(MOVE_DISPLAY_TAB_DURING_PHASES, true);
         store.setDefault(FIRE_DISPLAY_TAB_DURING_PHASES, true);
@@ -1432,14 +1428,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setHexLabelOutline(boolean outline) {
         store.setValue(HEX_LABEL_OUTLINE, outline);
-    }
-
-    public boolean getGameSummaryBoardView() {
-        return store.getBoolean(GAME_SUMMARY_BOARD_VIEW);
-    }
-
-    public boolean getGameSummaryMinimap() {
-        return store.getBoolean(GAME_SUMMARY_MINIMAP);
     }
 
     /**
@@ -2614,14 +2602,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     @Deprecated(since = "0.51.0", forRemoval = true)
     public void setCoordsEnabled(boolean b) {
         store.setValue(SHOW_COORDS, b);
-    }
-
-    public void setGameSummaryBoardView(boolean state) {
-        store.setValue(GAME_SUMMARY_BOARD_VIEW, state);
-    }
-
-    public void setGameSummaryMinimap(boolean state) {
-        store.setValue(GAME_SUMMARY_MINIMAP, state);
     }
 
     public void setGifGameSummaryRecording(GifRecordingMode mode) {

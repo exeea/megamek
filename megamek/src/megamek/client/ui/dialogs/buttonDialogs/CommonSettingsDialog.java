@@ -392,10 +392,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JLabel stampFormatLabel;
     private JLabel gameLogFilenameLabel;
 
-    private final JCheckBox gameSummaryBV =
-          new JCheckBox(Messages.getString("CommonSettingsDialog.gameSummaryBV.name"));
-    private final JCheckBox gameSummaryMM =
-          new JCheckBox(Messages.getString("CommonSettingsDialog.gameSummaryMM.name"));
     private final JComboBox<String> gifGameSummaryRecording = new JComboBox<>(new String[] {
           Messages.getString("CommonSettingsDialog.gifGameSummaryRecording.always"),
           Messages.getString("CommonSettingsDialog.gifGameSummaryRecording.ask"),
@@ -1212,13 +1208,10 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             Messages.getString("CommonSettingsDialog.playersRemainingToShow.tooltip"));
 
         List.of(mouseWheelZoom, mouseWheelZoomFlip).forEach(checkBox -> configureCheckBox(checkBox, null));
-        String msg_tooltip = Messages.getString("CommonSettingsDialog.gameSummaryBV.tooltip",
-            Configuration.gameSummaryImagesBVDir());
-        configureCheckBox(gameSummaryBV, msg_tooltip);
         comps.add(List.of(createGameBoardControlsGrid("CommonSettingsGameBoardControlsGrid",
               buttonsPerRowLabel, buttonsPerRow,
               playersRemainingToShowLabel, playersRemainingToShow,
-              mouseWheelZoom, mouseWheelZoomFlip, gameSummaryBV)));
+              mouseWheelZoom, mouseWheelZoomFlip)));
 
         addLineSpacer(comps);
 
@@ -2445,8 +2438,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JPanel getMiniMapPanel() {
         List<List<Component>> comps = new ArrayList<>();
         configureCheckBox(mmSymbol, null);
-              configureCheckBox(gameSummaryMM, Messages.getString("CommonSettingsDialog.gameSummaryMM.tooltip",
-                Configuration.gameSummaryImagesMMDir()));
         JLabel gifGameSummaryRecordingLabel =
               new JLabel(Messages.getString("CommonSettingsDialog.gifGameSummaryRecording.name"));
         String gifRecordingTooltip = Messages.getString("CommonSettingsDialog.gifGameSummaryRecording.tooltip");
@@ -2478,7 +2469,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             "CommonSettingsDialog.movePathPersistence"));
         movePathPersistenceOnMiniMapLabel.setLabelFor(movePathPersistenceOnMiniMap);
         comps.add(List.of(createMiniMapDisplayGrid(
-              mmSymbol, gameSummaryMM,
+              mmSymbol,
               gifGameSummaryRecordingLabel, gifGameSummaryRecording,
               gifSaveDirectoryLabel, gifSaveDirectoryControl,
               drawFacingArrowsOnMiniMap, drawSensorRangeOnMiniMap,
@@ -2489,7 +2480,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     }
 
     static SettingsFormPanel createMiniMapDisplayGrid(
-        JCheckBox symbols, JCheckBox summaryImage,
+        JCheckBox symbols,
         JLabel recordingLabel, JComponent recordingControl,
         JLabel saveDirectoryLabel, JComponent saveDirectoryControl,
         JCheckBox facingArrows, JCheckBox sensorRange,
@@ -2500,7 +2491,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         recordingLabel.setLabelFor(recordingControl);
         saveDirectoryLabel.setLabelFor(saveDirectoryControl);
         persistenceLabel.setLabelFor(persistenceControl);
-        grid.addEqualWidthComponentGrid(2, symbols, summaryImage);
+        grid.addEqualWidthComponentGrid(2, symbols);
         grid.addEqualWidthComponentGrid(2, recordingLabel, recordingControl);
         grid.addEqualWidthComponentGrid(2, saveDirectoryLabel, saveDirectoryControl);
         grid.addEqualWidthComponentGrid(2, facingArrows, sensorRange);
@@ -2953,8 +2944,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                 }
             }
 
-            gameSummaryBV.setSelected(GUIP.getGameSummaryBoardView());
-            gameSummaryMM.setSelected(GUIP.getGameSummaryMinimap());
             gifGameSummaryRecording.setSelectedIndex(GUIP.getGifGameSummaryRecording().ordinal());
             boardGraphicsChoice.setSelectedIndex(GUIP.getBoardGraphics().ordinal());
             gifSaveDirectory.setText(GUIP.getGifGameSummarySaveDirectory());
@@ -3435,8 +3424,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setSoftCenter(useSoftCenter.isSelected());
         GUIP.setAutoCenter(useAutoCenter.isSelected());
         GUIP.setAutoSelectNextUnit(useAutoSelectNext.isSelected());
-        GUIP.setGameSummaryBoardView(gameSummaryBV.isSelected());
-        GUIP.setGameSummaryMinimap(gameSummaryMM.isSelected());
         int selectedRecordingIndex = gifGameSummaryRecording.getSelectedIndex();
         GifRecordingMode[] recordingModes = GifRecordingMode.values();
         boolean isValidRecordingIndex = (selectedRecordingIndex >= 0)
