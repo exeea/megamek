@@ -46,3 +46,7 @@ IO:BF “Playing the Game”, pp. 163–164, and “Detection and Reconnaissance
 ### Ground initiative and turn order
 
 IO:BF “Initiative Phase”, p. 163, and “Unequal Number of Formations” and “Combat Phase”, p. 164. Unequal sides are “moved in proportion”. SBFInitiativeHelper now uses the Team initiative already rolled and reported by the server. Allied owners contribute to the same side’s movement count when team initiative is enabled. The losing side declares all combat actions first. SBFInitiativeHelperTest reverses the individual and side rolls and checks both phase orders. Advanced reconnaissance’s undetected-formation exception remains open.
+
+### Ground terrain and movement modes
+
+IO:BF “Movement Cost Table”, p. 165, and “Terrain Modifiers on Movement”, p. 166, require the “highest Move cost” for mixed Formations. SurfaceSBFMoveStep uses SBFTerrainMovement for constituent terrain legality and costs, including infantry in urban terrain, naval/submarine water requirements, sealing and amphibious abilities, tracked and wheeled movement, VTOL, WiGE and rail. SurfaceSBFMoveStepTest covers representative legal and prohibited combinations. Mixed-width water, entry shore, bridge capacity, unusually large Elements and advanced bogging remain PARTIAL. The standard road allowance and stacking are recorded with server movement below.

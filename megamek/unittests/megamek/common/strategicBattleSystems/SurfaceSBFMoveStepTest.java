@@ -1,0 +1,165 @@
+/*
+ * Copyright (C) 2024-2025 The MegaMek Team. All Rights Reserved.
+ *
+ * This file is part of MegaMek.
+ *
+ * MegaMek is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License (GPL),
+ * version 3 or (at your option) any later version,
+ * as published by the Free Software Foundation.
+ *
+ * MegaMek is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * A copy of the GPL should have been included with this project;
+ * if not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTICE: The MegaMek organization is a non-profit group of volunteers
+ * creating free software for the BattleTech community.
+ *
+ * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+ * of The Topps Company, Inc. All Rights Reserved.
+ *
+ * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+ * InMediaRes Productions, LLC.
+ *
+ * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+ * Microsoft's "Game Content Usage Rules"
+ * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+ * affiliated with Microsoft.
+ */
+
+package megamek.common.strategicBattleSystems;
+
+import static megamek.common.alphaStrike.BattleForceSUA.AMP;
+import static megamek.common.alphaStrike.BattleForceSUA.SEAL;
+import static megamek.common.alphaStrike.BattleForceSUA.UMU;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import megamek.common.Hex;
+import megamek.common.Player;
+import megamek.common.alphaStrike.ASUnitType;
+import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+class SurfaceSBFMoveStepTest {
+    private final SBFGame game = new SBFGame();
+    private final SBFFormation formation = new SBFFormation();
+    private final BoardLocation start = BoardLocation.of(new Coords(0, 0), 0);
+    private final BoardLocation end = BoardLocation.of(new Coords(0, 1), 0);
+    private final Hex from = new Hex();
+    private final Hex to = new Hex();
+
+    @BeforeEach
+    void setUp() {
+        Board board = new Board(1, 2);
+        board.setHex(0, 0, from);
+        board.setHex(0, 1, to);
+        game.setBoard(0, board);
+        game.addPlayer(1, new Player(1, "Owner"));
+        formation.setOwnerId(1);
+        formation.setId(10);
+        formation.setPosition(start);
+        formation.setDeployed(true);
+        game.addUnit(formation);
+    }
+
+    @Test
+    void mappedWaterRequiresTheRightMovementModeOrEquipment() {
+        setMover(SBFElementType.V, SBFMovementMode.NAVAL);
+        assertTrue(step().isIllegal());
+        to.addTerrain(new Terrain(Terrains.WATER, 1));
+        assertEquals(1, step().getMpUsed());
+        setMover(SBFElementType.V, SBFMovementMode.TRACKED);
+        assertTrue(step().isIllegal());
+        formation.getSpecialAbilities().setSUA(AMP);
+        assertEquals(2, step().getMpUsed());
+    }
+
+    @Test
+    void infantryAndIndustrialMeksNeedUnderwaterEquipment() {
+        to.addTerrain(new Terrain(Terrains.WATER, 2));
+        setMover(SBFElementType.CI, SBFMovementMode.INFANTRY_FOOT);
+        assertTrue(step().isIllegal());
+        formation.getSpecialAbilities().setSUA(UMU);
+        assertEquals(9, step().getMpUsed());
+
+        AlphaStrikeElement industrial = new AlphaStrikeElement();
+        industrial.setType(ASUnitType.IM);
+        industrial.setPrimaryMovementMode("");
+        SBFUnit unit = new SBFUnit();
+        unit.setType(SBFElementType.BM);
+        unit.setElements(List.of(industrial));
+        formation.addUnit(unit);
+        assertTrue(step().isIllegal());
+        industrial.getSpecialAbilities().setSUA(SEAL);
+        assertFalse(step().isIllegal());
+        assertEquals(9, step().getMpUsed());
+    }
+
+    @Test
+    void pavedCrossingBypassesWaterAndObstructingTerrain() {
+        setMover(SBFElementType.V, SBFMovementMode.WHEELED);
+        to.addTerrain(new Terrain(Terrains.WATER, 2));
+        to.addTerrain(new Terrain(Terrains.WOODS, 2));
+        assertTrue(step().isIllegal());
+        to.addTerrain(new Terrain(Terrains.BRIDGE, 1));
+        assertFalse(step().isIllegal());
+        assertEquals(1, step().getMpUsed());
+    }
+
+    @Test
+    void urbanTerrainAndHillsUseInfantryAndVehicleCosts() {
+        to.setLevel(1);
+        to.addTerrain(new Terrain(Terrains.BUILDING, 4));
+        setMover(SBFElementType.V, SBFMovementMode.TRACKED);
+        assertEquals(7, step().getMpUsed());
+        setMover(SBFElementType.BA, SBFMovementMode.BA_WALK);
+        assertEquals(5, step().getMpUsed());
+        setMover(SBFElementType.BM, SBFMovementMode.MEK_WALK);
+        assertEquals(6, step().getMpUsed());
+        to.setLevel(2);
+        setMover(SBFElementType.PM, SBFMovementMode.MEK_WALK);
+        assertTrue(step().isIllegal());
+    }
+
+    @Test
+    void everyConstituentMustBeAbleToFlyOverWoods() {
+        setMover(SBFElementType.V, SBFMovementMode.VTOL);
+        to.addTerrain(new Terrain(Terrains.WOODS, 2));
+        assertFalse(step().isIllegal());
+        assertEquals(1, step().getMpUsed());
+        SBFUnit flyer = new SBFUnit();
+        flyer.setType(SBFElementType.V);
+        flyer.setMovementMode(SBFMovementMode.VTOL);
+        SBFUnit tank = new SBFUnit();
+        tank.setType(SBFElementType.V);
+        tank.setMovementMode(SBFMovementMode.TRACKED);
+        tank.setArmor(4);
+        formation.setUnits(List.of(flyer, tank));
+        assertTrue(step().isIllegal());
+        tank.setCurrentArmor(0);
+        assertFalse(step().isIllegal());
+    }
+
+    private void setMover(SBFElementType type, SBFMovementMode mode) {
+        formation.setType(type);
+        formation.setMovementMode(mode);
+    }
+
+    private SBFMoveStep step() {
+        return SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), start, end);
+    }
+}

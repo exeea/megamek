@@ -33,17 +33,24 @@
 
 package megamek.common.strategicBattleSystems;
 
+import java.util.List;
+
 import megamek.client.commands.ClientCommand;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.BoardLocation;
-import megamek.common.units.Terrains;
 
 /**
  * This is an SBF move step that happens on the surface of a hex, i.e. on the ground or, if the destination has water,
  * on the water surface. This means that the elevation at start and end is considered to be 0.
  */
 public class SurfaceSBFMoveStep extends SBFMoveStep {
+
+    private boolean roadBonusEligible;
+
+    boolean earnsRoadBonus() {
+        return roadBonusEligible;
+    }
 
     protected SurfaceSBFMoveStep(int formationId) {
         super(formationId);
@@ -73,54 +80,21 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
         }
 
         SBFFormation formation = game.getFormation(formationId).orElseThrow();
-        boolean isNaval = formation.getMovementMode().isDeepWater();
-        boolean isHover = formation.getMovementMode().isHover();
-        boolean isWige = formation.getMovementMode() == SBFMovementMode.WIGE;
-        boolean wheeledOrHover = isHover || formation.getMovementMode().isWheeled();
-
-        boolean isInfantry = formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA);
-        boolean isMek = formation.isType(SBFElementType.BM);
-        boolean isVehicle = formation.isType(SBFElementType.V);
-
-        mpUsed = startingPoint.coords().distance(destination.coords());
-        Hex startingHex = game.getBoard(startingPoint.boardId()).getHex(startingPoint.coords());
-        Hex destinationHex = game.getBoard(destination.boardId()).getHex(destination.coords());
-        int levelDifference = Math.abs(destinationHex.getLevel() - startingHex.getLevel());
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.WOODS)) {
-            int woodsLevel = destinationHex.terrainLevel(Terrains.WOODS);
-            mpUsed += wheeledOrHover ? 2 : woodsLevel;
-            mpUsed -= isInfantry ? 1 : 0;
-            isIllegal |= (woodsLevel > 1) && isVehicle;
-            isIllegal |= (woodsLevel == 3) && !isInfantry;
+        Hex from = game.getBoard(startingPoint.boardId()).getHex(startingPoint.coords());
+        Hex to = game.getBoard(destination.boardId()).getHex(destination.coords());
+        List<SBFTerrainMovement> movers = SBFTerrainMovement.of(formation).toList();
+        roadBonusEligible = SBFTerrainMovement.isPaved(from) && SBFTerrainMovement.isPaved(to);
+        int direction = startingPoint.coords().direction(destination.coords());
+        for (SBFTerrainMovement mover : movers) {
+            int cost = mover.cost(from, to, direction);
+            if (cost == SBFTerrainMovement.PROHIBITED) {
+                isIllegal = true;
+                return;
+            }
+            mpUsed = Math.max(mpUsed, cost);
+            roadBonusEligible &= mover.earnsRoadBonus();
         }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.JUNGLE)) {
-            int jungleLevel = destinationHex.terrainLevel(Terrains.JUNGLE);
-            mpUsed += wheeledOrHover ? 2 : jungleLevel + 1;
-            isIllegal |= (jungleLevel > 1) && isVehicle;
-            isIllegal |= (jungleLevel == 3) && !isInfantry;
-        }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.RUBBLE)) {
-            mpUsed++;
-        }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.ROUGH)) {
-            mpUsed += (wheeledOrHover) ? 2 : 1;
-        }
-
-        if ((destinationHex.terrainLevel(Terrains.WATER) == 0) && isNaval) {
-            isIllegal = true;
-        }
-
-        if (destinationHex.terrainLevel(Terrains.WATER) >= 1) {
-            isIllegal = !isHover && !isNaval && !isWige;
-        }
-
-        mpUsed += levelDifference;
-        isIllegal |= (levelDifference > 2) || ((levelDifference == 2) && !isMek);
-
+        isIllegal |= movers.isEmpty();
         final Player owner = game.getPlayer(formation.getOwnerId());
         if (game.getActiveFormationsAt(startingPoint).stream().anyMatch(f -> game.areHostile(f, owner))) {
             mpUsed++;
@@ -129,7 +103,8 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
 
     @Override
     public SBFMoveStep copy() {
-        SBFMoveStep step = new SurfaceSBFMoveStep(formationId);
+        SurfaceSBFMoveStep step = new SurfaceSBFMoveStep(formationId);
+        step.roadBonusEligible = roadBonusEligible;
         step.startingPoint = startingPoint;
         step.destination = destination;
         step.mpUsed = mpUsed;
