@@ -315,6 +315,25 @@ class SBFAerospaceTest {
     }
 
     @Test
+    void strikeStillUsesTheDeclaredFlightWhenFlakRemovesAPreviousFlight() {
+        airborneFiring(List.of(ground));
+        enemy(21, ground);
+        var lost = squadron.getUnits().getFirst();
+        var chosen = unit(SBFElementType.AS, SBFMovementMode.AERODYNE);
+        chosen.setDamage(ASDamageVector.create(4, 3, 2, 0, 3));
+        squadron.addUnit(chosen);
+        var strike = new SBFAirGroundAttack(11, Type.STRIKE, List.of(21), List.of(1), List.of());
+        assertTrue(SBFAirGroundRun.declare(manager, 1, strike));
+        var handler = ((SBFAirGroundAttack) game.getActionsVector().getFirst()).getHandler(manager);
+        squadron.removeUnit(lost);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.d6(2)).thenReturn(12);
+            handler.handle();
+        }
+        assertEquals(4, game.getPendingHits().getFirst().damage());
+    }
+
+    @Test
     void altitudeBombingConsumesOnlyAcceptedLoadsAndCanHitAFriendlyOnAMiss() {
         BoardLocation next = BoardLocation.of(new Coords(2, 1), 0);
         airborneFiring(List.of(ground, next));

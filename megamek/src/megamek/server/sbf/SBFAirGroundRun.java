@@ -58,10 +58,24 @@ import megamek.common.strategicBattleSystems.SBFUnit;
 /** Air-to-ground strike, strafe and conventional bombing (Strategic Aerospace, IO:BF p. 178). */
 public class SBFAirGroundRun extends AbstractSBFActionHandler {
     private final SBFAirGroundAttack run;
+    /** Keep original Flight participants even if immediate flak removes an earlier index (IO:BF p. 205). */
+    private List<SBFUnit> declaredFlights;
+
 
     public SBFAirGroundRun(SBFAirGroundAttack run, SBFGameManager manager) {
         super(run, manager);
         this.run = run;
+        manager.getGame().getFormation(run.getEntityId()).ifPresent(this::captureFlights);
+    }
+
+    private void captureFlights(SBFFormation squadron) {
+        var flights = run.flights();
+        if (flights.isEmpty() && !run.releases().isEmpty() && !squadron.getUnits().isEmpty()) {
+            declaredFlights = java.util.Collections.nCopies(run.releases().size(), squadron.getUnits().getFirst());
+        } else {
+            declaredFlights = flights.stream().map(i -> i >= 0 && i < squadron.getUnits().size()
+                  ? squadron.getUnits().get(i) : null).toList();
+        }
     }
 
     static boolean declare(SBFGameManager manager, int player, SBFAirGroundAttack submitted) {
@@ -143,7 +157,7 @@ public class SBFAirGroundRun extends AbstractSBFActionHandler {
 
     static boolean isBombingBattleArmor(SBFFormation formation) {
         return formation.isType(SBFElementType.BA) && (formation.getMovementMode() == SBFMovementMode.VTOL)
-              && (formation.getMovement() > 0) && formation.hasSUA(BattleForceSUA.BOMB);
+              && (formation.getMovement() > 0) && !formation.isAirVehicleLanded() && formation.hasSUA(BattleForceSUA.BOMB);
     }
 
     private static boolean onRun(SBFFormation formation, BoardLocation hex) {
@@ -199,14 +213,19 @@ public class SBFAirGroundRun extends AbstractSBFActionHandler {
     public void handle() {
         SBFFormation squadron = game().getFormation(run.getEntityId()).orElse(null);
         if (squadron != null) {
+            if (declaredFlights == null) {
+                captureFlights(squadron); // Saves created before Flight identities were retained.
+            }
             if ((run.type() == Type.STRIKE) || (run.type() == Type.STRAFE)) {
                 for (int targetId : run.targets()) {
                     game().getFormation(targetId).ifPresent(target -> attackGround(squadron, target));
                 }
             } else {
                 for (int i = 0; i < run.releases().size(); i++) {
-                    int flight = run.flights().isEmpty() ? 0 : run.flights().get(i);
-                    releaseBombs(squadron, squadron.getUnits().get(flight), run.releases().get(i));
+                    SBFUnit flight = i < declaredFlights.size() ? declaredFlights.get(i) : null;
+                    if (flight != null && squadron.getUnits().contains(flight) && flight.getCurrentArmor() > 0 && flight.canFire()) {
+                        releaseBombs(squadron, flight, run.releases().get(i));
+                    }
                 }
             }
         }
@@ -218,17 +237,20 @@ public class SBFAirGroundRun extends AbstractSBFActionHandler {
         target.recordAttack(squadron);
         gameManager().addReportFor(new SBFReportEntry(2001).add(squadron.generalName()).add(target.generalName()),
               squadron, target);
-        for (int index : run.flights()) {
-            SBFUnit unit = squadron.getUnits().get(index);
+        for (SBFUnit unit : declaredFlights) {
+            if (unit == null || !squadron.getUnits().contains(unit) || unit.getCurrentArmor() <= 0 || !unit.canFire()) {
+                continue;
+            }
             SBFToHitData tn = new SBFToHitData(squadron.getSkill(), "Skill");
+            SBFToHitData.processDefensiveMovement(tn, target);
             tn.addModifier(strafe ? 4 : 2, strafe ? "strafing" : "striking");
             tn.addModifier(2 * unit.getTargetingCrits(), "targeting damage");
             SBFToHitData.aerospaceFireControl(tn, unit);
-            SBFToHitData.processTargetTerrain(tn, game().getHex(target.getPosition()));
+            SBFToHitData.processTargetTerrain(tn, game(), game().getHex(target.getPosition()), target);
             if (target.isAerospace()) {
                 tn.addModifier(-4, "grounded aerospace");
-            } else if ((target.getMovementMode() == SBFMovementMode.VTOL)
-                  || ((target.getMovementMode() == SBFMovementMode.WIGE) && (target.getMpSpentThisTurn() > 0))) {
+            } else if (!target.isAirVehicleLanded() && ((target.getMovementMode() == SBFMovementMode.VTOL)
+                  || ((target.getMovementMode() == SBFMovementMode.WIGE) && (target.getMpSpentThisTurn() > 0)))) {
                 tn.addModifier(1, "airborne VTOL or WiGE");
             }
             int roll = Compute.d6(2);
@@ -254,6 +276,9 @@ public class SBFAirGroundRun extends AbstractSBFActionHandler {
             toHit.addModifier(dive ? 2 : 3, dive ? "dive bombing" : "altitude bombing");
             toHit.addModifier(2 * flight.getTargetingCrits(), "targeting damage");
             SBFToHitData.aerospaceFireControl(toHit, flight);
+            if (dive) {
+                game().getFormation(run.getTargetId()).ifPresent(target -> SBFToHitData.processDefensiveMovement(toHit, target));
+            }
             int tn = toHit.getValue();
             report(squadron, roll, tn);
             int damage = (roll >= tn ? 2 * he : 0) + (roll >= tn - 1 ? cluster : 0);

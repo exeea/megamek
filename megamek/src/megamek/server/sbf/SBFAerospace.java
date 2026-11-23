@@ -44,6 +44,7 @@ import megamek.common.Player;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
@@ -75,7 +76,7 @@ record SBFAerospace(SBFGameManager manager) {
         }
         squadron.setRadarHome(home);
         squadron.setBombLoad(he, cluster);
-        squadron.setRadarPosition(home, List.of());
+        setAtmosphericPosition(game, squadron, home, List.of());
         squadron.setDeployed(true);
         manager.sendUnitUpdate(squadron);
         manager.endCurrentTurn(squadron);
@@ -119,6 +120,7 @@ record SBFAerospace(SBFGameManager manager) {
         if ((squadron.getCurrentThrust() > 0) && game.canEnterCentral(squadron)) {
             squadron.setRadarHome(homeZone(game, game.getPlayer(squadron.getOwnerId()), null));
             game.enterCentral(squadron);
+            game.visibilityHelper().enteredCentral(squadron.getId(), List.of(squadron.getPosition()));
             squadron.setRadarPosition(SBFRadarZone.CENTRAL, List.of(squadron.getPosition()));
         }
         squadron.setDone(true);
@@ -165,7 +167,7 @@ record SBFAerospace(SBFGameManager manager) {
 
     boolean move(int player, SBFFormation squadron, RadarFlight flight) {
         SBFGame game = manager.getGame();
-        if (!game.getPhase().isMovement() || (squadron == null) || !squadron.isOnRadarMap()
+        if (!game.getPhase().isMovement() || (squadron == null) || squadron.inHighDrop() || squadron.combatZone() == null
               || (game.getTurn() == null) || !game.getTurn().isValid(player, squadron, game)
               || (game.engagementOrders().pendingMove() != null) || !validFlight(game, squadron, flight)) {
             return false;
@@ -177,6 +179,21 @@ record SBFAerospace(SBFGameManager manager) {
     }
 
     static boolean validFlight(SBFGame game, SBFFormation squadron, RadarFlight flight) {
+        if (squadron.engagementZone() != null) {
+            if (flight == null || squadron.waitingForSpaceCombat(game.getCurrentRound()) || flight.retreat()
+                  || !flight.groundPath().isEmpty() || flight.zones().size()
+                  > zoneAllowance(squadron.capitalSector().adjustedThrust(squadron.capitalThrust()))) {
+                return false;
+            }
+            SBFRadarZone previous = squadron.engagementZone();
+            for (var next : flight.zones()) {
+                if (!previous.adjacent(next)) {
+                    return false;
+                }
+                previous = next;
+            }
+            return true;
+        }
         if ((flight == null) || (flight.zones().size() + (flight.retreat() ? 1 : 0)
               > zoneAllowance(squadron.getCurrentThrust()))) {
             return false;
@@ -185,7 +202,9 @@ record SBFAerospace(SBFGameManager manager) {
         // Initialize this round's Central occupants before any Squadron leaves it.
         boolean mayEnterCentral = game.canEnterCentral(squadron);
         for (SBFRadarZone next : flight.zones()) {
-            if (!zone.adjacent(next) || ((next == SBFRadarZone.CENTRAL) && !mayEnterCentral)) {
+            if (!zone.adjacent(next) || ((next == SBFRadarZone.CENTRAL) && !mayEnterCentral)
+                  || ((squadron.capitalSector() != null || squadron.fallingFromOrbit()) && !next.isOuter()
+                        && !squadron.canDescendIntoAtmosphere())) {
                 return false;
             }
             zone = next;
@@ -194,6 +213,12 @@ record SBFAerospace(SBFGameManager manager) {
             Map<SBFRadarZone, Integer> distance = distanceToExit(squadron.getRadarHome());
             int best = Math.max(0, distance.get(squadron.getRadarZone()) - zoneAllowance(squadron.getCurrentThrust()));
             if ((flight.retreat() && (distance.get(zone) != 1)) || ((flight.retreat() ? 0 : distance.get(zone)) > best)) {
+                return false;
+            }
+        }
+        for (var rider : game.passengersOf(squadron)) {
+            if (rider.plannedLowDrop() != null && ((zone != SBFRadarZone.CENTRAL)
+                  || !(flight.groundPath().isEmpty() ? squadron.getGroundFlightPath() : flight.groundPath()).contains(rider.plannedLowDrop()))) {
                 return false;
             }
         }
@@ -220,22 +245,33 @@ record SBFAerospace(SBFGameManager manager) {
         return true;
     }
 
+    /** A released high drop appears in Central immediately, including after an enemy there took its move (p. 209). */
+    void beginDropContact(SBFFormation passenger) {
+        var route = new SBFMovePath(passenger.getId(), null, manager.getGame());
+        route.setRadarFlight(new RadarFlight(List.of(), List.of(), false));
+        fly(passenger, route);
+    }
+
     void fly(SBFFormation squadron, SBFMovePath route) {
         SBFGame game = manager.getGame();
         game.engagementOrders().startRound(game.getCurrentRound());
         RadarFlight flight = route.radarFlight();
         List<SBFRadarZone> visited = new ArrayList<>();
-        visited.add(squadron.getRadarZone());
+        visited.add(squadron.combatZone());
         visited.addAll(flight.zones());
         SBFEngagementControl control = new SBFEngagementControl(manager);
         Player owner = game.getPlayer(squadron.getOwnerId());
         for (int i = 0; i < visited.size(); i++) {
             SBFRadarZone zone = visited.get(i);
-            if (zone == SBFRadarZone.CENTRAL) {
+            if ((zone == SBFRadarZone.CENTRAL) && squadron.engagementZone() == null && !squadron.inHighDrop()) {
                 game.enterCentral(squadron);
+                if (i > 0) {
+                    game.visibilityHelper().enteredCentral(squadron.getId(), flight.groundPath());
+                }
             }
             List<SBFFormation> opponents = game.getActiveFormations().stream()
-                  .filter(f -> (f.getRadarZone() == zone) && game.areHostile(f, owner))
+                  .filter(f -> squadron.sharesAerospaceMap(f) && f.combatZone() == zone
+                        && !f.waitingForSpaceCombat(game.getCurrentRound()) && game.areHostile(f, owner))
                   .sorted(Comparator.comparingInt(SBFFormation::getId)).toList();
             boolean stopped = false;
             for (SBFFormation opponent : opponents) {
@@ -256,14 +292,36 @@ record SBFAerospace(SBFGameManager manager) {
     private void finish(SBFFormation squadron, SBFRadarZone zone, RadarFlight flight, int spent, boolean retreat) {
         SBFGame game = manager.getGame();
         game.engagementOrders().finishMovement();
-        if (retreat) {
+        if (squadron.inHighDrop()) {
+            manager.sendUnitUpdate(squadron);
+            return; // Resolving the drop does not expend the carrier's own movement turn.
+        }
+        if (squadron.engagementZone() != null) {
+            squadron.setEngagementZone(zone);
+            if (spent > 0) {
+                squadron.markSpaceManeuver(game.getCurrentRound());
+            }
+            squadron.setMpSpentThisTurn(spent);
+            squadron.setDone(true);
+            manager.sendUnitUpdate(squadron);
+        } else if (retreat) {
             SBFWithdrawal.leaveMap(manager, squadron, squadron.mustWithdraw());
         } else {
             List<BoardLocation> path = List.of();
             if (zone == SBFRadarZone.CENTRAL) {
                 path = flight.groundPath().isEmpty() ? squadron.getGroundFlightPath() : flight.groundPath();
             }
-            squadron.setRadarPosition(zone, path);
+            setAtmosphericPosition(game, squadron, zone, path);
+            for (var rider : game.passengersOf(squadron)) {
+                BoardLocation landing = rider.plannedLowDrop();
+                if (landing != null) {
+                    rider.planLowDrop(null);
+                    if ((zone == SBFRadarZone.CENTRAL) && path.contains(landing)) {
+                        rider.aimDrop(landing, false);
+                    }
+                    manager.sendUnitUpdate(rider);
+                }
+            }
             squadron.setMpSpentThisTurn(spent);
             squadron.setDone(true);
             manager.sendUnitUpdate(squadron);
@@ -271,12 +329,27 @@ record SBFAerospace(SBFGameManager manager) {
         manager.endCurrentTurn(squadron);
     }
 
+    private static void setAtmosphericPosition(SBFGame game, SBFFormation squadron, SBFRadarZone zone,
+          List<BoardLocation> path) {
+        if (zone.isOuter() && !squadron.fallingFromOrbit() && squadron.hasSUA(BattleForceSUA.SPC)
+              && game.getOptions().booleanOption(SBFRuleOptions.CAPITAL_AEROSPACE)
+              && game.getOptions().booleanOption(SBFRuleOptions.CAPITAL_GROUND_CENTER)) {
+            squadron.enterCapitalAtmosphere(zone);
+        } else {
+            squadron.setRadarPosition(zone, path);
+        }
+    }
+
     /** Maintaining Position and Aerospace End Phase, IO:BF pp. 176, 179. */
     List<FormationLosses> removeCrashedSquadrons() {
         SBFGame game = manager.getGame();
         List<FormationLosses> losses = new ArrayList<>();
         for (SBFFormation squadron : game.getActiveFormations()) {
-            if (squadron.isOnRadarMap() && (squadron.getCurrentThrust() == 0)) {
+            if (squadron.fallingFromOrbit() && !squadron.fellThisRound(game.getCurrentRound())
+                  && !squadron.canDescendIntoAtmosphere()) {
+                losses.addAll(SBFSpaceGravity.fallInward(manager, squadron));
+            } else if (squadron.isOnRadarMap() && squadron.capitalSector() == null && !squadron.fellThisRound(game.getCurrentRound())
+                  && !squadron.inHighDrop() && (squadron.getCurrentThrust() == 0)) {
                 manager.sendServerChat(squadron.getOwnerId(), "Squadron " + squadron.getId() + " crashed at zero Thrust.");
                 for (SBFFormation passenger : game.passengersOf(squadron)) {
                     losses.add(crash(game, passenger));
@@ -287,7 +360,7 @@ record SBFAerospace(SBFGameManager manager) {
         return losses;
     }
 
-    private FormationLosses crash(SBFGame game, SBFFormation formation) {
+    static FormationLosses crash(SBFGame game, SBFFormation formation) {
         boolean leader = formation.getUnits().stream().anyMatch(u -> u.hasSUA(BattleForceSUA.LEAD));
         boolean commander = formation.getUnits().stream().anyMatch(u -> u.hasSUA(BattleForceSUA.COM));
         formation.getUnits().forEach(unit -> {
