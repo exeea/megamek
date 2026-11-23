@@ -2123,12 +2123,16 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void setDisplayInvalidFields(boolean show) { showInvalidFields = show; repaint(); }
 
     public String getHexTooltip(Coords coords) {
+        return getHexTooltip(coords, true);
+    }
+
+    public String getHexTooltip(Coords coords, boolean showTacticalTerrainFactor) {
         if (tooltipSuspended || closed || !GUIP.getShowMapHexPopup() || coords == null) {
             return "";
         }
         Board board = getBoard();
         Hex hex = board == null ? null : board.getHex(coords);
-        return hex == null ? "" : HexTooltip.getTerrainTip(hex, boardId, game);
+        return hex == null ? "" : HexTooltip.getTerrainTip(hex, boardId, game, showTacticalTerrainFactor);
     }
 
     public List<Entity> getWrecks() {

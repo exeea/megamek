@@ -1640,7 +1640,7 @@ final class GpuBoardSource implements BoardSource {
         }
         HoverPoint pointer = hoverPoint;
         Coords tipHex = contextCoords == null ? pointer.coords() : contextCoords;
-        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(tipHex));
+        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(tipHex, sbf == null));
         String nextDetails = tipHex != null && board.contains(tipHex)
               ? hexDetails(board.getHex(tipHex), view.getClientgui(), view.getBoardId()) : "";
         // The movement plan before the tactical capture, which leaves out what the plan draws (G4).

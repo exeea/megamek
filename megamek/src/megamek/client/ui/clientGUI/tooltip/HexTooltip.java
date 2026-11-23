@@ -370,6 +370,10 @@ public final class HexTooltip {
     }
 
     public static String getTerrainTip(Hex mhex, int boardId, Game game) {
+        return getTerrainTip(mhex, boardId, game, true);
+    }
+
+    public static String getTerrainTip(Hex mhex, int boardId, Game game, boolean showTacticalTerrainFactor) {
         boolean inAtmosphere = game.getBoard(boardId).isLowAltitude();
         String fontSizeAttr = String.format("class=%s", GUIP.getUnitToolTipFontSizeMod());
         Coords mcoords = mhex.getCoords();
@@ -413,9 +417,15 @@ public final class HexTooltip {
                           + ")";
                 }
                 String msg_tf = Messages.getString("BoardView1.Tooltip.TF");
-                name += (tf > 0) ? " (" + msg_tf + ": " + tf + ')' : "";
+                name += (showTacticalTerrainFactor && tf > 0) ? " (" + msg_tf + ": " + tf + ')' : "";
                 sTerrain.append(DOT_SPACER).append(name);
             }
+        }
+        for (int passage : mhex.strategicPassages().stream().sorted().toList()) {
+            int first = Integer.numberOfTrailingZeros(passage);
+            int second = Integer.numberOfTrailingZeros(passage & (passage - 1));
+            sTerrain.append(DOT_SPACER).append(Messages.getString("SBF.clearedPassage",
+                  megamek.client.commands.ClientCommand.getDirection(first), megamek.client.commands.ClientCommand.getDirection(second)));
         }
         sTerrain.append("<BR>");
 

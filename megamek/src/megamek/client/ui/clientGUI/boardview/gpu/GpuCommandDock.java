@@ -942,7 +942,7 @@ final class GpuCommandDock implements GpuHud.Component {
         } else if (running) {
             main(text("GpuBoard.hud.dock.skipToResults"), true);
         } else {
-            main(text(phase.isFiringReport() ? "GpuBoard.hud.dock.continuePhysical"
+            main(text(phase.isFiringReport() && !source.strategic() ? "GpuBoard.hud.dock.continuePhysical"
                   : "GpuBoard.hud.dock.continueEndPhase"), enabled(done()));
         }
         follow.pressed(camera.animateCombatPlayback);
