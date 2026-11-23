@@ -62,6 +62,7 @@ import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovePath.TransportOrder;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.common.strategicBattleSystems.SBFTurn;
 
 /** Ground infantry transport, IO:BF pp. 167, 267-268. Transport orders belong to the carrier's movement. */
@@ -73,14 +74,18 @@ final class SBFTransport {
 
     /** Validate orders against earlier loads and drops without changing the live formations. */
     static Optional<List<Operation>> plan(SBFGame game, SBFFormation carrier, SBFMovePath route) {
+        return plan(game, carrier, route, false);
+    }
+
+    static Optional<List<Operation>> plan(SBFGame game, SBFFormation carrier, SBFMovePath route,
+          boolean validatedBeforeDamage) {
         List<TransportOrder> orders = route.getTransportOrders();
         if (orders.isEmpty()) {
             return Optional.of(List.of());
         }
-        if (carrier.isAerospace() || carrier.isEmbarked() || (carrier.getMovementMode() == SBFMovementMode.VTOL)
-              || (carrier.getMovementMode() == SBFMovementMode.WIGE)
-              || (carrier.getMovementMode() == SBFMovementMode.AIRSHIP)
-              || (orders.size() > SBFMovePath.maximumMovementPoints(carrier, game))) {
+        if (carrier.isOnRadarMap() || carrier.isEmbarked()
+              || (carrier.isAerospace() && !route.getSteps().isEmpty())
+              || (!validatedBeforeDamage && (orders.size() > SBFMovePath.maximumMovementPoints(carrier, game)))) {
             return Optional.empty();
         }
         List<Operation> result = new ArrayList<>();
@@ -89,7 +94,11 @@ final class SBFTransport {
         boolean hadXmec = carriesXmec(aboard);
         Map<SBFFormation, BoardLocation> dropped = new HashMap<>();
         int previousStep = 0;
-        for (TransportOrder order : orders) {
+        for (int i = validatedBeforeDamage ? route.processedTransportOrders() : 0; i < orders.size(); i++) {
+            TransportOrder order = orders.get(i);
+            if (validatedBeforeDamage && (order != null) && (order.afterSteps() > route.getSteps().size())) {
+                continue;
+            }
             if ((order == null) || (order.afterSteps() < previousStep)
                   || (order.afterSteps() > route.getSteps().size())) {
                 return Optional.empty();
@@ -98,18 +107,21 @@ final class SBFTransport {
             BoardLocation location = previousStep == 0 ? carrier.getPosition()
                   : route.getSteps().get(previousStep - 1).getDestination();
             SBFFormation passenger = game.getFormation(order.passengerId()).orElse(null);
-            if ((passenger == null) || (passenger == carrier) || !passenger.isDeployed()
+            if (validatedBeforeDamage && !order.mount() && ((passenger == null) || !aboard.containsKey(passenger))) {
+                continue; // Emergency dismount or casualty before this previously approved drop.
+            }
+            if ((passenger == null) || passenger.packedCargoTons() > 0 || (passenger == carrier) || !passenger.isDeployed()
                   || !passenger.isAnyTypeOf(CI, BA) || (passenger.getOwnerId() != carrier.getOwnerId())) {
                 return Optional.empty();
             }
             boolean external;
             if (order.mount()) {
-                if ((previousStep != 0) || aboard.containsKey(passenger) || dropped.containsKey(passenger)
+                if ((previousStep != 0) || (carrier.isAirVehicle() && !carrier.isAirVehicleLanded()) || aboard.containsKey(passenger) || dropped.containsKey(passenger)
                       || passenger.isEmbarked() || !location.equals(passenger.getPosition())
                       || !passenger.getEngagedOpponents().isEmpty() || passenger.mustWithdraw()) {
                     return Optional.empty();
                 }
-                double used = aboard.entrySet().stream().filter(e -> !e.getValue())
+                double used = aboard.entrySet().stream().filter(e -> !e.getValue() && e.getKey().packedCargoTons() == 0)
                       .mapToDouble(e -> e.getKey().getCAR()).sum();
                 external = (passenger.getCAR() == 0) || (passenger.getCAR() + used > carrier.getIT());
                 if (external && !canMountExternally(carrier, passenger, aboard)) {
@@ -118,17 +130,20 @@ final class SBFTransport {
                 aboard.put(passenger, external);
             } else {
                 Boolean mounted = aboard.remove(passenger);
-                if ((mounted == null) || !SBFMovePath.canInfantryOccupy(game, passenger, location)) {
+                boolean airDrop = carrier.isAirVehicle() && (!carrier.isAirVehicleLanded() || (previousStep > 0));
+                if ((mounted == null) || (airDrop ? !SBFAirDrop.mayDrop(passenger) : !SBFMovePath.canOccupyTerrain(game, passenger, location))) {
                     return Optional.empty();
                 }
                 external = mounted;
                 List<SBFFormation> others = friendlyOccupants(game, carrier, location, aboard, dropped);
                 others.remove(passenger);
                 others.add(carrier);
-                if (SBFMovePath.exceedsStackingLimit(passenger, others)) {
+                if (!airDrop && SBFMovePath.exceedsStackingLimit(passenger, others)) {
                     return Optional.empty();
                 }
-                dropped.put(passenger, location);
+                if (!airDrop) {
+                    dropped.put(passenger, location);
+                }
             }
             result.add(new Operation(previousStep, passenger, order.mount(), external, location));
         }
@@ -137,7 +152,7 @@ final class SBFTransport {
             movement = Math.max(0, movement - 1);
         }
         int budget = game.usesSprintingMove() ? movement + (movement + 1) / 2 : movement;
-        if ((route.getMpUsed() + orders.size() > budget)
+        if ((!validatedBeforeDamage && (route.getMpUsed() + orders.size() > budget))
               || SBFMovePath.exceedsStackingLimit(carrier, friendlyOccupants(game, carrier, route.getLastPosition(),
                     aboard, dropped))) {
             return Optional.empty();
@@ -190,7 +205,18 @@ final class SBFTransport {
     }
 
     /** Resolve the route prefix actually traveled before engagement, retaining orders on a suspended move. */
-    static int apply(SBFGameManager manager, SBFFormation carrier, List<Operation> orders, int traveledSteps) {
+    static int applyThrough(SBFGameManager manager, SBFFormation carrier, SBFMovePath route, int traveledSteps) {
+        if (route.processedTransportOrders() >= route.getTransportOrders().size()) {
+            return route.spentTransportMP();
+        }
+        List<Operation> remaining = plan(manager.getGame(), carrier, route, true).orElse(List.of());
+        int spent = apply(manager, carrier, remaining, traveledSteps);
+        int processed = (int) route.getTransportOrders().stream().filter(o -> o.afterSteps() <= traveledSteps).count();
+        route.recordTransportProgress(processed, spent);
+        return route.spentTransportMP();
+    }
+
+    private static int apply(SBFGameManager manager, SBFFormation carrier, List<Operation> orders, int traveledSteps) {
         int spent = 0;
         for (Operation op : orders) {
             if (op.step() > traveledSteps) {
@@ -199,9 +225,14 @@ final class SBFTransport {
             if (op.mount()) {
                 manager.addReportFor(new SBFReportEntry(3420).add(carrier.generalName())
                       .add(op.passenger().generalName()), carrier, op.passenger());
+                manager.getGame().scenarioProgress().interruptOccupation(op.passenger());
                 op.passenger().embark(carrier.getId(), op.external());
             } else {
-                op.passenger().dismount(op.location(), manager.getGame().getCurrentRound());
+                if (carrier.isAirVehicle() && (!carrier.isAirVehicleLanded() || (op.step() > 0))) {
+                    op.passenger().aimDrop(op.location(), false);
+                } else {
+                    op.passenger().dismount(op.location(), manager.getGame().getCurrentRound());
+                }
                 manager.addReportFor(new SBFReportEntry(3421).add(carrier.generalName())
                       .add(op.passenger().generalName()), carrier, op.passenger());
             }
@@ -213,9 +244,25 @@ final class SBFTransport {
 
     /** Previously embarked riders may need additional movement turns on dismount. */
     static void restoreDismountTurns(SBFGameManager manager, int ownerId) {
+        restoreDismountTurns(manager, ownerId, Player.PLAYER_NONE);
+    }
+
+    /** During an immediate exchange the mover has already consumed the current turn. */
+    static void restoreDismountTurns(SBFGameManager manager, int ownerId, int moverId) {
         SBFGame game = manager.getGame();
-        SBFFormationTurn turn = new SBFFormationTurn(ownerId);
-        long eligible = game.getActiveFormations().stream().filter(f -> turn.isValidEntity(f, game)).count();
+        if (game.getActiveFormations().stream().noneMatch(f -> f.getOwnerId() == ownerId
+              && f.dismountedIn(game.getCurrentRound()))) {
+            return;
+        }
+        restoreMovementTurns(manager, ownerId, moverId);
+    }
+
+    /** Restore turns for newly eligible formations after movement has already begun. */
+    static void restoreMovementTurns(SBFGameManager manager, int ownerId, int moverId) {
+        SBFGame game = manager.getGame();
+        long eligible = game.getActiveFormations().stream().filter(f -> f.getId() != moverId)
+              .filter(f -> SBFFormationTurn.isEligible(f, game.getPhase(), game.getCurrentRound()) && f.getOwnerId() == ownerId)
+              .map(SBFFormation::movementGroup).distinct().count();
         List<SBFTurn> turns = new ArrayList<>(game.getTurnsList());
         long remaining = turns.stream().skip(game.getTurnIndex() + 1L).filter(t -> t.playerId() == ownerId).count();
         if (eligible > remaining) {
@@ -235,13 +282,16 @@ final class SBFTransport {
         for (SBFFormation passenger : game.passengersOf(carrier).stream()
               .sorted(Comparator.comparingInt(SBFFormation::getId)).toList()) {
             BoardLocation landing = nearestDismount(game, carrier, passenger);
-            if ((landing == null) || !SBFMovePath.canInfantryOccupy(game, passenger, landing)) {
+            if ((landing == null) || !SBFMovePath.canOccupyTerrain(game, passenger, landing)) {
                 manager.addReportFor(new SBFReportEntry(3422).add(passenger.generalName()), passenger);
                 boolean leader = passenger.getUnits().stream().anyMatch(u -> u.hasSUA(LEAD));
                 boolean commander = passenger.getUnits().stream().anyMatch(u -> u.hasSUA(COM));
                 game.getImmediateLosses().add(new FormationLosses(passenger, true, passenger.getUnits().size(),
                       leader, commander, true));
-                passenger.getUnits().forEach(u -> u.setCurrentArmor(0));
+                passenger.getUnits().forEach(u -> {
+                    game.scenarioProgress().recordLoss(game.getCurrentRound(), passenger, u, Player.PLAYER_NONE, LossCause.TRANSPORT);
+                    u.setCurrentArmor(0);
+                });
                 game.removeFormationFromPlay(passenger);
             } else {
                 passenger.dismount(landing, game.getCurrentRound());

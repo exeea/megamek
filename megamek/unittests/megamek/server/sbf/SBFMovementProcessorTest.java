@@ -38,26 +38,37 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+
 import megamek.common.Hex;
 import megamek.common.Player;
+import megamek.common.alphaStrike.ASRange;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovePathFinder;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
+import megamek.common.strategicBattleSystems.SBFToHitData;
+import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import megamek.server.GameManagerPacketHelper;
+import megamek.server.Server;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -291,6 +302,183 @@ class SBFMovementProcessorTest {
         assertEquals(3, envelope.getComputedPath(end).getMpUsed());
         assertTrue(processor.processMovement(pathWithSteps(4), formation));
         assertFalse(formation.hasSprintedThisTurn());
+    }
+
+    @Test
+    void terrainCoverCostsHalfMoveProtectsFromDamageAndLosesStationaryTmm() {
+        var route = pathWithSteps(1);
+        route.enterHullDownAtEnd();
+        game.getOptions().getOption(SBFRuleOptions.MOVE_HULL_DOWN).setValue(true);
+        game.getHex(route.getLastPosition()).addTerrain(new Terrain(Terrains.FORTIFIED, 1));
+        assertRejected(route); // Infantry fieldworks cannot shelter a BattleMek.
+        game.getHex(route.getLastPosition()).addTerrain(new Terrain(Terrains.FORTIFIED, 2));
+        formation.setTmm(2);
+        assertTrue(processor.processMovement(route, formation));
+        assertTrue(formation.isHullDown());
+        assertEquals(3, formation.getMpSpentThisTurn());
+        var moving = new SBFToHitData(0, "test");
+        SBFToHitData.processGroundTarget(moving, formation, ASRange.LONG, false);
+        assertEquals(3, moving.getValue());
+        formation.resetEngagementMovement();
+        var stationary = new SBFToHitData(0, "test");
+        SBFToHitData.processGroundTarget(stationary, formation, ASRange.LONG, false);
+        assertEquals(1, stationary.getValue());
+        var unit = new SBFUnit();
+        unit.setArmor(20);
+        unit.setCurrentArmor(20);
+        formation.addUnit(unit);
+        SBFCombatDamage.recordHit(gameManager, formation, formation, 0, 5);
+        assertEquals(2, game.getPendingHits().getFirst().damage());
+        var leave = new SBFMovePath(formation.getId(), formation.getPosition(), game);
+        leave.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), formation.getPosition(), start));
+        formation.setDone(false);
+        assertTrue(processor.processMovement(leave, formation));
+        assertFalse(formation.isHullDown());
+    }
+
+    @Test
+    void evasiveOrderUsesSkillTableAndExpiresAtInitiativeWithoutChangingMove() {
+        game.setTurns(List.of(new SBFFormationTurn(1)));
+        game.setTurnIndex(0, Player.PLAYER_NONE);
+        var command = new SBFMovementCommand(mock(Server.class), gameManager);
+        formation.setSkill(5);
+        command.run(1, new String[] { "sbfmove", "17", "evasive" });
+        assertEquals(0, formation.evasiveModifier());
+        game.getOptions().getOption(SBFRuleOptions.MOVE_EVASIVE).setValue(true);
+        command.run(1, new String[] { "sbfmove", "17", "evasive" });
+        int[] expected = { 4, 4, 3, 3, 2, 1, 1, 1 };
+        for (int skill = 1; skill <= 8; skill++) {
+            formation.setSkill(skill);
+            var roll = new SBFToHitData(0, "test");
+            SBFToHitData.processDefensiveMovement(roll, formation);
+            assertEquals(expected[skill - 1], roll.getValue());
+        }
+        assertEquals(3, SBFMovePath.normalMovementPoints(formation, game));
+        assertFalse(formation.canAttackAfterEngagement());
+        assertFalse(formation.canFireArtilleryAfterEngagement());
+        formation.resetEngagementMovement();
+        assertEquals(0, formation.evasiveModifier());
+        assertTrue(formation.canAttackAfterEngagement());
+    }
+
+    @Test
+    void engineersBuildInTwoStationaryTurnsWhileOtherUnitsFireAndScreenThem() {
+        var builder = new SBFUnit();
+        builder.setArmor(10);
+        builder.setCurrentArmor(10);
+        builder.getSpecialAbilities().replaceSUA(BattleForceSUA.TRN, null);
+        var guard = new SBFUnit();
+        guard.setArmor(10);
+        guard.setCurrentArmor(10);
+        formation.addUnit(builder);
+        formation.addUnit(guard);
+        var hex = game.getHex(start);
+        when(gameManager.getPacketHelper()).thenReturn(mock(GameManagerPacketHelper.class));
+        hex.addTerrain(new Terrain(Terrains.SWAMP, 1));
+        assertFalse(SBFFieldFortification.construct(gameManager, formation, 0));
+        hex.removeTerrain(Terrains.SWAMP);
+        assertTrue(SBFFieldFortification.construct(gameManager, formation, 0));
+        assertFalse(builder.canFire());
+        assertTrue(guard.canFire());
+        assertEquals(List.of(1), SBFCombatDamage.eligibleUnits(game, formation, formation));
+        SBFCombatDamage.recordHit(gameManager, formation, formation, 1, 1);
+        assertEquals(List.of(0, 1), SBFCombatDamage.eligibleUnits(game, formation, formation));
+        SBFFieldFortification.finish(gameManager);
+        assertEquals(1, SBFFieldFortification.level(hex));
+        assertTrue(builder.canFire());
+        formation.setDone(false);
+        assertFalse(SBFFieldFortification.construct(gameManager, formation, 0));
+        builder.getSpecialAbilities().replaceSUA(BattleForceSUA.ENG, null);
+        assertTrue(SBFFieldFortification.construct(gameManager, formation, 0));
+        SBFFieldFortification.finish(gameManager);
+        assertEquals(2, SBFFieldFortification.level(hex));
+    }
+
+    @Test
+    void advancedTerrainCostsAndSecondRoadHexUseSameServerAndPathfinderBudget() {
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        var next = pathWithSteps(1).getLastPosition();
+        var hex = game.getHex(next);
+        hex.addTerrain(new Terrain(Terrains.ROUGH, 2));
+        assertEquals(3, pathWithSteps(1).getLastStep().getMpUsed());
+        hex.removeTerrain(Terrains.ROUGH);
+        hex.addTerrain(new Terrain(Terrains.SWAMP, 1));
+        assertEquals(2, pathWithSteps(1).getLastStep().getMpUsed());
+        formation.setType(SBFElementType.V);
+        formation.setMovementMode(SBFMovementMode.TRACKED);
+        assertEquals(3, pathWithSteps(1).getLastStep().getMpUsed());
+        hex.removeTerrain(Terrains.SWAMP);
+        for (int x = 1; x <= 6; x++) {
+            game.getBoard(0).getHex(x, 1).addTerrain(new Terrain(Terrains.ROAD, 1));
+        }
+        var route = pathWithSteps(5);
+        assertEquals(3, route.getMpUsed());
+        var reach = SBFMovePathFinder.moveEnvelopeFinder(3, game);
+        reach.run(pathWithSteps(0));
+        assertEquals(3, reach.getComputedPath(route.getLastPosition()).getMpUsed());
+        assertTrue(processor.processMovement(route, formation));
+        assertEquals(route.getLastPosition(), formation.getPosition());
+    }
+
+    @Test
+    void boggingStopsOnEntryThenRetriesAtStartAndIgnoresTmmOnFailedEscape() {
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        var mud = pathWithSteps(1).getLastPosition();
+        game.getHex(mud).addTerrain(new Terrain(Terrains.MUD, 1));
+        formation.setSkill(4);
+        formation.setTmm(2);
+        formation.setJumpMove(3);
+        game.setCurrentRound(1);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.d6(2)).thenReturn(2, 2, 3);
+            assertTrue(processor.processMovement(pathWithSteps(2), formation));
+            assertEquals(mud, formation.getPosition());
+            assertTrue(formation.isBoggedDown());
+            game.setCurrentRound(2);
+            formation.setDone(false);
+            var escape = new SBFMovePath(17, mud, game);
+            escape.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, 17, mud, start));
+            assertTrue(processor.processMovement(escape, formation));
+            assertEquals(mud, formation.getPosition());
+            var toHit = new SBFToHitData(0, "test");
+            SBFToHitData.processGroundTarget(toHit, formation, ASRange.MEDIUM, false);
+            assertEquals(0, toHit.getValue());
+            game.setCurrentRound(3);
+            formation.setDone(false);
+            formation.resetEngagementMovement();
+            assertTrue(processor.processMovement(escape, formation));
+            assertEquals(start, formation.getPosition());
+            assertFalse(formation.isBoggedDown());
+        }
+    }
+
+    @Test
+    void overloadedBridgeDropsTheLeadUnitAndExtremeDepthChecksBeforeFiring() {
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        formation.setSize(4);
+        SBFUnit unit = new SBFUnit();
+        unit.setType(SBFElementType.BM);
+        unit.setMovementMode(SBFMovementMode.MEK_WALK);
+        unit.setMovement(3);
+        unit.setArmor(20);
+        unit.setCurrentArmor(20);
+        unit.getSpecialAbilities().replaceSUA(BattleForceSUA.LEAD, null);
+        formation.addUnit(unit);
+        var site = pathWithSteps(1).getLastPosition();
+        var hex = game.getHex(site);
+        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 20));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
+        when(gameManager.getPacketHelper()).thenReturn(mock(GameManagerPacketHelper.class));
+        assertTrue(processor.processMovement(pathWithSteps(1), formation));
+        assertFalse(hex.hasBridge());
+        assertEquals(18, unit.getCurrentArmor());
+        hex.addTerrain(new Terrain(Terrains.WATER, 15));
+        SBFMovementHazards.extremeDepthAtMovementEnd(gameManager, () -> 6);
+        assertEquals(1, unit.getTargetingCrits());
+        unit.setMovementMode(SBFMovementMode.SUBMARINE);
+        SBFMovementHazards.extremeDepthAtMovementEnd(gameManager, () -> { throw new AssertionError(); });
+        assertEquals(1, unit.getTargetingCrits());
     }
 
     private void addFriendly(int id, BoardLocation location, SBFElementType type) {

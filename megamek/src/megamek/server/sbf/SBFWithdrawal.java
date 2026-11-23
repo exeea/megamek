@@ -38,7 +38,6 @@ import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
@@ -49,8 +48,7 @@ import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovePathFinder;
 import megamek.common.strategicBattleSystems.SBFMoveStep;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
-import megamek.common.strategicBattleSystems.SBFToHitData;
-import megamek.common.units.Terrains;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 
 /** Ground withdrawal and shaken movement (IO:BF, Forced Withdrawal and Morale, pp. 172-173). */
 final class SBFWithdrawal {
@@ -96,17 +94,22 @@ final class SBFWithdrawal {
         if (!formation.mustWithdraw() || !atHomeEdge(game, formation)) {
             return false;
         }
-        manager.addReportFor(new SBFReportEntry(3404).add(formation.generalName()), formation);
-        for (SBFFormation passenger : game.passengersOf(formation)) {
-            passenger.markWithdrawn();
-            game.removeFormationFromPlay(passenger);
-        }
-        formation.markWithdrawn();
-        game.removeFormationFromPlay(formation);
+        leaveMap(manager, formation, true);
+        return true;
+    }
+
+    static void leaveMap(SBFGameManager manager, SBFFormation carrier, boolean forced) {
+        SBFGame game = manager.getGame();
+        manager.addReportFor(new SBFReportEntry(forced ? 3404 : 3518).add(carrier.generalName()), carrier);
+        Stream.concat(game.passengersOf(carrier).stream(), Stream.of(carrier)).forEach(formation -> {
+            LossCause cause = forced ? LossCause.FORCED_WITHDRAWAL : LossCause.VOLUNTARY_WITHDRAWAL;
+            formation.getUnits().forEach(u -> game.scenarioProgress().recordLoss(game.getCurrentRound(), formation, u, Player.PLAYER_NONE, cause));
+            formation.markWithdrawn();
+            game.removeFormationFromPlay(formation);
+        });
         if (game.getPhase().isMovement()) {
             manager.entityAllUpdate();
         }
-        return true;
     }
 
     static boolean atHomeEdge(SBFGame game, SBFFormation formation) {
@@ -144,20 +147,8 @@ final class SBFWithdrawal {
         }
         int range = game.usesDoubleBlind() ? SBFDetectionHelper.visualRange(game, viewer) : 2;
         int distance = location.coords().distance(viewer.getPosition().coords());
-        if ((distance > range) || (distance == 0)) {
-            return distance == 0 ? range + 1 : 0;
-        }
-        if (!game.usesDoubleBlind()) {
-            // The occupant may use woods/rubble/urban cover or higher ground to break LOS (IO:BF p. 169).
-            Board board = game.getBoard(location.boardId());
-            Hex observer = board.getHex(viewer.getPosition().coords());
-            Hex occupied = board.getHex(location.coords());
-            if ((occupied != null) && (observer != null)
-                  && (SBFToHitData.isLosCover(occupied) || occupied.containsTerrain(Terrains.SMOKE)
-                        || observer.containsTerrain(Terrains.SMOKE)
-                        || (occupied.getLevel() >= observer.getLevel() + 2))) {
-                return 0;
-            }
+        if ((distance > range) || !game.combatOrders().hasLineOfSight(game, viewer.getPosition(), location, false)) {
+            return 0;
         }
         return range + 1 - distance;
     }

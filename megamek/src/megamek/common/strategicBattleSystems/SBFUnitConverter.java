@@ -281,7 +281,7 @@ public class SBFUnitConverter {
         addUnitSUAsIfHalf(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
         addUnitSUAsIfAll(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW, TRN);
         sumUnitSUAs(CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
-              VTS, AT, DT, MT, PT, ST, SCR);
+              VTS, AT, ATxD, DT, MT, PT, ST, STxD, SCR);
         sumUnitSUAsDivideBy3(ATAC, BOMB, PNT, IF);
         sumUnitArtillery(ARTAIS, ARTAC, ARTLT, ARTS, ARTT, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12);
         calcMHQ();

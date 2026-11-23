@@ -36,6 +36,8 @@ package megamek.server.sbf;
 import static megamek.common.alphaStrike.BattleForceSUA.CAR;
 import static megamek.common.alphaStrike.BattleForceSUA.IT;
 import static megamek.common.alphaStrike.BattleForceSUA.MEC;
+import static megamek.common.alphaStrike.BattleForceSUA.MT;
+import static megamek.common.alphaStrike.BattleForceSUA.MTxD;
 import static megamek.common.alphaStrike.BattleForceSUA.SBF_OMNI;
 import static megamek.common.alphaStrike.BattleForceSUA.XMEC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,17 +55,23 @@ import megamek.common.Player;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.alphaStrike.ASUnitType;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.strategicBattleSystems.SBFElementType;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.ContactHit;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.Exchange;
+import megamek.common.strategicBattleSystems.SBFEngagementOrders.Order;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovePath.TransportOrder;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
+import megamek.common.strategicBattleSystems.SBFRadarZone;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.strategicBattleSystems.SurfaceSBFMoveStep;
 import megamek.common.units.Terrain;
@@ -125,6 +133,125 @@ class SBFTransportTest {
         assertEquals(List.of(1, 2, 1), game.getTurnsList().stream().map(t -> t.playerId()).toList());
         game.setCurrentRound(4);
         assertEquals(4, SBFMovePath.normalMovementPoints(infantry, game));
+    }
+
+    @Test
+    void nonInfantryBoardingUsesPassengerTurnAllElementsAndDoorsThenChargesFourMpToUnload() {
+        SBFFormation passenger = formation(24, 1, SBFElementType.BM, at(2, 2));
+        AlphaStrikeElement mek = new AlphaStrikeElement();
+        mek.setType(ASUnitType.BM);
+        passenger.getUnits().getFirst().setElements(List.of(mek, mek));
+        passenger.setMovement(3);
+        carrier.getSpecialAbilities().replaceSUA(MT, 1);
+        carrier.getSpecialAbilities().replaceSUA(MTxD, 1);
+        SBFMovePath route = new SBFMovePath(24, at(2, 2), game);
+        route.boardCarrierAtEnd(10);
+        var movement = new SBFMovementProcessor(manager);
+        assertFalse(movement.processMovement(route, passenger));
+        carrier.getSpecialAbilities().replaceSUA(MT, 3);
+        assertTrue(movement.processMovement(route, passenger));
+        assertTrue(passenger.isCarriedBy(10));
+        assertEquals(3, passenger.getMpSpentThisTurn());
+        assertEquals(1, carrier.bayDoorsUsed(3));
+        assertFalse(SBFBayTransport.unload(manager, 1, passenger, carrier, at(2, 2)));
+        game.setCurrentRound(4);
+        passenger.setDone(false);
+        passenger.setMovement(6);
+        assertFalse(SBFBayTransport.unload(manager, 1, passenger, carrier, at(5, 5)));
+        assertTrue(SBFBayTransport.unload(manager, 1, passenger, carrier, at(2, 2)));
+        assertEquals(2, SBFMovePath.normalMovementPoints(passenger, game));
+        assertEquals(0, carrier.bayDoorsUsed(4));
+    }
+
+    @Test
+    void landedCarrierFitsMixedInfantryAndMeksAndChargesBayDismountRate() {
+        SBFFormation mixed = formation(24, 1, SBFElementType.CI, at(2, 2));
+        AlphaStrikeElement mek = new AlphaStrikeElement();
+        mek.setType(ASUnitType.BM);
+        AlphaStrikeElement foot = new AlphaStrikeElement();
+        foot.setType(ASUnitType.CI);
+        foot.getSpecialAbilities().replaceSUA(CAR, 2);
+        mixed.getUnits().getFirst().setElements(List.of(foot, mek));
+        carrier.setMovementMode(SBFMovementMode.VTOL);
+        carrier.getSpecialAbilities().replaceSUA(MT, 1);
+        carrier.getSpecialAbilities().replaceSUA(MTxD, 1);
+        var route = new SBFMovePath(24, at(2, 2), game);
+        route.boardCarrierAtEnd(10);
+        carrier.getSpecialAbilities().replaceSUA(IT, 1);
+        carrier.setAirVehicleLanded(true);
+        assertFalse(SBFBayTransport.canBoard(game, mixed, route));
+        carrier.getSpecialAbilities().replaceSUA(IT, 2);
+        carrier.setAirVehicleLanded(false);
+        assertFalse(SBFBayTransport.canBoard(game, mixed, route));
+        carrier.setAirVehicleLanded(true);
+        assertTrue(new SBFMovementProcessor(manager).processMovement(route, mixed));
+        game.setCurrentRound(4);
+        mixed.setDone(false);
+        carrier.setAirVehicleLanded(false);
+        assertFalse(SBFBayTransport.unload(manager, 1, mixed, carrier, at(2, 2)));
+        carrier.setAirVehicleLanded(true);
+        assertTrue(SBFBayTransport.unload(manager, 1, mixed, carrier, at(2, 2)));
+        assertEquals(4, mixed.dismountCost(4));
+    }
+
+    @Test
+    void airborneVtolDropsJumpInfantryAtEndAndFailedLandingDamagesEachUnit() {
+        carrier.setMovementMode(SBFMovementMode.VTOL);
+        infantry.embark(10, false);
+        var route = path();
+        route.addTransportOrder(new TransportOrder(0, 11, false));
+        assertTrue(SBFTransport.plan(game, carrier, route).isEmpty());
+        infantry.setJumpMove(1);
+        assertTrue(new SBFMovementProcessor(manager).processMovement(route, carrier));
+        assertEquals(start, infantry.getDropDestination());
+        assertNull(infantry.getPosition());
+        assertEquals(List.of(1), new SBFAirDrop(manager).landAll(() -> 4, () -> 0));
+        assertEquals(start, infantry.getPosition());
+        assertEquals(6, infantry.getUnits().getFirst().getCurrentArmor());
+        assertEquals(2, SBFMovePath.normalMovementPoints(infantry, game));
+    }
+
+    @Test
+    void previouslyMovedEnemyInCentralCanEngageAnImmediatelyReleasedHighDrop() {
+        carrier.setType(SBFElementType.AS);
+        carrier.setRadarPosition(SBFRadarZone.INNER, List.of());
+        var enemy = game.getFormation(12).orElseThrow();
+        enemy.setType(SBFElementType.AS);
+        enemy.setRadarPosition(SBFRadarZone.CENTRAL, List.of(start));
+        enemy.setDone(true);
+        infantry.setJumpMove(1);
+        infantry.embark(10, false);
+        game.engagementOrders().order(enemy.getId(), infantry.getId(), true);
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.d6(2)).thenReturn(2, 12);
+            assertTrue(new SBFAirDrop(manager).fromRadar(1, infantry, carrier, null, true));
+        }
+        assertTrue(enemy.isEngagedWith(infantry.getId()));
+        assertFalse(infantry.mayAttackAirOpponent(enemy.getId()));
+        assertFalse(carrier.isDone());
+    }
+
+    @Test
+    void highDropRemainsInTheAirForOneRoundThenCannotWalkAndFire() {
+        carrier.setType(SBFElementType.AS);
+        carrier.setRadarPosition(SBFRadarZone.INNER, List.of());
+        infantry.setJumpMove(1);
+        infantry.embark(10, false);
+        var drop = new SBFAirDrop(manager);
+        assertTrue(drop.fromRadar(1, infantry, carrier, null, true));
+        assertTrue(infantry.inHighDrop());
+        assertFalse(infantry.isEligibleForPhase(GamePhase.FIRING));
+        assertFalse(drop.aimHigh(1, infantry, at(3, 3)));
+        game.setCurrentRound(4);
+        infantry.setDone(false);
+        assertFalse(drop.aimHigh(1, infantry, at(7, 7)));
+        assertTrue(drop.aimHigh(1, infantry, at(3, 3)));
+        assertEquals(List.of(1), drop.landAll(() -> 5, () -> 0));
+        assertFalse(infantry.inHighDrop());
+        assertEquals(1, SBFMovePath.normalMovementPoints(infantry, game));
+        assertTrue(infantry.isEligibleForPhase(GamePhase.FIRING));
+        infantry.setMpSpentThisTurn(1);
+        assertFalse(infantry.isEligibleForPhase(GamePhase.FIRING));
     }
 
     @Test
@@ -190,6 +317,26 @@ class SBFTransportTest {
         assertEquals(1, start.coords().distance(infantry.getPosition().coords()));
         assertEquals(1, carrier.getUnits().size());
         assertTrue(infantry.dismountedIn(3));
+    }
+
+    @Test
+    void overrunDestroysTheNewCarrierAndReturnsItsPassengerAtContactWithAMovementTurn() {
+        BoardLocation contact = at(2, 2);
+        SBFFormation enemy = game.getFormation(12).orElseThrow();
+        enemy.setPosition(contact);
+        SBFMovePath route = path(contact, at(2, 1));
+        route.addTransportOrder(new TransportOrder(0, infantry.getId(), true));
+        route.addTransportOrder(new TransportOrder(2, infantry.getId(), false));
+        var hit = new ContactHit(enemy.getId(), carrier.getId(), 8, Player.PLAYER_NONE, 0);
+        game.engagementOrders().setExchange(new Exchange(carrier.getId(), enemy.getId(), Order.OVERRUN, true, -1,
+              List.of(hit)));
+        assertTrue(new SBFContactDamage(manager, () -> 7).resolve(carrier, enemy, contact, route, 1));
+        assertTrue(game.getGraveyard().contains(carrier));
+        assertEquals(contact, infantry.getPosition());
+        assertTrue(infantry.dismountedIn(3));
+        assertEquals(1, route.processedTransportOrders());
+        assertEquals(1, route.spentTransportMP());
+        assertEquals(List.of(1, 2, 1), game.getTurnsList().stream().map(t -> t.playerId()).toList());
     }
 
     @Test

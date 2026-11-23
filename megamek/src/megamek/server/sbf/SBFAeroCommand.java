@@ -175,8 +175,9 @@ class SBFAeroCommand extends ServerCommand {
         SBFGame game = manager.getGame();
         server.sendServerChat(player, HELP);
         for (SBFFormation squadron : game.getActiveFormations()) {
-            if (squadron.isOnRadarMap() && game.isVisible(player, squadron.getId())) {
-                String description = squadron.getId() + " " + squadron.generalName() + " — " + squadron.getRadarZone().label();
+            if (squadron.isOnRadarMap() && game.getVisibility(game.getPlayer(player), squadron.getId()).isLocated()) {
+                String name = game.isVisible(player, squadron.getId()) ? squadron.generalName() : "radar contact";
+                String description = squadron.getId() + " " + name + " — " + squadron.getRadarZone().label();
                 if (squadron.getOwnerId() == player) {
                     description += ", Thrust " + squadron.getCurrentThrust() + ", neighboring zones "
                           + squadron.getRadarZone().neighbors().stream().map(SBFRadarZone::label).toList()
