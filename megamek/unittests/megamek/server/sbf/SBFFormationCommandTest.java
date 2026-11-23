@@ -36,6 +36,7 @@ package megamek.server.sbf;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
+import java.util.Map;
 
 import megamek.common.Player;
 import megamek.common.alphaStrike.BattleForceSUA;
@@ -52,8 +53,10 @@ import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMovementMode;
 import megamek.common.strategicBattleSystems.SBFUnit;
+import megamek.common.util.SerializationHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SBFFormationCommandTest {
@@ -232,7 +235,7 @@ class SBFFormationCommandTest {
         game.incrementCurrentRound();
         var sibling = game.getFormation(21).orElseThrow();
         assertFalse(SBFFormationCommand.reform(game, 0, sibling));
-        assertEquals(2, game.originalFamily(sibling).size());
+        assertEquals(List.of(sibling), game.originalFamily(sibling));
         assertEquals(List.of(parent), game.originalFamily(parent));
     }
 
@@ -247,7 +250,8 @@ class SBFFormationCommandTest {
         assertTrue(SBFFormationCommand.assemble(game, 0, parent, List.of("30:1")));
         game.incrementCurrentRound();
         assertFalse(SBFFormationCommand.reform(game, 0, first));
-        assertEquals(List.of(first, second), game.originalFamily(first));
+        assertEquals(List.of(first), game.originalFamily(first));
+        assertEquals(List.of(second), game.originalFamily(second));
         assertEquals(first.movementGroup(), second.movementGroup());
         assertFalse(parent.movementGroup() == first.movementGroup());
     }
@@ -263,7 +267,7 @@ class SBFFormationCommandTest {
 
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
-    void anAdHocPairAndTheLastOriginalUnitReformRegardlessOfWhichReceives(boolean pairReceives) {
+    void anAdHocPairAndItsFormerSiblingCreateAnotherAdHocSheetInEitherOrder(boolean pairReceives) {
         var pair = formation(20, 2, 3);
         assertTrue(SBFFormationCommand.detach(game, 0, pair, List.of(), true));
         var third = game.getFormation(22).orElseThrow();
@@ -279,11 +283,115 @@ class SBFFormationCommandTest {
 
         assertTrue(SBFFormationCommand.assemble(game, 0, pairReceives ? pair : third,
               pairReceives ? List.of("22:1") : List.of("20:1", "20:2")));
-        var reformed = game.getActiveFormations().getFirst();
+        var assembled = game.getActiveFormations().getFirst();
         assertEquals(1, game.getActiveFormations().size());
-        assertEquals(3, reformed.getUnits().size());
-        assertEquals(1, reformed.reformMovementPenalty(game.getCurrentRound() + 1));
-        assertFalse(reformed.inactiveAfterAssembly(game.getCurrentRound() + 1));
+        assertEquals(3, assembled.getUnits().size());
+        assertEquals(0, assembled.reformMovementPenalty(game.getCurrentRound() + 1));
+        assertTrue(assembled.inactiveAfterAssembly(game.getCurrentRound() + 1));
+    }
+
+    @Test
+    void aLaterSplitReformsOnlyTheLatestAdHocSheet() {
+        var pair = formation(20, 2, 3);
+        assertTrue(SBFFormationCommand.detach(game, 0, pair, List.of(), true));
+        var third = game.getFormation(22).orElseThrow();
+        assertTrue(SBFFormationCommand.assemble(game, 0, pair, List.of("21:1")));
+        game.incrementCurrentRound();
+        assertFalse(SBFFormationCommand.detach(game, 0, pair, List.of(), true));
+        game.incrementCurrentRound();
+        assertTrue(SBFFormationCommand.detach(game, 0, pair, List.of(), true));
+        var child = game.getFormation(23).orElseThrow();
+        assertEquals(List.of(pair, child), game.originalFamily(pair));
+        game.setPhase(GamePhase.MOVEMENT);
+        assertFalse(SBFFormationCommand.planReunion(game, 0, third, pair.getPosition()));
+        assertTrue(SBFFormationCommand.planReunion(game, 0, child, pair.getPosition()));
+        game.setPhase(GamePhase.END);
+        assertTrue(SBFFormationCommand.finishReunions(game));
+        assertEquals(2, pair.getUnits().size());
+        assertEquals(1, pair.reformMovementPenalty(game.getCurrentRound() + 1));
+        assertFalse(pair.inactiveAfterAssembly(game.getCurrentRound() + 1));
+        assertEquals(List.of(third), game.originalFamily(third));
+    }
+
+    @Test
+    void aPartialDonorAndItsOffsiteDetachmentKeepTheirMovementTurnButRetireTheDonorSheet() {
+        var donor = formation(20, 2, 4);
+        assertTrue(SBFFormationCommand.detach(game, 0, donor, List.of(4), false));
+        var detached = game.getFormation(21).orElseThrow();
+        detached.setPosition(BoardLocation.of(new Coords(5, 2), 0));
+        var receiver = formation(30, 2, 1);
+        assertTrue(SBFFormationCommand.assemble(game, 0, receiver, List.of("20:2")));
+        assertEquals(2, donor.getUnits().size());
+        assertEquals(List.of(donor), game.originalFamily(donor));
+        assertEquals(List.of(detached), game.originalFamily(detached));
+        assertEquals(donor.movementGroup(), detached.movementGroup());
+        detached.setPosition(donor.getPosition());
+        assertFalse(SBFFormationCommand.reform(game, 0, detached));
+        assertTrue(SBFFormationCommand.detach(game, 0, donor, List.of(2), false));
+        assertTrue(SBFFormationCommand.reform(game, 0, donor));
+        assertEquals(2, donor.getUnits().size());
+    }
+
+    @Test
+    void reunitingANonAnchorCounterKeepsItsSharedMovementTurn() {
+        var anchor = formation(20, 2, 5);
+        assertTrue(SBFFormationCommand.detach(game, 0, anchor, List.of(4, 5), false));
+        var other = game.getFormation(21).orElseThrow();
+        var receiver = formation(30, 2, 1);
+        assertTrue(SBFFormationCommand.assemble(game, 0, receiver, List.of("20:1")));
+        assertEquals(anchor.movementGroup(), other.movementGroup());
+        assertTrue(SBFFormationCommand.detach(game, 0, other, List.of(2), false));
+        assertTrue(SBFFormationCommand.reform(game, 0, other));
+        assertEquals(anchor.movementGroup(), other.movementGroup());
+        assertEquals(2, other.getUnits().size());
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "false,false", "true,false", "false,true" })
+    void loadingAnObsoleteSheetFindsTransfersAcrossSurvivorsWithdrawalsAndCasualties(boolean leftPlay,
+          boolean transferredUnitLost) throws Exception {
+        var pair = formation(20, 2, 2);
+        var first = formation(21, 2, 1);
+        var second = formation(22, 2, 1);
+        first.assignOrigin(21, false);
+        second.assignOrigin(21, true);
+        var legacy = SBFGame.class.getDeclaredField("splitRosters");
+        legacy.setAccessible(true);
+        var transferred = pair.getUnits().getFirst();
+        var record = new java.util.ArrayList<>(List.of(transferred, first.getUnits().getFirst(), second.getUnits().getFirst()));
+        if (transferredUnitLost) {
+            game.scenarioProgress().recordLoss(game.getCurrentRound(), pair, transferred, 1,
+                  megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause.COMBAT);
+            pair.removeUnit(transferred);
+        }
+        legacy.set(game, new java.util.HashMap<>(Map.of(21, record, 22, record)));
+        if (leftPlay) {
+            game.removeFormationFromPlay(pair);
+        }
+        var writer = SerializationHelper.getSaveGameXStream();
+        var loaded = (SBFGame) SerializationHelper.getLoadSaveGameXStream().fromXML(writer.toXML(game));
+        var leftover = loaded.getFormation(21).orElseThrow();
+        var sibling = loaded.getFormation(22).orElseThrow();
+        assertEquals(List.of(leftover), loaded.originalFamily(leftover));
+        assertEquals(leftover.movementGroup(), sibling.movementGroup());
+        assertFalse(writer.toXML(loaded).contains("splitRosters"));
+    }
+
+    @Test
+    void loadingAnIntactSplitSheetStillAllowsReformingAfterAnOrdinaryCasualty() throws Exception {
+        var parent = formation(20, 2, 3);
+        var record = new java.util.ArrayList<>(parent.getUnits());
+        assertTrue(SBFFormationCommand.detach(game, 0, parent, List.of(), true));
+        var legacy = SBFGame.class.getDeclaredField("splitRosters");
+        legacy.setAccessible(true);
+        legacy.set(game, new java.util.HashMap<>(Map.of(20, record, 21, record, 22, record)));
+        game.removeFormationFromPlay(game.getFormation(22).orElseThrow());
+        var xml = SerializationHelper.getSaveGameXStream().toXML(game);
+        var loaded = (SBFGame) SerializationHelper.getLoadSaveGameXStream().fromXML(xml);
+        var surviving = loaded.getFormation(20).orElseThrow();
+        assertTrue(SBFFormationCommand.reform(loaded, 0, surviving));
+        assertEquals(2, surviving.getUnits().size());
+        assertEquals(1, surviving.reformMovementPenalty(loaded.getCurrentRound() + 1));
     }
 
     @Test

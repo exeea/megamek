@@ -112,60 +112,56 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
         return false;
     }
 
-    // Each split counter points to the original record sheet. Units keep their identity when transferred.
+    // Older development saves stored copies of split rosters. New games use the counter's current sheet ID.
     private Map<Integer, List<SBFUnit>> splitRosters;
 
-    public void recordSplit(SBFFormation parent, SBFFormation child) {
-        rememberSplitRoster(parent, originalFamily(parent));
-        splitRosters.put(child.getId(), splitRosters.get(parent.getId()));
-    }
-
-    public void rememberExistingSplit(SBFFormation parent) {
-        var relatives = originalFamily(parent);
-        if (relatives.size() > 1) {
-            rememberSplitRoster(parent, relatives);
-        }
-    }
-
-    private void rememberSplitRoster(SBFFormation parent, List<SBFFormation> relatives) {
-        if (splitRosters == null) {
-            splitRosters = new java.util.HashMap<>();
-        }
-        var roster = splitRosters.get(parent.getId());
-        if (roster == null) {
-            roster = relatives.stream().flatMap(f -> f.getUnits().stream()).toList();
-            for (var relative : relatives) {
-                splitRosters.put(relative.getId(), roster);
-            }
-        }
-    }
-
-    public void leaveSplitRoster(SBFFormation counter) {
+    @java.io.Serial
+    private Object readResolve() {
         if (splitRosters != null) {
-            splitRosters.remove(counter.getId());
+            var active = getActiveFormations();
+            var roster = new ArrayList<>(active);
+            graveyard.stream().filter(SBFFormation.class::isInstance).map(SBFFormation.class::cast).forEach(roster::add);
+            for (var sheet : splitRosters.values().stream().distinct().toList()) {
+                var holders = active.stream().filter(f -> sheet.equals(splitRosters.get(f.getId()))).toList();
+                boolean reassigned = roster.stream().filter(f -> !sheet.equals(splitRosters.get(f.getId())))
+                      .anyMatch(f -> f.getUnits().stream().anyMatch(sheet::contains));
+                boolean lostAfterTransfer = scenarioProgress != null && scenarioProgress.losses().stream()
+                      .anyMatch(loss -> sheet.contains(loss.unit()) && !sheet.equals(splitRosters.get(loss.formationId())));
+                if (reassigned || lostAfterTransfer) {
+                    retireSheets(holders, null);
+                }
+            }
+            splitRosters = null;
         }
+        return this;
     }
 
     public boolean hasOriginalSurvivors(List<SBFFormation> present) {
-        if (splitRosters != null) {
-            var rosters = present.stream().map(f -> splitRosters.get(f.getId()))
-                  .filter(java.util.Objects::nonNull).distinct().toList();
-            if (!rosters.isEmpty()) {
-                var gathered = present.stream().flatMap(f -> f.getUnits().stream()).toList();
-                return rosters.stream().anyMatch(roster -> roster.containsAll(gathered)
-                      && getActiveFormations().stream().flatMap(f -> f.getUnits().stream())
-                            .filter(roster::contains).allMatch(gathered::contains));
-            }
-        }
         var relatives = originalFamily(present.getFirst());
         return relatives.size() == present.size() && relatives.containsAll(present);
     }
 
     public List<SBFFormation> originalFamily(SBFFormation member) {
         return getActiveFormations().stream().filter(f -> f.getOwnerId() == member.getOwnerId()
-              && f.originalFormationId() == member.originalFormationId()
-              && (splitRosters == null || java.util.Objects.equals(splitRosters.get(member.getId()), splitRosters.get(f.getId()))))
+              && f.originalFormationId() == member.originalFormationId())
               .sorted(java.util.Comparator.comparingInt(SBFFormation::getId)).toList();
+    }
+
+    /** Replace the old sheets while keeping surviving detachments together for movement (IO:BF p. 198). */
+    public void retireSheets(List<SBFFormation> holders, @Nullable SBFFormation receiver) {
+        holders.forEach(SBFFormation::retireSheet);
+        reanchorMovementGroups(holders, receiver);
+    }
+
+    public void reanchorMovementGroups(List<SBFFormation> affected, @Nullable SBFFormation receiver) {
+        var groupIds = affected.stream().map(SBFFormation::movementGroup).collect(Collectors.toSet());
+        var remaining = getActiveFormations().stream().filter(f -> f != receiver && groupIds.contains(f.movementGroup()))
+              .collect(Collectors.groupingBy(SBFFormation::movementGroup));
+        remaining.forEach((group, counters) -> {
+            int anchor = counters.stream().anyMatch(f -> f.getId() == group) ? group
+                  : counters.stream().mapToInt(SBFFormation::getId).min().orElseThrow();
+            counters.forEach(f -> f.setMovementGroup(anchor));
+        });
     }
 
     public boolean takingAdjustmentOrders() {

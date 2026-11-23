@@ -120,7 +120,7 @@ final class SBFFormationCommand extends ServerCommand {
     private static boolean eligibleCounter(SBFGame game, int owner, SBFFormation f) {
         return f != null && f.getOwnerId() == owner && !f.isAerospace() && !f.isEmbarked()
               && !f.isOffMapArtillery() && game.passengersOf(f).isEmpty()
-              && !f.inactiveAfterAssembly(game.getCurrentRound() + 1)
+              && !f.inactiveAfterAssembly(game.getCurrentRound()) && !f.inactiveAfterAssembly(game.getCurrentRound() + 1)
               && (game.getPhase().isLounge() || f.occupiesGroundHex());
     }
 
@@ -130,7 +130,7 @@ final class SBFFormationCommand extends ServerCommand {
             return false;
         }
         var family = game.originalFamily(member);
-        if (family.size() < 2 || family.stream().anyMatch(f -> !f.occupiesGroundHex()
+        if (family.size() < 2 || family.stream().anyMatch(f -> !f.occupiesGroundHex() || f.inactiveAfterAssembly(game.getCurrentRound())
               || !f.getPosition().isSameBoardAs(destination))) {
             return false;
         }
@@ -210,7 +210,9 @@ final class SBFFormationCommand extends ServerCommand {
         child.setMoraleStatus(parent.moraleStatus());
         child.assignOrigin(parent.originalFormationId(), movesWithParent);
         child.setUnits(new ArrayList<>(group));
-        game.recordSplit(parent, child);
+        if (movesWithParent) {
+            child.setMovementGroup(parent.movementGroup());
+        }
         group.forEach(parent::removeUnit);
         recalculate(game, child, 0);
         recalculate(game, parent, historicalPV);
@@ -252,8 +254,8 @@ final class SBFFormationCommand extends ServerCommand {
         }
         recalculate(game, receiver, 0);
         receiver.setPointValue(pv);
-        game.leaveSplitRoster(receiver);
         receiver.markReformed(game.getCurrentRound() + 1);
+        game.reanchorMovementGroups(family, null);
     }
 
     static boolean assemble(SBFGame game, int owner, SBFFormation receiver, List<String> choices) {
@@ -285,9 +287,6 @@ final class SBFFormationCommand extends ServerCommand {
     }
 
     private static void assemble(SBFGame game, SBFFormation receiver, Map<SBFFormation, List<SBFUnit>> transfers) {
-        // Older saved detachments need their original composition before any Unit changes counter.
-        game.rememberExistingSplit(receiver);
-        transfers.keySet().forEach(game::rememberExistingSplit);
         var counters = new ArrayList<>(transfers.keySet());
         counters.addFirst(receiver);
         if (transfers.entrySet().stream().allMatch(e -> receiver.getPosition().equals(e.getKey().getPosition())
@@ -295,6 +294,7 @@ final class SBFFormationCommand extends ServerCommand {
             mergeOriginal(game, counters, receiver);
             return;
         }
+        var oldSheets = counters.stream().flatMap(f -> game.originalFamily(f).stream()).distinct().toList();
         // Receive into the chosen superior. In a tie, selecting a receiver resolves the owner's choice.
         Map<Integer, Integer> elementsByForce = new HashMap<>();
         countElements(elementsByForce, receiver, receiver.getUnits());
@@ -326,13 +326,7 @@ final class SBFFormationCommand extends ServerCommand {
         if (game.getForces().contains(superior)) {
             game.getForces().addEntity(receiver, superior);
         }
-        if (receiver.originalFormationId() == receiver.getId()) {
-            var remaining = game.originalFamily(receiver).stream().filter(f -> f != receiver).toList();
-            if (!remaining.isEmpty()) {
-                remaining.forEach(f -> f.replaceOriginalCounter(remaining.getFirst().getId()));
-            }
-        }
-        game.leaveSplitRoster(receiver);
+        game.retireSheets(oldSheets, receiver);
         receiver.markAdHoc(game.getCurrentRound() + 1);
         recalculate(game, receiver, oldPV);
     }
@@ -355,7 +349,6 @@ final class SBFFormationCommand extends ServerCommand {
             });
         }
         game.getForces().removeEntityFromForces(f);
-        game.leaveSplitRoster(f);
         f.clearReunion();
         game.forget(f.getId());
     }

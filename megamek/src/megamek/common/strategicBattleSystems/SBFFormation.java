@@ -127,6 +127,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     // ID of the Formation from which these Units split. Detachments share their parent's movement turn.
     private Integer originalFormation;
     private boolean movesWithParent;
+    private Integer detachmentMovementGroup;
     private Integer reformPenaltyRound;
     private Integer reunionRound;
     private BoardLocation reunionLocation;
@@ -146,23 +147,31 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     }
 
     public int movementGroup() {
-        return movesWithParent ? originalFormationId() : getId();
+        return detachmentMovementGroup != null ? detachmentMovementGroup : (movesWithParent ? originalFormationId() : getId());
     }
 
-    public void replaceOriginalCounter(int id) {
-        originalFormation = id;
+    public void setMovementGroup(int group) {
+        movesWithParent = group != getId() && group == originalFormationId();
+        detachmentMovementGroup = (group == getId() || movesWithParent) ? null : group;
+    }
+
+    /** An ad hoc transfer replaces the participating sheets, including those held by off-site siblings (IO:BF p. 198). */
+    public void retireSheet() {
+        int group = movementGroup();
+        originalFormation = null;
+        setMovementGroup(group);
+        clearReunion();
     }
 
     public void assignOrigin(int formation, boolean detached) {
         originalFormation = formation;
-        movesWithParent = detached;
+        setMovementGroup(detached ? formation : getId());
     }
 
     public void markReformed(int nextRound) {
-        originalFormation = null;
-        movesWithParent = false;
+        retireSheet();
+        adHocInactiveRound = null;
         reformPenaltyRound = nextRound;
-        clearReunion();
     }
 
     public void clearReunion() {
@@ -173,7 +182,8 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     public void markAdHoc(int nextRound) {
         clearReunion();
         originalFormation = null;
-        movesWithParent = false;
+        setMovementGroup(getId());
+        reformPenaltyRound = null;
         adHocInactiveRound = nextRound;
     }
 
