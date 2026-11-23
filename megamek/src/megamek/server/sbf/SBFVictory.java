@@ -41,6 +41,7 @@ import megamek.common.Player;
 import megamek.common.game.InGameObject;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.server.scriptedEvents.DrawTriggeredEvent;
 import megamek.server.scriptedEvents.TriggeredEvent;
 import megamek.server.scriptedEvents.VictoryTriggeredEvent;
 import megamek.server.trigger.TriggerSituation;
@@ -52,18 +53,35 @@ final class SBFVictory {
     }
 
     static VictoryResult atRoundEnd(SBFGame game) {
-        if (game.scriptedEvents().stream().anyMatch(TriggeredEvent::isGameEnding)) {
-            List<TriggeredEvent> met = game.scriptedEvents().stream()
-                  .filter(event -> event.isGameEnding() || event instanceof VictoryTriggeredEvent)
-                  .filter(event -> event.trigger().isTriggered(game, TriggerSituation.ROUND_END)).toList();
-            if (met.stream().noneMatch(TriggeredEvent::isGameEnding)) {
-                return VictoryResult.noResult();
-            }
-            return met.stream().filter(VictoryTriggeredEvent.class::isInstance).map(VictoryTriggeredEvent.class::cast)
-                  .map(event -> event.winner(game)).filter(VictoryResult::isVictory).findFirst()
-                  .orElseGet(VictoryResult::drawResult);
+        List<TriggeredEvent> endings = game.scriptedEvents().stream().filter(TriggeredEvent::isGameEnding).toList();
+        List<TriggeredEvent> met = endings.stream()
+              .filter(event -> event.trigger().isTriggered(game, TriggerSituation.ROUND_END)).toList();
+        VictoryResult fallback = endings.isEmpty() ? pickupResult(game)
+              : met.isEmpty() ? VictoryResult.noResult() : VictoryResult.drawResult();
+        if (!fallback.isVictory()) {
+            return fallback;
         }
+        for (TriggeredEvent event : game.scriptedEvents()) {
+            if (!(event instanceof VictoryTriggeredEvent || event instanceof DrawTriggeredEvent)) {
+                continue;
+            }
+            boolean triggered = event.isGameEnding() ? met.contains(event)
+                  : event.trigger().isTriggered(game, TriggerSituation.ROUND_END);
+            if (triggered) {
+                if (event instanceof VictoryTriggeredEvent victory) {
+                    VictoryResult result = victory.winner(game);
+                    if (result.isVictory()) {
+                        return result;
+                    }
+                } else {
+                    return VictoryResult.drawResult();
+                }
+            }
+        }
+        return SBFScenarioResolution.pointsResult(game, fallback);
+    }
 
+    private static VictoryResult pickupResult(SBFGame game) {
         List<Player> participants = Stream.concat(game.getActiveFormations().stream(),
                     game.getGraveyard().stream().filter(SBFFormation.class::isInstance))
               .map(InGameObject::getOwnerId).distinct().map(game::getPlayer).filter(Objects::nonNull).toList();

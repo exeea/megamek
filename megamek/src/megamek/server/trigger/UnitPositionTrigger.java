@@ -114,8 +114,7 @@ public class UnitPositionTrigger implements Trigger {
     public boolean isTriggered(IGame game, TriggerSituation event) {
         Stream<? extends InGameObject> inArea;
         if (game instanceof SBFGame sbfGame) {
-            inArea = sbfGame.getActiveFormations().stream().filter(SBFFormation::isDeployed)
-                  .filter(formation -> !formation.isEmbarked() && formation.getPosition() != null)
+            inArea = sbfGame.getActiveFormations().stream().filter(SBFFormation::occupiesGroundHex)
                   .filter(formation -> area.containsCoords(formation.getPosition().coords(), game.getBoard(formation.getPosition())));
         } else if (game instanceof Game) {
             inArea = Stream.concat(game.getInGameObjects().stream(), game.getGraveyard().stream())

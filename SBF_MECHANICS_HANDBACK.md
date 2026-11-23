@@ -113,3 +113,11 @@ Each completed part receives an independent rules and code review. The author ad
 “Strategic Aerospace Setup” and “Aerospace Movement”, pp. 175–177, reserve the standard radar game for fighter Squadrons. Reviewed ground occupation and scoring cover pp. 172–174. A Central Zone flyover is represented by a flight path; it must never satisfy a ground position or occupation condition. Air-to-air declarations, counterfire decisions and airborne crash or forced-withdrawal scoring require their own tests and rechecks.
 
 Independent reviews above are rules and source reviews. The integrated test run is tracked separately. The first combined SBF run passed 99 tests. A later expanded run passed 199 of 200, exposing an invalid server fixture in the end-to-end ground game test. The replacement uses a real game manager and the normal packet/phase sequence.
+
+### Objective, victory and recognition rechecks
+
+“Capturing Objectives” and “Victory Points”, p. 174, use the Unit occupying a ground hex. The shared SBFFormation.occupiesGroundHex check distinguishes a landed Squadron from its airborne flight path. Independent review passed the objective, battlefield-control and position predicates after the fix. SBFScenarioResolutionTest and SBFVictoryTest cover both cases. Named winners, explicit draws, continuous occupation, score fractions and the final salvage threshold received separate independent review.
+
+“Losing Contact”, p. 198, applies in “an Urban hex” and at the end of Movement. SBFDetectionHelper uses the actual traversed destination and the detection tables for each recheck. A modified 6 changes an identified contact to a Blip, or removes an existing Blip. With shared vision the side retains its best identification while an allied sensor remains in range. Shared-team tracking and the hardened-urban entry cap passed independent rechecks. Where several observers track the formation, a side retains contact if one observer passes its applicable checks; the text does not specify how to combine multiple observers.
+
+Integrated verification at this checkpoint passed 217 of 218 tests. The failure concerned damage-triggered aerospace withdrawal and is under correction. The ground server scenario exercised deployment through the first End Phase. A follow-up regression now exercises actual adjacent movement and reciprocal attacks.

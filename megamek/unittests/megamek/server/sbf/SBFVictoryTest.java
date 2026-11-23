@@ -45,6 +45,9 @@ import megamek.common.board.Coords;
 import megamek.common.hexArea.ListHexArea;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFRadarZone;
+import megamek.common.options.SBFRuleOptions;
+import megamek.server.scriptedEvents.DrawTriggeredEvent;
 import megamek.server.scriptedEvents.GameEndTriggeredEvent;
 import megamek.server.scriptedEvents.VictoryTriggeredEvent;
 import megamek.server.trigger.BattlefieldControlTrigger;
@@ -91,6 +94,20 @@ class SBFVictoryTest {
     }
 
     @Test
+    void explicitDrawWinsOverPointsAndEndOnlyWinnerRunsAtPickupElimination() {
+        add(1, 1);
+        game.removeFormationFromPlay(add(2, 2));
+        game.setCurrentRound(2);
+        game.addScriptedEvent(new VictoryTriggeredEvent(new SpecificRoundEndTrigger(2), false, "Side 2"));
+        assertEquals(2, SBFVictory.atRoundEnd(game).getWinningTeam());
+
+        game.setCurrentRound(3);
+        game.getOptions().getOption(SBFRuleOptions.BASE_VICTORY_POINTS).setValue(true);
+        game.addScriptedEvent(new DrawTriggeredEvent(new SpecificRoundEndTrigger(3), true));
+        assertTrue(SBFVictory.atRoundEnd(game).isDraw());
+    }
+
+    @Test
     void scenarioPredicatesDistinguishFieldControlWithdrawalAndActualLoss() {
         SBFFormation first = add(1, Player.TEAM_NONE);
         SBFFormation other = add(2, Player.TEAM_NONE);
@@ -103,6 +120,14 @@ class SBFVictoryTest {
         assertTrue(control.isTriggered(game, TriggerSituation.ROUND_END));
         other.setPosition(hex);
         other.setDeployed(true);
+        assertFalse(control.isTriggered(game, TriggerSituation.ROUND_END));
+        var otherInArea = new UnitPositionTrigger(new ListHexArea(hex.coords()), "Side 2", List.of(other.getId()), 1, 1);
+        other.setRadarPosition(SBFRadarZone.CENTRAL, List.of(hex));
+        assertFalse(otherInArea.isTriggered(game, TriggerSituation.ROUND_END));
+        assertTrue(control.isTriggered(game, TriggerSituation.ROUND_END));
+        other.setRadarPosition(null, List.of());
+        other.setPosition(hex);
+        assertTrue(otherInArea.isTriggered(game, TriggerSituation.ROUND_END));
         assertFalse(control.isTriggered(game, TriggerSituation.ROUND_END));
         game.removeFormationFromPlay(first);
         assertFalse(area.isTriggered(game, TriggerSituation.ROUND_END));

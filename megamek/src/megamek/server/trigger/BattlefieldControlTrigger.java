@@ -54,8 +54,7 @@ public class BattlefieldControlTrigger implements Trigger {
     @Override
     public boolean isTriggered(IGame game, TriggerSituation event) {
         if (game instanceof SBFGame sbfGame) {
-            List<Player> occupants = sbfGame.getActiveFormations().stream().filter(SBFFormation::isDeployed)
-                  .filter(formation -> !formation.isEmbarked() && formation.getPosition() != null)
+            List<Player> occupants = sbfGame.getActiveFormations().stream().filter(SBFFormation::occupiesGroundHex)
                   .map(formation -> game.getPlayer(formation.getOwnerId())).distinct().toList();
             return !occupants.isEmpty() && occupants.stream().noneMatch(occupants.getFirst()::isEnemyOf);
         } else if (game instanceof Game twGame) {
