@@ -95,7 +95,7 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
     protected Map<String, ClientCommand> clientCommands = new HashMap<>();
 
     /**
-     * The {@link megamek.client.ui.clientGUI.boardview.BoardView}'s of the game with the board ID as the map key
+     * The {@link megamek.client.ui.clientGUI.boardview.IBoardView}'s of the game with the board ID as the map key
      */
     public final Map<Integer, IBoardView> boardViews = new HashMap<>();
     /** Authoritative client presentation, retained when its renderer changes. */
@@ -326,13 +326,13 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
     }
 
     /**
-     * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}. If there is only a single
-     *       {@link megamek.client.ui.clientGUI.boardview.BoardView} (no tabbed pane), this will be returned. With
-     *       multiple {@link megamek.client.ui.clientGUI.boardview.BoardView}'s, the one in the currently selected tab
+     * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.IBoardView}. If there is only a single
+     *       {@link megamek.client.ui.clientGUI.boardview.IBoardView} (no tabbed pane), this will be returned. With
+     *       multiple {@link megamek.client.ui.clientGUI.boardview.IBoardView}'s, the one in the currently selected tab
      *       is returned.
      *       <p>
      *       Unfortunately it is possible to have no selected tab in a JTabbedPane; also, theoretically, there could be
-     *       no {@link megamek.client.ui.clientGUI.boardview.BoardView}. Therefore, the result is returned as an
+     *       no {@link megamek.client.ui.clientGUI.boardview.IBoardView}. Therefore, the result is returned as an
      *       Optional.
      */
     public Optional<IBoardView> getCurrentBoardView() {

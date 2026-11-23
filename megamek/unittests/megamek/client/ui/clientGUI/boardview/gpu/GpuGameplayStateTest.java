@@ -24,10 +24,6 @@ import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
-import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -76,11 +72,7 @@ class GpuGameplayStateTest {
     @Test
     void gameplayCaptureSelectionMovementAndTooltipsConstructNoLegacy2DRenderer() throws Exception {
         onClient(() -> {
-            try (var views = mockConstruction(BoardView.class);
-                  var panels = mockConstruction(BoardViewPanel.class);
-                  var units = mockConstruction(EntitySprite.class);
-                  var isometric = mockConstruction(IsometricSprite.class);
-                  var session = Session.create()) {
+            try (var session = Session.create()) {
                 var state = session.state();
                 assertEquals(1, session.source().takeFrame().scene().units().size());
                 state.select(session.unit().getPosition());
@@ -95,17 +87,17 @@ class GpuGameplayStateTest {
                 session.game().processGameEvent(new GameEntityChangeEvent(session.game(), session.unit()));
                 session.source().refresh();
                 assertNotNull(session.source().takeFrame().scene());
-                assertTrue(views.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
-                assertTrue(units.constructed().isEmpty());
-                assertTrue(isometric.constructed().isEmpty());
+
+
+
+
             }
             return null;
         });
     }
 
     @Test
-    void closingLegacy2DRendererRetainsSharedSelectionListenersAndTacticalState() throws Exception {
+    void refreshRetainsSharedSelectionListenersAndTacticalState() throws Exception {
         onClient(() -> {
             try (var session = Session.create()) {
                 var state = session.state();
@@ -114,10 +106,8 @@ class GpuGameplayStateTest {
                 var listener = mock(BoardViewListenerAdapter.class);
                 state.addBoardViewListener(listener);
                 long revision = state.getRevision();
-                BoardView legacy2D = new BoardView(state, null, state.getClientgui());
-                legacy2D.getPanel().repaint();
-                assertEquals(revision, state.getRevision(), "Swing repaint must not invalidate native tactical state");
-                legacy2D.dispose();
+                session.source().refresh();
+                assertEquals(revision, state.getRevision());
                 assertFalse(state.isClosed());
                 assertEquals(selected, state.getSelected());
                 state.select(new Coords(5, 4));
@@ -147,7 +137,7 @@ class GpuGameplayStateTest {
     void nativeVisibilityRefreshesWhenTerrainChangesWithoutALegacy2DRenderer() throws Exception {
         try (var options = new GpuFieldOfViewTest.Options()) {
             onClient(() -> {
-                try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
+                try (var session = Session.create()) {
                     var board = session.game().getBoard();
                     var target = new Coords(6, 3);
                     session.state().select(session.unit().getPosition());
@@ -167,7 +157,7 @@ class GpuGameplayStateTest {
                     session.source().refresh();
                     assertEquals(BoardFieldOfView.Visibility.BLOCKED,
                           GpuFieldOfViewTest.at(session.source().takeFrame().scene().fieldOfView(), target).visibility());
-                    assertTrue(views.constructed().isEmpty());
+
                 }
                 return null;
             });
@@ -337,22 +327,6 @@ class GpuGameplayStateTest {
         } finally {
             onClient(() -> { session.close(); return null; });
         }
-    }
-
-    @Test
-    void printableExportUsesSharedArtworkAndLeavesInteractiveStateIntact() throws Exception {
-        onClient(() -> {
-            try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
-                var before = session.source().takeFrame().scene();
-                var image = session.state().getEntireBoardImage(false);
-                assertEquals((8 - 1) * 63 + 84, image.getWidth());
-                assertTrue(image.getHeight() >= 8 * 72);
-                assertTrue(views.constructed().isEmpty());
-                session.source().refresh();
-                assertSame(before.units().getFirst().annotations(), session.source().takeFrame().scene().units().getFirst().annotations());
-            }
-            return null;
-        });
     }
 
     private static Timer captureTimer(GpuBoardSource source) throws ReflectiveOperationException {

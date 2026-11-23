@@ -2042,7 +2042,7 @@ public class Board implements Serializable {
     }
 
     /**
-     * Fires a board event which typically leads to the {@link megamek.client.ui.clientGUI.boardview.BoardView} and
+     * Fires a board event which typically leads to the {@link megamek.client.ui.clientGUI.boardview.IBoardView} and
      * minimap being redrawn. This is public as the boards and minimaps show some data that is not part of the Board
      * class and Board has no way of knowing when a change happens. An example of this is arty auto hexes which are
      * stored in the player class

@@ -45,9 +45,9 @@ import java.util.List;
 import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 
 /**
- * Used for {@link megamek.client.ui.clientGUI.boardview.BoardView} overlays that don't move when the map is scrolled
+ * Used for {@link megamek.client.ui.clientGUI.boardview.IBoardView} overlays that don't move when the map is scrolled
  * (such as the chat window). Use BoardView1.addDisplayable() to add it to the
- * {@link megamek.client.ui.clientGUI.boardview.BoardView}.
+ * {@link megamek.client.ui.clientGUI.boardview.IBoardView}.
  *
  * @author jwalt
  */
@@ -58,7 +58,7 @@ public interface IDisplayable {
 
     /**
      * Returns true when this IDisplayable is being dragged or resized using mouse movement. This will prevent the
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} from reacting to this mouse action. The default for this
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView} from reacting to this mouse action. The default for this
      * method will always return false.
      */
     default boolean isBeingDragged() {
@@ -67,7 +67,7 @@ public interface IDisplayable {
 
     /**
      * Returns true when this IDisplayable is dragged or resized using mouse dragging. This will prevent the
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} from reacting to this mouse action. The default for this
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView} from reacting to this mouse action. The default for this
      * method will always return false.
      */
     default boolean isDragged(Point point, Dimension backSize) {
@@ -85,7 +85,7 @@ public interface IDisplayable {
     /**
      * Returns true when the mouse position point is considered "within" this IDisplayable. This is called when the
      * mouse or mouse wheel is moved. backSize is the pixel size of the
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView}. The default for this method will always return false.
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView}. The default for this method will always return false.
      */
     default boolean isMouseOver(Point point, Dimension backSize) {
         return false;
@@ -97,9 +97,9 @@ public interface IDisplayable {
 
     /**
      * Draw this IDisplayable to the Graphics graph, which is the
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} graphics. The currently visible part of the
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} is given by the Rectangle rect, so the upper left corner
-     * of the visible {@link megamek.client.ui.clientGUI.boardview.BoardView} is rect.x, rect.y.
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView} graphics. The currently visible part of the
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView} is given by the Rectangle rect, so the upper left corner
+     * of the visible {@link megamek.client.ui.clientGUI.boardview.IBoardView} is rect.x, rect.y.
      */
     void draw(Graphics graph, Rectangle rect);
 
@@ -113,7 +113,7 @@ public interface IDisplayable {
 
     /**
      * Return true while sliding. "Sliding" means that this IDisplayable is in the process of opening, closing moving or
-     * fading. The {@link megamek.client.ui.clientGUI.boardview.BoardView} will repaint at some fps while an
+     * fading. The {@link megamek.client.ui.clientGUI.boardview.IBoardView} will repaint at some fps while an
      * IDisplayable is sliding. The default for this method will always return false.
      */
     default boolean isSliding() {
@@ -121,7 +121,7 @@ public interface IDisplayable {
     }
 
     /**
-     * The {@link megamek.client.ui.clientGUI.boardview.BoardView} calls this to pass on the elapsed time elTime to the
+     * The {@link megamek.client.ui.clientGUI.boardview.IBoardView} calls this to pass on the elapsed time elTime to the
      * IDisplayable. when add is true, elTime is usually the elapsed time since the last call to setIdleTime and should
      * be added to a stored elapsed time. When add is false, elTime should replace the previously stored elapsed time
      * (this is usually used with elTime = 0 to reset the elapsed time). Can be used to make this IDisplayable "slide"
@@ -131,7 +131,7 @@ public interface IDisplayable {
 
     /**
      * Conducts a frame update when sliding. "Sliding" means that this IDisplayable is in the process of opening,
-     * closing moving or fading. The {@link megamek.client.ui.clientGUI.boardview.BoardView} will repaint at some fps
+     * closing moving or fading. The {@link megamek.client.ui.clientGUI.boardview.IBoardView} will repaint at some fps
      * while an IDisplayable is sliding. Return true as long as the slide process is not finished. See ChatterBox2 and
      * KeyBindingsOverlay for examples. The default for this method will always return false.
      */

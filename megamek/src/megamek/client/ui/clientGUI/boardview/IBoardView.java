@@ -37,7 +37,6 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.image.RenderedImage;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -47,7 +46,6 @@ import javax.swing.Scrollable;
 import megamek.client.event.BoardViewListener;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
-import megamek.client.ui.clientGUI.boardview.toolTip.BoardViewTooltipProvider;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 
@@ -107,8 +105,8 @@ public interface IBoardView {
     }
 
     /**
-     * Sets the {@link BoardView} to use the given player ID as the player in whose client this {@link BoardView} is
-     * shown. This may affect what is shown and what is hidden in this {@link BoardView}; it will also affect what is
+     * Sets the {@link IBoardView} to use the given player ID as the player in whose client this {@link IBoardView} is
+     * shown. This may affect what is shown and what is hidden in this {@link IBoardView}; it will also affect what is
      * considered an enemy and ally.
      *
      * @param playerId The local player's ID as stored in the game.
@@ -118,8 +116,8 @@ public interface IBoardView {
     Player getLocalPlayer();
 
     /**
-     * Frees the resources this {@link BoardView} uses and removes listeners. Call when this {@link BoardView} is not
-     * used anymore. The {@link BoardView} will no longer be functional after calling this method. When overriding this
+     * Frees the resources this {@link IBoardView} uses and removes listeners. Call when this {@link IBoardView} is not
+     * used anymore. The {@link IBoardView} will no longer be functional after calling this method. When overriding this
      * method, include a call to super.dispose().
      */
     void dispose();
@@ -146,7 +144,7 @@ public interface IBoardView {
     void removeBoardViewListener(BoardViewListener listener);
 
     /**
-     * Adds the given overlay to this {@link BoardView}. Overlays are displayed above the actual board and fixed with
+     * Adds the given overlay to this {@link IBoardView}. Overlays are displayed above the actual board and fixed with
      * respect to the screen, like the chatbox or unit overview.
      *
      * @param overlay The overlay to add
@@ -154,7 +152,7 @@ public interface IBoardView {
     void addOverlay(IDisplayable overlay);
 
     /**
-     * Removes the given overlay from this {@link BoardView}.
+     * Removes the given overlay from this {@link IBoardView}.
      *
      * @param overlay The overlay to add
      *
@@ -165,17 +163,6 @@ public interface IBoardView {
     default void refreshDisplayables() {
         getPanel().repaint();
     }
-
-    /**
-     * Returns an image of the entire board. Depending on parameters, the board may contain any currently present units
-     * or other game objects, and it may be drawn at zoom 1 or the current zoom level.
-     *
-     * @param hideUnits   If true, no units are drawn, only the board
-     * @param useBaseZoom If true, zoom = 1 is used, otherwise the current board zoom
-     *
-     * @return an image of the whole board
-     */
-    RenderedImage getEntireBoardImage(boolean hideUnits, boolean useBaseZoom);
 
     /**
      * Notifies this BoardView to center itself on the given Coords. Override this to be safe for null Coords.
@@ -209,16 +196,6 @@ public interface IBoardView {
      *       MouseEvent.
      */
     Coords getCoordsAt(Point point);
-
-    /**
-     * Adds the given BoardViewTooltipProvider to this BoardView to provide the tooltips that are shown, replacing the
-     * previous BoardViewTooltipProvider, if any.
-     *
-     * @param provider The BoardViewTooltipProvider
-     *
-     * @see BoardViewTooltipProvider
-     */
-    void setTooltipProvider(BoardViewTooltipProvider provider);
 
     /**
      * Schedules a repaint of the BoardView.
@@ -293,7 +270,7 @@ public interface IBoardView {
     }
 
     /**
-     * @return This {@link BoardView}'s board ID. Defaults to 0 for all implementations that don't support multiple
+     * @return This {@link IBoardView}'s board ID. Defaults to 0 for all implementations that don't support multiple
      *       boards.
      */
     default int getBoardId() {
@@ -301,10 +278,10 @@ public interface IBoardView {
     }
 
     /**
-     * Returns true when this {@link BoardView} is showing some animation and should not be centered on another hex or
+     * Returns true when this {@link IBoardView} is showing some animation and should not be centered on another hex or
      * be hidden right now. An example is showing a unit's move animation.
      *
-     * @return True when this {@link BoardView} is in the process of showing some animation
+     * @return True when this {@link IBoardView} is in the process of showing some animation
      */
     default boolean isShowingAnimation() {
         return false;

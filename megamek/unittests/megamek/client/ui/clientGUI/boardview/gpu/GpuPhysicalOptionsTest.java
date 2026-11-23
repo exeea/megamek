@@ -33,19 +33,18 @@ import java.util.Vector;
 import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.CriticalSlot;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.KickAttackAction;
@@ -125,9 +124,9 @@ class GpuPhysicalOptionsTest {
             assertEquals(List.of(KickAttackAction.LEFT), scene.press(PhysicalCommand.PHYSICAL_KICK),
                   "Equal rolls kick with the left leg");
 
-            scene.hitFootActuator(Mek.LOC_LEFT_LEG);
+            scene.fireFromLeftLeg();
             assertEquals(List.of(KickAttackAction.RIGHT), scene.press(PhysicalCommand.PHYSICAL_KICK),
-                  "A destroyed left foot actuator adds 1 to the left leg's roll");
+                  "A weapon fired from the left leg rules out a kick with that leg");
         }
     }
 
@@ -144,7 +143,7 @@ class GpuPhysicalOptionsTest {
         try (Scene scene = Scene.create(routingClient(), ATLAS, NORTH)) {
             scene.addRetractableBlade(Mek.LOC_LEFT_ARM);
             scene.attacker.getCrew().getOptions().getOption(OptionsConstants.PILOT_ZWEIHANDER).setValue(true);
-            present(scene.gui, scene.view.getClientState(), scene.source);
+            present(scene.gui, scene.view, scene.source);
             try {
                 String blade = Messages.getString("PhysicalDisplay.ExtendBladeDialog.title");
                 String zweihander = Messages.getString("PhysicalDisplay.ZweihanderPunchDialog.title");
@@ -280,7 +279,7 @@ class GpuPhysicalOptionsTest {
         try (Scene scene = Scene.create(routingClient(), ATLAS, NORTH)) {
             scene.addRetractableBlade(Mek.LOC_LEFT_ARM);
             scene.attacker.getCrew().getOptions().getOption(OptionsConstants.PILOT_ZWEIHANDER).setValue(true);
-            present(scene.gui, scene.view.getClientState(), scene.source);
+            present(scene.gui, scene.view, scene.source);
             try {
                 String blade = Messages.getString("PhysicalDisplay.ExtendBladeDialog.title");
                 String zweihander = Messages.getString("PhysicalDisplay.ZweihanderPunchDialog.title");
@@ -307,7 +306,7 @@ class GpuPhysicalOptionsTest {
             assertEquals(List.of(), scene.declare(true, "punchLeft"), "No declares nothing");
             verify(gui).doYesNoDialog(eq(punch), anyString());
 
-            GpuBoardWindow window = present(gui, scene.view.getClientState(), scene.source);
+            GpuBoardWindow window = present(gui, scene.view, scene.source);
             try {
                 GpuDialogFixture.set(window, "presented", false);
                 assertEquals(List.of(), scene.declare(true, "punchLeft"),
@@ -350,7 +349,7 @@ class GpuPhysicalOptionsTest {
         final List<List<EntityAction>> sent = new ArrayList<>();
         Entity attacker;
         Entity enemy;
-        BoardView view;
+        BoardClientState view;
         GpuBoardSource source;
         PhysicalDisplay display;
         private MockedStatic<MegaMekGUI> keys;
@@ -411,17 +410,18 @@ class GpuPhysicalOptionsTest {
             when(gui.getUnitDisplayState()).thenReturn(unitDisplay);
             gui.controller = mock(MegaMekController.class);
 
-            view = new BoardView(game, null, gui, 0);
+            view = new BoardClientState(game, null, gui, 0, null);
             view.setLocalPlayer(fixture.player.getId());
-            when(gui.boardViews()).thenReturn(List.of(view));
-            when(gui.getBoardState()).thenReturn(view.getClientState());
-            when(gui.getBoardState(any(Targetable.class))).thenReturn(view.getClientState());
-            when(gui.getBoardState(anyInt())).thenReturn(view.getClientState());
+            when(gui.boardStates()).thenReturn(List.of(view));
+            when(gui.getCurrentBoardState()).thenReturn(java.util.Optional.of(view));
+            when(gui.getBoardState()).thenReturn(view);
+            when(gui.getBoardState(any(Targetable.class))).thenReturn(view);
+            when(gui.getBoardState(anyInt())).thenReturn(view);
             // The key dispatcher is only used while the display registers its commands.
             keys = mockStatic(MegaMekGUI.class, CALLS_REAL_METHODS);
             keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(gui.controller);
             display = new PhysicalDisplay(gui);
-            source = new GpuBoardSource(view.getClientState(), () -> display);
+            source = new GpuBoardSource(view, () -> display);
             select();
         }
 
@@ -569,15 +569,11 @@ class GpuPhysicalOptionsTest {
             });
         }
 
-        void hitFootActuator(int location) throws Exception {
+        void fireFromLeftLeg() throws Exception {
             onSwing(() -> {
-                for (int slot = 0; slot < attacker.getNumberOfCriticalSlots(location); slot++) {
-                    CriticalSlot critical = attacker.getCritical(location, slot);
-                    if ((critical != null) && (critical.getType() == CriticalSlot.TYPE_SYSTEM)
-                          && (critical.getIndex() == Mek.ACTUATOR_FOOT)) {
-                        critical.setHit(true);
-                    }
-                }
+                var weapon = attacker.getWeaponList().getFirst();
+                weapon.setLocation(Mek.LOC_LEFT_LEG);
+                weapon.setUsedThisRound(true);
                 return null;
             });
         }
@@ -597,7 +593,7 @@ class GpuPhysicalOptionsTest {
                         display.removeAllListeners();
                     }
                     if (view != null) {
-                        view.dispose();
+                        view.close();
                     }
                     if (keys != null) {
                         keys.close();

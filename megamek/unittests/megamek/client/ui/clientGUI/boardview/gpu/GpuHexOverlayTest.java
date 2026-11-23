@@ -15,7 +15,6 @@ import javax.swing.SwingUtilities;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -84,16 +83,7 @@ class GpuHexOverlayTest {
                 assertTrue(triangles.stream().filter(t -> t.argb() == new Color(0, 140, 0, 120).getRGB())
                       .allMatch(t -> t.a().z > 3 * BoardGeometry.LEVEL && t.b().z > 3 * BoardGeometry.LEVEL
                             && t.c().z > 3 * BoardGeometry.LEVEL));
-                BoardView legacy2D = fixture.legacy2DView();
-                try {
-                    legacy2D.getComponent();
-                    legacy2D.zoomOut();
-                    float scale = legacy2D.getScale();
-                    assertEquals(marked.tactical(), new BoardTacticalMarks().capture(fixture.view, false));
-                    assertEquals(scale, legacy2D.getScale());
-                } finally {
-                    legacy2D.dispose();
-                }
+                assertEquals(marked.tactical(), new BoardTacticalMarks().capture(fixture.view, false));
                 prefs.setMapSheetColor(Color.YELLOW);
                 fixture.source.refresh();
                 assertTrue(covers(fixture.source.takeFrame().scene().tactical(), Color.YELLOW, new Coords(8, 17), 0,

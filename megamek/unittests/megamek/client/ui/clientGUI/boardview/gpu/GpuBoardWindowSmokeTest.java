@@ -19,7 +19,6 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,8 +64,6 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
@@ -132,8 +129,6 @@ class GpuBoardWindowSmokeTest {
 
     @Test
     void nativeGameplayRendersWithoutConstructingALegacy2DBoardOrInspector() throws Exception {
-        var legacy2D = GpuTestSupport.onSwing(() -> mockConstruction(BoardView.class));
-        var panels = GpuTestSupport.onSwing(() -> mockConstruction(BoardViewPanel.class));
         var inspector = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayPanel.class));
         var inspectorDialog = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayDialog.class));
         var weapons = GpuTestSupport.onSwing(() -> mockConstruction(WeaponPanel.class));
@@ -169,8 +164,8 @@ class GpuBoardWindowSmokeTest {
                 });
             }
             GpuTestSupport.onSwing(() -> {
-                assertTrue(legacy2D.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
+
+
                 assertTrue(inspector.constructed().isEmpty());
                 assertTrue(inspectorDialog.constructed().isEmpty());
                 assertTrue(weapons.constructed().isEmpty());
@@ -184,11 +179,11 @@ class GpuBoardWindowSmokeTest {
                 session.close();
                 owner.dispose();
                 menus.die();
-                panels.close();
+
                 weapons.close();
                 inspectorDialog.close();
                 inspector.close();
-                legacy2D.close();
+
                 return null;
             });
         }
@@ -278,10 +273,7 @@ class GpuBoardWindowSmokeTest {
         Application previous = Gdx.app;
         try {
             GpuTestSupport.onSwing(() -> {
-                try (var views = mockConstruction(BoardView.class)) {
-                    GpuBoardWindow.openEditor(launcher, file.toFile(), false);
-                    assertTrue(views.constructed().isEmpty());
-                }
+                GpuBoardWindow.openEditor(launcher, file.toFile(), false);
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);

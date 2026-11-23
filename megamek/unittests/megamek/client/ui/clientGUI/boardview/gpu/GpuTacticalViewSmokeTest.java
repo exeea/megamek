@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
-import javax.imageio.ImageIO;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 
@@ -177,24 +176,11 @@ class GpuTacticalViewSmokeTest {
         boolean types = preferences.getHexTypesEnabled();
         try (var fixture = GpuBoardFixture.create(typesBoard())) {
             SwingUtilities.invokeAndWait(() -> {
-                try {
-                    if (!preferences.getCoordsEnabled()) { preferences.toggleCoords(); }
-                    if (preferences.getHexTypesEnabled()) { preferences.toggleHexTypes(); }
-                    File directory = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-                    assertTrue(directory.isDirectory() || directory.mkdirs());
-                    ImageIO.write(fixture.legacy2DView().getEntireBoardImage(true, true), "png",
-                          new File(directory, "hex-types-off-legacy-2d.png"));
-                    preferences.toggleHexTypes();
-                    preferences.setBoardGraphics(BoardGraphics.ENHANCED);
-                    fixture.source.setVisibleArea(new Rectangle(0, 0, WIDTH, HEIGHT));
-                    fixture.source.refresh();
-                    ImageIO.write(fixture.legacy2DView().getEntireBoardImage(true, true), "png",
-                          new File(directory, "hex-types-legacy-2d.png"));
-                    ImageIO.write(fixture.view.getEntireBoardImage(true), "png",
-                          new File(directory, "hex-types-export.png"));
-                } catch (Exception error) {
-                    throw new IllegalStateException(error);
-                }
+                if (!preferences.getCoordsEnabled()) { preferences.toggleCoords(); }
+                if (!preferences.getHexTypesEnabled()) { preferences.toggleHexTypes(); }
+                preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+                fixture.source.setVisibleArea(new Rectangle(0, 0, WIDTH, HEIGHT));
+                fixture.source.refresh();
             });
             run(fixture, failure, view -> hexTypes(view, fixture));
         } finally {

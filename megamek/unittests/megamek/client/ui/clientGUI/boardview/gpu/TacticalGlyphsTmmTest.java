@@ -9,7 +9,7 @@ import java.util.concurrent.FutureTask;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalGlyphs;
 import megamek.common.Player;
 import megamek.common.board.Coords;
@@ -76,14 +76,14 @@ class TacticalGlyphsTmmTest {
             for (MoveStepType step : steps) {
                 path.addStep(step);
             }
-            BoardView view = new BoardView(game, null, null, 0);
+            BoardClientState view = new BoardClientState(game, null, null, 0, null);
             try {
                 BoardTacticalGraphics graphics = new BoardTacticalGraphics();
                 TacticalGlyphs.paintStep(graphics, view, path.getLastStep(), true);
                 return graphics.snapshot().labels().stream().map(label -> label.text().value())
                       .filter(text -> text.startsWith("+") || text.startsWith("-")).collect(Collectors.toSet());
             } finally {
-                view.dispose();
+                view.close();
             }
         });
         SwingUtilities.invokeAndWait(task);

@@ -112,7 +112,6 @@ import megamek.common.board.FacingOption;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;
 import megamek.common.compute.ComputeECM;
-import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.Minefield;
@@ -3185,71 +3184,5 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public boolean isTooltipSuspended() { return tooltipSuspended; }
     public void suspendTooltip() { tooltipSuspended = true; }
     public void activateTooltip() { tooltipSuspended = false; }
-
-    /** Explicit printable export; uses the same labels and tactical painters without constructing a viewport. */
-    public BufferedImage getEntireBoardImage(boolean ignoreUnits) {
-        BoardGlyphContext previousProjection = projection;
-        projection = null;
-        List<Sprite> glyphs = allSprites.stream()
-              .filter(sprite -> !sprite.isUnitVisual()).toList();
-        try {
-            BufferedImage overlay = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            BufferedImage result = BoardArtwork.printable(getBoard(), tileManager, coords -> {
-                Graphics2D g = overlay.createGraphics();
-                try {
-                    g.setComposite(AlphaComposite.Clear); g.fillRect(0, 0, HEX_W, HEX_H);
-                    g.setComposite(AlphaComposite.SrcOver);
-                    drawHexEffects(g, coords); drawSpecialHexes(g, coords); drawHexPlugins(g, coords);
-                } finally { g.dispose(); }
-                return overlay;
-            });
-            Graphics2D graphics = result.createGraphics();
-            try {
-                UIUtil.setHighQualityRendering(graphics);
-                graphics.setClip(0, 0, result.getWidth(), result.getHeight());
-                glyphs.forEach(Sprite::prepare);
-                drawSprites(graphics, behindTerrainHexSprites.stream().filter(sprite -> !sprite.isUnitVisual()).toList());
-                if (!ignoreUnits) {
-                    if (GUIP.getShowWrecks()) {
-                        for (Entity wreck : getWrecks()) {
-                            if (EntityVisibilityUtils.detectedOrHasVisual(localPlayer, game, wreck)
-                                  && !EntityVisibilityUtils.onlyDetectedBySensors(localPlayer, wreck)) {
-                                drawPrintedUnit(graphics, wreck, true);
-                            }
-                        }
-                    }
-                    for (Entity entity : game.getEntitiesVector()) {
-                        if (isOnThisBord(entity) && entity.getPosition() != null
-                              && EntityVisibilityUtils.detectedOrHasVisual(localPlayer, game, entity)) {
-                            drawPrintedUnit(graphics, entity, false);
-                        }
-                    }
-                }
-                drawTacticalLayers(graphics, false);
-            } finally { graphics.dispose(); }
-            return result;
-        } finally {
-            projection = previousProjection;
-            if (projection != null && getScale() != 1) { glyphs.forEach(Sprite::prepare); }
-        }
-    }
-
-    private void drawPrintedUnit(Graphics2D graphics, Entity entity, boolean wreck) {
-        Map<Integer, Coords> positions = entity.getSecondaryPositions().isEmpty()
-              ? Map.of(-1, entity.getPosition()) : entity.getSecondaryPositions();
-        boolean sensor = EntityVisibilityUtils.onlyDetectedBySensors(localPlayer, entity);
-        for (var entry : positions.entrySet()) {
-            Point point = getHexLocation(entry.getValue());
-            Image image = sensor ? getRadarBlipImage() : wreck ? tileManager.wreckMarkerFor(entity, entry.getKey())
-                  : tileManager.imageFor(entity, entry.getKey());
-            graphics.drawImage(image, point.x, point.y, null);
-            if (!wreck) {
-                UnitAnnotations annotations = new UnitAnnotations(this, entity, entry.getKey());
-                annotations.prepare();
-                Rectangle bounds = annotations.getBounds();
-                graphics.drawImage(annotations.image(), bounds.x, bounds.y, null);
-            }
-        }
-    }
 
 }

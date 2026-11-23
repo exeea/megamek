@@ -21,14 +21,10 @@ import megamek.client.Client;
 import megamek.client.CloseClientListener;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
-import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
@@ -52,11 +48,7 @@ class ClientGUIBoardLifecycleTest {
     @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
     void nativeMapArrivalReplacementAndBoardSelectionNeedNoLegacy2DRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
-            try (var views = mockConstruction(BoardView.class);
-                  var panels = mockConstruction(BoardViewPanel.class);
-                  var rulers = mockConstruction(RulerDialog.class);
-                  var units = mockConstruction(EntitySprite.class);
-                  var isometric = mockConstruction(IsometricSprite.class);
+            try (var rulers = mockConstruction(RulerDialog.class);
                   var display = mockConstruction(UnitDisplayPanel.class);
                   var dialog = mockConstruction(UnitDisplayDialog.class);
                   var weapons = mockConstruction(WeaponPanel.class);
@@ -103,11 +95,11 @@ class ClientGUIBoardLifecycleTest {
                 assertNull(gui.getBoardState(2));
                 assertSame(gui.getBoardState(0), gui.getBoardState());
                 assertEquals(List.of(), boardListeners(removedBoard));
-                assertTrue(views.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
+
+
                 assertTrue(rulers.constructed().isEmpty(), "Native startup must not construct a Swing ruler");
-                assertTrue(units.constructed().isEmpty());
-                assertTrue(isometric.constructed().isEmpty());
+
+
                 assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");
                 assertTrue(dialog.constructed().isEmpty());
                 assertTrue(weapons.constructed().isEmpty());

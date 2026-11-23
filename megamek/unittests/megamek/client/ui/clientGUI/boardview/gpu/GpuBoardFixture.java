@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JButton;
@@ -12,7 +10,6 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
@@ -74,15 +71,6 @@ final class GpuBoardFixture implements AutoCloseable {
         FutureTask<GpuBoardFixture> task = new FutureTask<>(() -> new GpuBoardFixture(board));
         SwingUtilities.invokeAndWait(task);
         return task.get();
-    }
-
-    /** A Legacy 2D Swing viewport over the shared state, only for tests that exercise both renderers together. */
-    BoardView legacy2DView() {
-        try {
-            return new BoardView(view, null, null);
-        } catch (IOException failure) {
-            throw new UncheckedIOException(failure);
-        }
     }
 
     void addEcm() throws Exception {

@@ -63,8 +63,8 @@ public class BoardViewsContainer {
     private final JTabbedPane mapTabPane = new JTabbedPane();
 
     /**
-     * The {@link megamek.client.ui.clientGUI.boardview.BoardView} components of the game with the board ID as the map
-     * value. Used to retrieve the active {@link megamek.client.ui.clientGUI.boardview.BoardView}
+     * The {@link megamek.client.ui.clientGUI.boardview.IBoardView} components of the game with the board ID as the map
+     * value. Used to retrieve the active {@link megamek.client.ui.clientGUI.boardview.IBoardView}
      */
     protected final Map<Component, Integer> shownBoardViews = new HashMap<>();
 
@@ -159,7 +159,7 @@ public class BoardViewsContainer {
      * Returns the selected board independently of the visualization. The map tabs of an SBF game's board views reflect
      * this selection; the 3D board's startup and navigation do not depend on a Swing component being constructed.
      *
-     * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}, if any
+     * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.IBoardView}, if any
      */
     public Optional<Integer> getCurrentBoardId() {
         updateSelection();
@@ -201,9 +201,9 @@ public class BoardViewsContainer {
     }
 
     /**
-     * Sets the {@link megamek.client.ui.clientGUI.boardview.BoardView}'s that are not shown to ignore key presses from
+     * Sets the {@link megamek.client.ui.clientGUI.boardview.IBoardView}'s that are not shown to ignore key presses from
      * the MegamekController (Key Dispatcher) and the currently shown
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} to accept them.
+     * {@link megamek.client.ui.clientGUI.boardview.IBoardView} to accept them.
      *
      * @param changeEvent The changeEvent (not used)
      */

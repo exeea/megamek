@@ -28,7 +28,7 @@ import megamek.client.Client;
 import megamek.client.bot.BotClient;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
@@ -159,8 +159,8 @@ class BoardViewsContainerTest {
         game.setBoard(1, new Board(1, 1));
         when(gui.getClient()).thenReturn(client);
         when(client.getGame()).thenReturn(game);
-        BoardView first = mock(BoardView.class);
-        BoardView second = mock(BoardView.class);
+        IBoardView first = mock(IBoardView.class);
+        IBoardView second = mock(IBoardView.class);
         when(first.getComponent()).thenReturn(new JPanel());
         when(second.getComponent()).thenReturn(new JPanel());
         SwingUtilities.invokeAndWait(() -> {

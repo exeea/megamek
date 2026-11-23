@@ -17,7 +17,6 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.common.Facing;
@@ -251,8 +250,7 @@ class GpuTacticalTest {
     }
 
     @Test
-    void shapesAndTextLeaveTheRasterLayerAndRestoreLegacy2DZoom() throws Exception {
-        int originalZoom = GUIPreferences.getInstance().getMapZoomIndex();
+    void removingMarksLeavesPublishedGeometryIntact() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             var second = GpuUnitHudTest.addUnits(fixture, 1).getFirst();
             SwingUtilities.invokeAndWait(() -> {
@@ -265,18 +263,8 @@ class GpuTacticalTest {
                 BoardScene captured = fixture.source.takeFrame().scene();
                 assertFalse(captured.tactical().fills().isEmpty());
                 assertFalse(captured.tactical().labels().isEmpty(), "Movement costs must remain readable labels");
-                BoardView legacy2D = fixture.legacy2DView();
-                try {
-                    legacy2D.getComponent();
-                    legacy2D.zoomOut();
-                    float zoom = legacy2D.getScale();
-                    assertEquals(captured.tactical(), marks(fixture.view),
-                          "The Legacy 2D zoom leaves the markings; the native frame takes its ruler from the native LOS model");
-                    assertNull(captured.tactical().ruler(), "No native measurement was started");
-                    assertEquals(zoom, legacy2D.getScale());
-                } finally {
-                    legacy2D.dispose();
-                }
+                assertEquals(captured.tactical(), marks(fixture.view));
+                assertNull(captured.tactical().ruler(), "No native measurement was started");
                 fixture.view.removeMarks(marks);
                 BoardTactical hidden = marks(fixture.view);
                 assertNotEquals(captured.tactical(), hidden);
@@ -284,8 +272,6 @@ class GpuTacticalTest {
                 assertTrue(marks(fixture.view).fills().isEmpty());
                 assertFalse(captured.tactical().fills().isEmpty(), "Published geometry must remain immutable");
             });
-        } finally {
-            SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));
         }
     }
 }

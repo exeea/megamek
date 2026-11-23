@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.HashMap;
 import java.util.List;
@@ -28,7 +26,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.util.PlayerColour;
@@ -327,52 +324,29 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
+    void navigationPublishesTheSelectedHexToTheNativeCamera() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                BoardView legacy2D = fixture.legacy2DView();
-                try {
-                    assertNull(legacy2D.getPanel().getParent());
-                    legacy2D.centerOnPointRel(1, 1);
-                    Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
-                          fixture.game.getBoard().getHeight() - 1);
-                    assertEquals(corner, fixture.view.getCenterRequest().coords());
-                    fixture.source.refresh();
-                    assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
-                    assertNull(legacy2D.getPanel().getParent());
-                    var viewport = legacy2D.getComponent();
-                    legacy2D.releaseLegacy2DView();
-                    assertNull(legacy2D.getPanel().getParent());
-                    assertEquals(corner, fixture.view.getCenterRequest().coords());
-                    assertNotSame(viewport, legacy2D.getComponent(), "Switching back creates a new Legacy 2D viewport");
-                } finally {
-                    legacy2D.dispose();
-                }
+                Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1, fixture.game.getBoard().getHeight() - 1);
+                fixture.view.centerOnHex(corner);
+                fixture.source.refresh();
+                assertEquals(corner, fixture.source.takeFrame().centerRequest().coords());
             });
         }
     }
 
     @Test
-    void captureNavigationAndBoardExportsDoNotNeedALegacy2DViewport() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean softCenter = preferences.getSoftCenter();
+    void centeringOnAUnitPublishesItsBoardPosition() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                for (boolean smooth : new boolean[] { false, true }) {
-                    preferences.setSoftCenter(smooth);
-                    fixture.view.centerOn(fixture.entity);
-                    fixture.source.refresh();
-                    var frame = fixture.source.takeFrame();
-                    assertEquals(fixture.entity.getPosition(), frame.centerRequest().coords());
-                    assertEquals(fixture.entity.getId(), frame.centerRequest().entityId());
-                    assertFalse(frame.scene().tiles().isEmpty());
-                    assertFalse(frame.scene().units().isEmpty());
-                }
-                BufferedImage image = fixture.view.getEntireBoardImage(false);
-                assertTrue(image.getWidth() > 0 && image.getHeight() > 0);
+                fixture.view.centerOn(fixture.entity);
+                fixture.source.refresh();
+                var frame = fixture.source.takeFrame();
+                assertEquals(fixture.entity.getPosition(), frame.centerRequest().coords());
+                assertEquals(fixture.entity.getId(), frame.centerRequest().entityId());
+                assertFalse(frame.scene().tiles().isEmpty());
+                assertFalse(frame.scene().units().isEmpty());
             });
-        } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setSoftCenter(softCenter));
         }
     }
 
@@ -589,30 +563,34 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void tileResolutionDoesNotDependOnLegacy2DZoom() throws Exception {
-        int originalZoom = GUIPreferences.getInstance().getMapZoomIndex();
+    void refreshingPreservesTheTileResolutionAndPixels() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            BoardScene.Tile tile = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
-            SwingUtilities.invokeAndWait(() -> {
-                BoardView legacy2D = fixture.legacy2DView();
-                try {
-                    legacy2D.getComponent();
-                    legacy2D.zoomOut();
-                    float scale = legacy2D.getScale();
-                    Dimension size = new Dimension(legacy2D.getHexSize());
-                    fixture.source.refresh();
-                    assertEquals(scale, legacy2D.getScale());
-                    assertEquals(size, legacy2D.getHexSize());
-                } finally {
-                    legacy2D.dispose();
-                }
-            });
-            BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
+            Coords at = new Coords(0, 0);
+            BoardScene.Tile tile = fixture.source.takeFrame().scene().tile(at);
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene.Tile after = fixture.source.takeFrame().scene().tile(at);
             assertEquals(HexTile.WIDTH, after.tileset().width());
             assertEquals(HexTile.HEIGHT, after.tileset().height());
             assertTrue(samePixels(tile.tileset(), after.tileset()));
-        } finally {
-            SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));
+        }
+    }
+
+    @Test
+    void aUnitThatBoardsATransportDoesNotAnimateItsLastPath() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                Coords start = fixture.entity.getPosition();
+                var path = new Vector<>(List.of(new UnitLocation(fixture.entity.getId(), start, 0, 0, 0)));
+                fixture.entity.setPosition(null);
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity, path));
+                assertTrue(fixture.source.takeFrame().timeline().stream().noneMatch(BoardScene.Movement.class::isInstance));
+
+                Coords end = start.translated(0);
+                fixture.entity.setPosition(end);
+                path.add(new UnitLocation(fixture.entity.getId(), end, 0, 0, 0));
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity, path));
+                assertTrue(fixture.source.takeFrame().timeline().stream().anyMatch(BoardScene.Movement.class::isInstance));
+            });
         }
     }
 
