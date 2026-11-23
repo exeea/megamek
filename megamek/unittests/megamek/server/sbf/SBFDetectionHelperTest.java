@@ -94,6 +94,23 @@ class SBFDetectionHelperTest {
     }
 
     @Test
+    void hailLightningAndIceStormsUseVisualThreeWithNormalLightingAndSearchlightRules() {
+        var game = new SBFGame();
+        var observer = deploy(game, 0, 20);
+        observer.getSpecialAbilities().setSUA(megamek.common.alphaStrike.BattleForceSUA.SRCH);
+        for (Weather storm : List.of(Weather.LIGHT_HAIL, Weather.HEAVY_HAIL, Weather.LIGHTNING_STORM,
+              Weather.ICE_STORM)) {
+            game.getPlanetaryConditions().setWeather(storm);
+            game.getPlanetaryConditions().setLight(Light.DAY);
+            assertEquals(1, SBFDetectionHelper.visualRange(game, observer), storm.name());
+            game.getPlanetaryConditions().setLight(Light.DUSK_DAWN);
+            assertEquals(2, SBFDetectionHelper.visualRange(game, observer), storm.name());
+            game.getPlanetaryConditions().setLight(Light.PITCH_BLACK);
+            assertEquals(1, SBFDetectionHelper.visualRange(game, observer), storm.name());
+        }
+    }
+
+    @Test
     void bestProbeOrBasicSensorsWinAndReconOnlyExtendsBasicSensors() {
         SBFFormation infantry = new SBFFormation();
         infantry.setType(SBFElementType.BA);
