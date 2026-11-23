@@ -205,8 +205,7 @@ class CraneOperationHandler extends AbstractTWRuleHandler {
             cancelLoading(carrier, unit, 5356, true, "the carrier is no longer grounded");
             return;
         }
-        boolean hasLeftWaitingHex = !operation.getUnitPosition().equals(unit.getPosition());
-        if (hasLeftWaitingHex || (unit.delta_distance > 0)
+        if (!operation.isWaitingInPlace(unit)
               || !CraneRules.isInReach(unit, unit.getPosition(), carrier, getGame())) {
             cancelLoading(carrier, unit, 5354, true, "the unit moved or is out of the cranes' reach");
             return;

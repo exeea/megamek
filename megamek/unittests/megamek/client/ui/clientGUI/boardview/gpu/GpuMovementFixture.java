@@ -21,7 +21,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark.Envelope;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.MovementEnvelopeSpriteHandler;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -120,10 +120,10 @@ final class GpuMovementFixture implements AutoCloseable {
     }
 
     /** EDT: the envelope sprites the board view holds now. */
-    List<MovementEnvelopeSprite> envelopeSprites() {
-        return board.view.getAllSprites().stream()
-              .filter(MovementEnvelopeSprite.class::isInstance)
-              .map(MovementEnvelopeSprite.class::cast)
+    List<Envelope> envelopeMarks() {
+        return board.view.getMarks().stream()
+              .filter(Envelope.class::isInstance)
+              .map(Envelope.class::cast)
               .toList();
     }
 

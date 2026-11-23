@@ -97,7 +97,7 @@ class GpuSwingCutTest {
     @Test
     void theNativeFrameShowsMegaMeksEnvelopeAndFieldOfFireWhileThePlanDrawsTheRoute() throws Exception {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
-            assertFalse(onSwing(moving::envelopeSprites).isEmpty(),
+            assertFalse(onSwing(moving::envelopeMarks).isEmpty(),
                   "MegaMek's board state shows the selected unit's envelope");
             moving.board.panel = moving.display;
             onSwing(() -> {

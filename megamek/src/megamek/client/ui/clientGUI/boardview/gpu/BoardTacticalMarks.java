@@ -80,6 +80,9 @@ final class BoardTacticalMarks {
             orbitalBombardment(graphics, view);
             BoardTacticalGraphics.draw(graphics, BoardTactical.Playback.HIDE_DURING_MOVEMENT,
                   local -> hexes(local, view.getHighlightedEntityHexes(), hex -> outline(hex, UIUtil.uiGreen(), 2)));
+            if (view.getHighlightedHex() != null) {
+                hexes(graphics, List.of(view.getHighlightedHex()), hex -> ring(hex, view.getHighlightColor(), 2));
+            }
             demolitionHighlights(graphics, view);
             marks(graphics, view, view.getLosEnds());
             if (view.showsAllDeployment()) {

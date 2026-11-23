@@ -37,13 +37,12 @@ import java.util.Map;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.SawClearingSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.game.Game;
 
 /**
- * Manages saw clearing indicator sprites on the board view. Creates and removes {@link SawClearingSprite} instances to
+ * Manages saw clearing indicator sprites on the board view. Creates and removes {@link TacticalMark.SawClearing} instances to
  * show which hexes are being cleared by vehicle-mounted saws.
  */
 public class SawClearingSpriteHandler extends BoardViewSpriteHandler {

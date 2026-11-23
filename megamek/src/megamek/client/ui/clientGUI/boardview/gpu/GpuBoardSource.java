@@ -2567,7 +2567,8 @@ final class GpuBoardSource implements BoardSource {
      * A hex's lines of MegaMek's hex tooltip below its terrain ({@link HexTooltip#getHexTip}): its building, bridge or
      * fuel tank with height and CF, minefields, objects on the ground, clearing and bridge-building work; one a line.
      */
-    static String hexDetails(Hex hex, ClientGUI gui, int boardId) {
+    static String hexDetails(@Nullable Hex hex, ClientGUI gui, int boardId) {
+        if (hex == null) { return ""; }
         return GpuBoardActions.plainText(HexTooltip.getHexTip(hex, gui == null ? null : gui.getClient(), boardId))
               .lines().map(String::strip).filter(line -> !line.isEmpty()).collect(Collectors.joining("\n"));
     }

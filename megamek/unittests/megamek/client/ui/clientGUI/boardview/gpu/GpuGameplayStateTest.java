@@ -22,6 +22,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.common.Hex;
@@ -67,6 +68,22 @@ class GpuGameplayStateTest {
             return new Session(game, unit, state, new GpuBoardSource(state, () -> panel));
         }
         @Override public void close() { source.close(); state.close(); }
+    }
+
+    @Test
+    void unloadedTerrainHasAnEmptyTooltip() throws Exception {
+        var preferences = GUIPreferences.getInstance();
+        boolean previous = preferences.getShowMapHexPopup();
+        Game game = new Game();
+        game.setBoard(0, new Board(3, 3));
+        try (var state = new BoardClientState(game, null, null, 0, null)) {
+            preferences.setShowMapHexPopup(true);
+            assertEquals("", state.getHexTooltip(new Coords(1, 1)));
+            assertEquals("", state.getHexTooltip(new Coords(4, 4)));
+            assertEquals("", GpuBoardSource.hexDetails(game.getBoard().getHex(1, 1), null, 0));
+        } finally {
+            preferences.setShowMapHexPopup(previous);
+        }
     }
 
     @Test

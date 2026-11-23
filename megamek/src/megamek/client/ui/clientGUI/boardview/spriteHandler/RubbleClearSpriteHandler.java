@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.RubbleClearSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -47,7 +46,7 @@ import megamek.common.units.RubbleClearer;
 
 /**
  * Manages rubble-clearing-in-progress indicator sprites on the board view (TacOps bulldozer rubble clearing). Creates
- * and removes {@link RubbleClearSprite} instances on the rubble hex of every vehicle that is currently clearing it,
+ * and removes {@link TacticalMark.RubbleClear} instances on the rubble hex of every vehicle that is currently clearing it,
  * showing the turns of work banked so far and the total required; the clearing state is read from the synced entities.
  * Mirrors {@link FortifyBuildSpriteHandler}.
  */

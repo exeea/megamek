@@ -37,7 +37,6 @@ import java.util.Map;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.BridgeRepairedSprite;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
@@ -49,7 +48,7 @@ import megamek.common.units.Terrains;
 
 /**
  * Manages the field-repair badges on bridge sections rebuilt in-game by Bridge-Building Engineers (the unofficial
- * bridge-repair option). Places a {@link BridgeRepairedSprite} on every hex carrying the persistent
+ * bridge-repair option). Places a {@link TacticalMark.BridgeRepaired} on every hex carrying the persistent
  * {@link Terrains#BRIDGE_REPAIRED} marker terrain, so a repaired section (with the kit's lower CF) is visibly distinct
  * from an original bridge. Because the marker is part of the hex, the badges survive save games and appear on every
  * client without extra packets.

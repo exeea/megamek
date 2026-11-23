@@ -9,7 +9,6 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 
 import java.awt.Color;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +17,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark.Envelope;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.common.board.Coords;
 import megamek.common.options.OptionsConstants;
@@ -71,7 +70,7 @@ class GpuMoveEnvelopeCharacterizationTest {
     }
 
     /**
-     * The last envelope the display showed: its gear, hex count and MP histogram, then per band (sprite colour) the
+     * The last envelope the display showed: its gear, hex count and MP histogram, then per band (colour) the
      * hexes and the hex edges drawn as the band's border.
      */
     private static String observe(GpuMovementFixture moving) throws Exception {
@@ -83,7 +82,7 @@ class GpuMoveEnvelopeCharacterizationTest {
         Map<Coords, Integer> envelope = maps.getValue();
         Map<Integer, Long> histogram = new TreeMap<>(envelope.values().stream()
               .collect(Collectors.groupingBy(Function.identity(), Collectors.counting())));
-        List<MovementEnvelopeSprite> sprites = onSwing(moving::envelopeSprites);
+        List<Envelope> marks = onSwing(moving::envelopeMarks);
         StringBuilder text = new StringBuilder("gear ").append(gears.getValue())
               .append(" hexes ").append(envelope.size()).append(" mp ").append(histogram);
         GUIPreferences preferences = GUIPreferences.getInstance();
@@ -92,22 +91,12 @@ class GpuMoveEnvelopeCharacterizationTest {
               "jump", preferences.getMoveJumpColor());
         assertEquals(4, bands.values().stream().distinct().count(), "The four band colours differ");
         for (String band : List.of("walk", "run", "sprint", "jump")) {
-            List<MovementEnvelopeSprite> inBand = sprites.stream()
-                  .filter(sprite -> field(sprite, "drawColor").equals(bands.get(band))).toList();
-            int edges = inBand.stream().mapToInt(sprite -> Integer.bitCount((Integer) field(sprite, "borders")))
+            List<Envelope> inBand = marks.stream()
+                  .filter(mark -> mark.color().equals(bands.get(band))).toList();
+            int edges = inBand.stream().mapToInt(mark -> Integer.bitCount(mark.borders()))
                   .sum();
             text.append(' ').append(band).append(' ').append(inBand.size()).append('/').append(edges);
         }
         return text.toString();
-    }
-
-    private static Object field(MovementEnvelopeSprite sprite, String name) {
-        try {
-            Field field = MovementEnvelopeSprite.class.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(sprite);
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException(error);
-        }
     }
 }

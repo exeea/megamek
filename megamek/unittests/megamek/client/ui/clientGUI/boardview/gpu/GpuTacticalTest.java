@@ -191,6 +191,22 @@ class GpuTacticalTest {
     }
 
     @Test
+    void thePhaseHighlightUsesTheRequestedColorAndClearsWithTheSelection() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                var initial = marks(fixture.view);
+                fixture.view.highlight(new Coords(2, 3));
+                var selected = marks(fixture.view);
+                assertNotEquals(initial, selected);
+                fixture.view.setHighlightColor(Color.MAGENTA);
+                assertNotEquals(selected, marks(fixture.view));
+                fixture.view.highlight(null);
+                assertEquals(initial, marks(fixture.view));
+            });
+        }
+    }
+
+    @Test
     void playbackKeepsObjectiveBoundariesAndLiveMeasurementsWhileHidingUnitOverlays() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             var second = GpuUnitHudTest.addUnits(fixture, 1).getFirst();
