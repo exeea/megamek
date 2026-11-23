@@ -89,6 +89,7 @@ import megamek.common.jacksonAdapters.dtos.GroundObjectInfo;
 import megamek.common.options.BasicGameOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFMinefields;
 import megamek.common.strategicBattleSystems.SBFScenarioProgress;
 import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
@@ -296,6 +297,15 @@ public class ScenarioV2 implements Scenario {
             for (JsonNode faction : node.path(PARAM_FACTIONS)) {
                 Player player = sbf.getPlayersList().stream().filter(p -> p.getName().equals(faction.get(NAME).asText()))
                       .findFirst().orElseThrow();
+                for (JsonNode entry : faction.path("minefields")) {
+                    var location = BoardLocation.of(CoordsDeserializer.parseNode(entry.required("at")), entry.path("board").asInt(0));
+                    var type = SBFMinefields.Type.valueOf(entry.path("type").asText("CONVENTIONAL").toUpperCase(java.util.Locale.ROOT));
+                    var field = new SBFMinefields.Field(player.getId(), type, entry.required("size").asInt(),
+                          entry.required("density").asInt(), entry.path("command").asBoolean(false));
+                    if (!sbf.hasBoardLocation(location) || sbf.minefields().fields().putIfAbsent(location, field) != null) {
+                        throw new IllegalArgumentException("Invalid or duplicate minefield location: " + location);
+                    }
+                }
                 for (JsonNode battery : faction.path("offboardartillery")) {
                     var formation = sbf.getFormation(battery.path("id").asInt(-1)).orElseThrow();
                     var origin = BoardLocation.of(CoordsDeserializer.parseNode(battery.required("at")), battery.path("board").asInt(0));
