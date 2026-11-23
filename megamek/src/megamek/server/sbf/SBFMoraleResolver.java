@@ -37,6 +37,7 @@ import static megamek.common.alphaStrike.BattleForceSUA.COM;
 import static megamek.common.alphaStrike.BattleForceSUA.DRO;
 import static megamek.common.alphaStrike.BattleForceSUA.LG;
 import static megamek.common.alphaStrike.BattleForceSUA.RBT;
+import static megamek.common.alphaStrike.BattleForceSUA.SCOM;
 import static megamek.common.alphaStrike.BattleForceSUA.SDCS;
 import static megamek.common.alphaStrike.BattleForceSUA.SLG;
 import static megamek.common.alphaStrike.BattleForceSUA.VLG;
@@ -57,6 +58,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
+import megamek.common.Player;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.compute.Compute;
 import megamek.common.options.SBFRuleOptions;
@@ -65,6 +67,8 @@ import megamek.common.strategicBattleSystems.SBFFormation.MoraleStatus;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFGame.FormationLosses;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause;
 import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.units.Terrains;
 
@@ -81,11 +85,11 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         for (FormationLosses loss : losses) {
             byFormation.put(loss.formation().getId(), loss);
             if (loss.commanderLost()) {
-                commanderLosses.put(loss.formation().getOwnerId(), loss.formation());
+                commanderLosses.put(sideOf(loss.formation()), loss.formation());
             }
         }
         List<SBFFormation> formations = game.getActiveFormations().stream().filter(SBFFormation::isDeployed)
-              .filter(f -> !f.isAerospace() && (f.getPosition() != null))
+              .filter(f -> f.isOnRadarMap() || (f.getPosition() != null))
               .sorted(Comparator.comparingInt(SBFFormation::getId)).toList();
         Map<Integer, Boolean> enraged = new HashMap<>();
         for (int owner : commanderLosses.keySet().stream().sorted().toList()) {
@@ -103,9 +107,9 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
             }
             int quiet = formation.updateQuietTurns();
             if (!isExempt(formation)) {
-                boolean commanderLost = enraged.containsKey(formation.getOwnerId());
-                boolean newlyEnraged = enraged.getOrDefault(formation.getOwnerId(), false);
-                boolean forced = commanderLost || ((loss != null)
+                boolean commanderLost = enraged.containsKey(sideOf(formation));
+                boolean newlyEnraged = enraged.getOrDefault(sideOf(formation), false);
+                boolean forced = commanderLost || formation.mustCheckArtilleryMorale(game.getCurrentRound()) || ((loss != null)
                       && (newlyCrippled || loss.armorAtHalf() || (loss.destroyedUnits() > 0) || loss.leaderLost()));
                 if (forced && !newlyEnraged && !formation.isRouted()) {
                     check(formation, checkTarget(formation, loss, commanderLost), false);
@@ -122,19 +126,19 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         Map<Integer, SBFFormation> routedCommanderLosses = new HashMap<>();
         for (SBFFormation formation : formations) {
             if (resolveWithdrawal(formation)) {
-                routedCommanderLosses.put(formation.getOwnerId(), formation);
+                routedCommanderLosses.put(sideOf(formation), formation);
             }
         }
         for (FormationLosses cargo : game.getImmediateLosses()) {
             if (cargo.commanderLost()) {
-                routedCommanderLosses.put(cargo.formation().getOwnerId(), cargo.formation());
+                routedCommanderLosses.put(sideOf(cargo.formation()), cargo.formation());
             }
         }
         game.getImmediateLosses().clear();
         for (int owner : routedCommanderLosses.keySet().stream().sorted().toList()) {
             if (!commanderLosses.containsKey(owner) && !reactToCommanderLoss(routedCommanderLosses.get(owner))) {
                 for (SBFFormation formation : formations) {
-                    if ((formation.getOwnerId() == owner) && game.getFormation(formation.getId()).isPresent()
+                    if ((sideOf(formation) == owner) && game.getFormation(formation.getId()).isPresent()
                           && !isExempt(formation) && !formation.isRouted()) {
                         check(formation, checkTarget(formation, byFormation.get(formation.getId()), true), false);
                         resolveWithdrawal(formation);
@@ -142,7 +146,7 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
                 }
             }
         }
-        rally.removeIf(f -> game.getFormation(f.getId()).isEmpty() || routedCommanderLosses.containsKey(f.getOwnerId())
+        rally.removeIf(f -> game.getFormation(f.getId()).isEmpty() || routedCommanderLosses.containsKey(sideOf(f))
               || !canRally(f));
         for (SBFFormation formation : rally) {
             int quiet = rallyTargets.get(formation);
@@ -155,6 +159,11 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         formations.forEach(SBFFormation::clearMoraleEvents);
     }
 
+    private int sideOf(SBFFormation formation) {
+        SBFGame game = manager.getGame();
+        return SBFScenarioProgress.sideId(game, game.getPlayer(formation.getOwnerId()));
+    }
+
     private boolean reactToCommanderLoss(SBFFormation commandFormation) {
         int owner = commandFormation.getOwnerId();
         SBFGame game = manager.getGame();
@@ -163,7 +172,7 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         manager.addReportFor(new SBFReportEntry(enraged ? 3410 : 3411).add(game.getPlayer(owner).getName()).add(roll),
               commandFormation);
         if (enraged) {
-            game.getActiveFormations().stream().filter(f -> f.getOwnerId() == owner)
+            game.getActiveFormations().stream().filter(f -> sideOf(f) == sideOf(commandFormation))
                   .forEach(f -> f.becomeEnraged(game.getCurrentRound()));
         }
         return enraged;
@@ -172,13 +181,15 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
     private boolean resolveWithdrawal(SBFFormation formation) {
         SBFGame game = manager.getGame();
         boolean lostCommander = false;
-        boolean scatter = formation.mustWithdraw() && (formation.getMovement() == 0)
+        boolean scatter = !formation.isOnRadarMap() && formation.mustWithdraw() && (formation.getMovement() == 0)
               && !SBFWithdrawal.atHomeEdge(game, formation);
         if (formation.isRouted() || scatter) {
             List<SBFUnit> casualties = formation.getUnits().stream()
                   .filter(u -> scatter || (u.getCurrentArmor() <= u.getArmor() / 2)).toList();
             for (SBFUnit casualty : casualties) {
                 lostCommander |= casualty.hasSUA(COM);
+                game.scenarioProgress().recordLoss(game.getCurrentRound(), formation, casualty, Player.PLAYER_NONE,
+                      scatter ? LossCause.SCATTER : LossCause.ROUT);
                 casualty.setCurrentArmor(0);
                 manager.addReportFor(new SBFReportEntry(scatter ? 3406 : 3403)
                       .add(formation.generalName()).add(casualty.getName()), formation);
@@ -187,7 +198,7 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
                 SBFCombatDamage.removeDestroyedUnits(manager, formation);
             }
         }
-        if (formation.mustWithdraw() && game.getFormation(formation.getId()).isPresent()) {
+        if (!formation.isAerospace() && formation.mustWithdraw() && game.getFormation(formation.getId()).isPresent()) {
             if (SBFWithdrawal.homeEdge(game, formation).isEmpty()) {
                 manager.addReportFor(new SBFReportEntry(3405).add(formation.generalName()), formation);
             } else {
@@ -211,6 +222,12 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         target += formation.isEnraged() ? -2 : 0;
         target += formation.getMovement() == 0 ? 2 : 0;
         target += commanderLost ? 2 : 0;
+        if (game.scenarioProgress().losses().stream().anyMatch(l -> l.round() == game.getCurrentRound()
+              && !l.withdrawn() && l.unit().hasSUA(SCOM)
+              && !game.getPlayer(formation.getOwnerId()).isEnemyOf(game.getPlayer(l.ownerId())))) {
+            target += 2; // IO:BF p. 173, Sub-Commander lost this turn.
+        }
+        target += formation.recentCruiseMissileAttack(game.getCurrentRound()) ? 1 : 0;
         if (loss != null) {
             target += loss.destroyedUnits() > 0 ? 3 : 0;
             target += loss.leaderLost() ? 1 : 0;
@@ -239,6 +256,10 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
 
     private boolean seesEnemy(SBFFormation formation) {
         SBFGame game = manager.getGame();
+        if (formation.isOnRadarMap()) {
+            return game.getActiveFormations().stream().anyMatch(f -> (f.getRadarZone() == formation.getRadarZone())
+                  && game.areHostile(f, game.getPlayer(formation.getOwnerId())));
+        }
         var enemies = SBFWithdrawal.enemiesOnBoard(game, formation);
         return SBFWithdrawal.exposure(game, formation.getPosition(), enemies) > 0;
     }
@@ -246,7 +267,7 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
     private boolean canRally(SBFFormation formation) {
         if (formation.isRouted()) {
             return manager.getGame().getActiveFormations().stream()
-                  .anyMatch(f -> (f.getOwnerId() == formation.getOwnerId()) && near(formation, f)
+                  .anyMatch(f -> (sideOf(f) == sideOf(formation)) && near(formation, f)
                         && f.getUnits().stream().anyMatch(u -> u.hasSUA(COM)));
         }
         return formation.isBroken() || (formation.isShaken() && !seesEnemy(formation));
@@ -258,11 +279,12 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
         modifier += seesEnemy(formation) ? 0 : -1;
         modifier += formation.getMovement() == 0 ? 2 : 0;
         List<SBFFormation> friendly = game.getActiveFormations().stream().filter(SBFFormation::isDeployed)
-              .filter(f -> game.onSameBoard(formation, f))
+              .filter(f -> formation.isOnRadarMap() ? f.getRadarZone() == formation.getRadarZone()
+                    : (!f.isOnRadarMap() && game.onSameBoard(formation, f)))
               .filter(f -> !game.areHostile(f, game.getPlayer(formation.getOwnerId()))).toList();
-        if (friendly.stream().anyMatch(f -> (f.getOwnerId() == formation.getOwnerId())
+        if (friendly.stream().anyMatch(f -> (sideOf(f) == sideOf(formation))
               && f.getUnits().stream().anyMatch(u -> u.hasSUA(COM))
-              && (SBFWithdrawal.visualExposure(game, formation, f.getPosition()) > 0))) {
+              && (formation.isOnRadarMap() || (SBFWithdrawal.visualExposure(game, formation, f.getPosition()) > 0)))) {
             modifier -= 2;
         }
         List<SBFFormation> nearby = friendly.stream().filter(f -> (f != formation) && near(formation, f)).toList();
@@ -281,7 +303,11 @@ record SBFMoraleResolver(SBFGameManager manager, IntSupplier roll2d6) {
     }
 
     private static boolean near(SBFFormation a, SBFFormation b) {
-        return b.isDeployed() && a.getPosition().isSameBoardAs(b.getPosition())
+        if (a.isOnRadarMap() || b.isOnRadarMap()) {
+            return b.isDeployed() && (a.getRadarZone() == b.getRadarZone());
+        }
+        return b.isDeployed() && (a.getPosition() != null) && (b.getPosition() != null)
+              && a.getPosition().isSameBoardAs(b.getPosition())
               && (a.getPosition().coords().distance(b.getPosition().coords()) <= 2);
     }
 

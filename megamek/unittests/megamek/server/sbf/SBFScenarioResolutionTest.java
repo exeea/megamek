@@ -231,7 +231,7 @@ class SBFScenarioResolutionTest {
         List<LossCause> excluded = List.of(LossCause.ARTILLERY_OR_BOMB, LossCause.CRASH, LossCause.ROUT,
               LossCause.SCATTER, LossCause.TRANSPORT, LossCause.FORCED_WITHDRAWAL, LossCause.VOLUNTARY_WITHDRAWAL);
         for (LossCause cause : excluded) {
-            game.scenarioProgress().recordLoss(red, unit(1), 1, cause);
+            game.scenarioProgress().recordLoss(game.getCurrentRound(), red, unit(1), 1, cause);
         }
         game.getOptions().getOption(SBFRuleOptions.BASE_SALVAGE).setValue(true);
         SBFScenarioResolution.reportFinal(manager, VictoryResult.drawResult(), () -> {

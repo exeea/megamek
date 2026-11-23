@@ -35,6 +35,7 @@ package megamek.server.sbf;
 
 import static megamek.common.alphaStrike.BattleForceSUA.COM;
 import static megamek.common.alphaStrike.BattleForceSUA.LEAD;
+import static megamek.common.alphaStrike.BattleForceSUA.SCOM;
 
 import java.util.List;
 
@@ -48,7 +49,7 @@ import megamek.server.commands.ServerCommand;
 
 /** Setup choices for “Force Commander and Formation Leaders”, IO:BF p. 163. */
 final class SBFCommandDesignation extends ServerCommand {
-    private static final String HELP = "/sbfcommand com|lead <formation ID> <unit number>, numbered from 1.";
+    private static final String HELP = "/sbfcommand com|lead|scom <formation ID> <unit number>, numbered from 1.";
     private final SBFGameManager manager;
 
     SBFCommandDesignation(Server server, SBFGameManager manager) {
@@ -65,7 +66,7 @@ final class SBFCommandDesignation extends ServerCommand {
             try {
                 SBFFormation formation = game.getFormation(Integer.parseInt(args[2])).orElse(null);
                 BattleForceSUA role = args[1].equalsIgnoreCase("com") ? COM
-                      : args[1].equalsIgnoreCase("lead") ? LEAD : null;
+                      : args[1].equalsIgnoreCase("lead") ? LEAD : args[1].equalsIgnoreCase("scom") ? SCOM : null;
                 if (designate(game, connId, formation, Integer.parseInt(args[3]) - 1, role)) {
                     manager.entityAllUpdate();
                     if (game.getPhase().isInitiativeReport()) {
@@ -83,12 +84,27 @@ final class SBFCommandDesignation extends ServerCommand {
 
     static boolean designate(SBFGame game, int player, SBFFormation formation, int unitIndex, BattleForceSUA role) {
         if (formation == null || formation.getOwnerId() != player || unitIndex < 0 || unitIndex >= formation.getUnits().size()
-              || (role != COM && role != LEAD)) {
+              || (role != COM && role != LEAD && role != SCOM)) {
             return false;
+        }
+        SBFUnit selected = formation.getUnits().get(unitIndex);
+        if (role == SCOM) {
+            List<SBFFormation> friendly = force(game, player);
+            long count = friendly.stream().flatMap(f -> f.getUnits().stream()).filter(u -> u.hasSUA(SCOM) && u != selected).count();
+            if (!selected.hasSUA(LEAD) || selected.hasSUA(COM) || count >= Math.max(0, friendly.size() / 3 - 1)) {
+                return false;
+            }
+            selected.getSpecialAbilities().setSUA(SCOM);
+            return true;
         }
         List<SBFFormation> affected = role == LEAD ? List.of(formation) : force(game, player);
         for (SBFFormation part : affected) {
-            part.getUnits().forEach(unit -> unit.getSpecialAbilities().removeSUA(role));
+            for (SBFUnit unit : part.getUnits()) {
+                unit.getSpecialAbilities().removeSUA(role);
+                if ((role == LEAD && unit != selected) || (role == COM && unit == selected)) {
+                    unit.getSpecialAbilities().removeSUA(SCOM);
+                }
+            }
             if (role == COM) {
                 part.getSpecialAbilities().removeSUA(COM);
             }

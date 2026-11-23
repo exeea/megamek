@@ -312,12 +312,18 @@ public abstract class TurnOrdered implements ITurnOrdered {
 
     public static void rollInitiative(List<? extends ITurnOrdered> initiativeCandidates,
           boolean bUseInitiativeCompensation, Map<Team, Integer> initiativeAptitude) {
+        rollInitiative(initiativeCandidates, bUseInitiativeCompensation, initiativeAptitude, Map.of());
+    }
+
+    /** An explicitly supplied team bonus replaces the ordinary calculation for the roll and all its tie-breaks. */
+    public static void rollInitiative(List<? extends ITurnOrdered> initiativeCandidates,
+          boolean bUseInitiativeCompensation, Map<Team, Integer> initiativeAptitude, Map<Team, Integer> teamRollBonuses) {
         // Clear all rolls
         for (ITurnOrdered item : initiativeCandidates) {
             item.clearInitiative(bUseInitiativeCompensation, initiativeAptitude);
         }
 
-        rollInitAndResolveTies(initiativeCandidates, null, bUseInitiativeCompensation, initiativeAptitude);
+        rollInitAndResolveTies(initiativeCandidates, null, bUseInitiativeCompensation, initiativeAptitude, teamRollBonuses, 0);
     }
 
     /**
@@ -398,7 +404,7 @@ public abstract class TurnOrdered implements ITurnOrdered {
     public static void rollInitAndResolveTies(List<? extends ITurnOrdered> initiativeCandidates,
           List<? extends ITurnOrdered> rerollRequests, boolean bInitCompBonus,
           Map<Team, Integer> initiativeAptitude) {
-        rollInitAndResolveTies(initiativeCandidates, rerollRequests, bInitCompBonus, initiativeAptitude, 0);
+        rollInitAndResolveTies(initiativeCandidates, rerollRequests, bInitCompBonus, initiativeAptitude, Map.of(), 0);
     }
 
     /**
@@ -412,7 +418,7 @@ public abstract class TurnOrdered implements ITurnOrdered {
 
     private static void rollInitAndResolveTies(List<? extends ITurnOrdered> initiativeCandidates,
           List<? extends ITurnOrdered> rerollRequests, boolean bInitCompBonus,
-          Map<Team, Integer> initiativeAptitude, int tieBreakDepth) {
+          Map<Team, Integer> initiativeAptitude, Map<Team, Integer> teamRollBonuses, int tieBreakDepth) {
         // Cache the team-level breakdown per player.
         Map<Player, InitiativeBonusBreakdown> playerBreakdownCache = new HashMap<>();
 
@@ -428,7 +434,8 @@ public abstract class TurnOrdered implements ITurnOrdered {
 
             // If we're using team-based initiative, we just need to check whether the team commander has Combat Sense
             if (initiativeCandidate instanceof Team team) {
-                breakdown = team.getInitBonusBreakdown(bInitCompBonus);
+                breakdown = teamRollBonuses.containsKey(team) ? InitiativeBonusBreakdown.fromTotal(teamRollBonuses.get(team))
+                      : team.getInitBonusBreakdown(bInitCompBonus);
 
                 if (!initiativeAptitude.isEmpty()) {
                     if (initiativeAptitude.containsKey(initiativeCandidate)) {
@@ -541,7 +548,7 @@ public abstract class TurnOrdered implements ITurnOrdered {
                 if (tieBreakDepth < MAX_TIE_BREAK_DEPTH) {
                     // Initiative compensation is retained here, as it should persist in the reroll, like all other
                     // bonuses
-                    rollInitAndResolveTies(ties, null, bInitCompBonus, initiativeAptitude, tieBreakDepth + 1);
+                    rollInitAndResolveTies(ties, null, bInitCompBonus, initiativeAptitude, teamRollBonuses, tieBreakDepth + 1);
                 }
             }
         }

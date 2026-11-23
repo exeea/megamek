@@ -73,7 +73,12 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
      */
     void determineTurnOrder(GamePhase phase) {
         final List<SBFTurn> turns;
-        if (phase.isDeployMinefields()) {
+        if (phase == GamePhase.PREMOVEMENT || phase == GamePhase.PRE_FIRING) {
+            // A fixed opportunity per player keeps the number and ownership of hidden counters private.
+            turns = game().getActiveFormations().stream().anyMatch(f -> f.isDeployed() && f.isHidden())
+                  ? game().getPlayersList().stream().filter(p -> !p.isObserver()).<SBFTurn>map(p -> new SBFPlayerTurn(p.getId())).toList()
+                  : List.of();
+        } else if (phase.isDeployMinefields()) {
             turns = game().getPlayersList()
                   .stream()
                   .filter(Player::hasMinefields)
@@ -153,6 +158,12 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
     }
 
     void rollInitiative() {
+        if (!game().getPhase().isInitiative()) {
+            // The separate deployment roll is unmodified 2D6 (IO:BF p. 163).
+            Map<Team, Integer> noBonuses = game().getTeams().stream().collect(Collectors.toMap(team -> team, team -> 0));
+            TurnOrdered.rollInitiative(game().getTeams(), false, Map.of(), noBonuses);
+            return;
+        }
         Map<Team, SBFInitiativeModifiers> forces = new LinkedHashMap<>();
         Map<Team, Integer> bonuses = new LinkedHashMap<>();
         for (Team team : game().getTeams()) {
@@ -161,19 +172,19 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                 forces.put(team, force);
                 int modifier = force.total();
                 if (modifier != 0) {
-                    bonuses.put(team, modifier);
+                    bonuses.put(team, team.getTotalInitBonus(false) + modifier);
                 }
             }
         }
-        boolean turnRoll = game().getPhase().isInitiative();
-        if (turnRoll && forces.size() == 2) {
+        if (forces.size() == 2) {
             List<Team> sides = List.copyOf(forces.keySet());
             var a = forces.get(sides.getFirst());
             var b = forces.get(sides.getLast());
             int first = bankingBid(a);
             int second = bankingBid(b);
-            a.orders.spend(Math.max(first, 0));
-            b.orders.spend(Math.max(second, 0));
+            // A second point is spent only to break opposing automatic successes.
+            a.orders.spend(Math.clamp(first, 0, second > 0 ? 2 : 1));
+            b.orders.spend(Math.clamp(second, 0, first > 0 ? 2 : 1));
             if (first != second) {
                 // Subordinate owners still roll for their places within their own side.
                 game().getTeams().forEach(team -> team.clearInitiative(false, Map.of()));
@@ -191,9 +202,7 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
         } else {
             TurnOrdered.rollInitiative(game().getTeams(), false, Map.of(), bonuses);
         }
-        if (turnRoll) {
-            forces.values().forEach(force -> force.orders.declare(Declaration.NORMAL));
-        }
+        forces.values().forEach(force -> force.orders.declare(Declaration.NORMAL));
     }
 
     private static int bankingBid(SBFInitiativeModifiers force) {

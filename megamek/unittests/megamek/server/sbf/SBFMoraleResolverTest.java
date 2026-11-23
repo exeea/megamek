@@ -53,6 +53,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.options.SBFRuleOptions;
+import megamek.common.strategicBattleSystems.SBFCombatOrders;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormation.MoraleStatus;
@@ -86,6 +87,47 @@ class SBFMoraleResolverTest {
         }
         game.setBoard(0, board);
         formation = formation(20, 1, 4, 4);
+    }
+
+    @Test
+    void artilleryAttackWithoutAnArmorHitChecksInfantryAndCruiseAffectsTwoTurns() {
+        SBFFormation enemy = formation(22, 2, 7, 7);
+        game.setCurrentRound(5);
+        formation.recordArtilleryAttack(enemy, 5, false);
+        resolve(List.of()); // ordinary artillery against an undamaged vehicle does not require a check
+        formation.setType(SBFElementType.CI);
+        formation.getUnits().getFirst().setType(SBFElementType.CI);
+        formation.recordArtilleryAttack(enemy, 5, false);
+        resolve(List.of(), 12);
+        formation.setType(SBFElementType.V);
+        formation.getUnits().getFirst().setType(SBFElementType.V);
+        formation.recordArtilleryAttack(enemy, 5, true);
+        resolve(List.of(), 12);
+        assertTrue(formation.recentCruiseMissileAttack(6));
+        game.setCurrentRound(6);
+        resolve(List.of()); // no fresh attack means no mandatory check
+        assertFalse(formation.recentCruiseMissileAttack(7));
+    }
+
+    @Test
+    void losingAnAlliedSubCommanderRaisesThisTurnsMoraleTargetEvenWithoutAnyCommandAbility() {
+        owner.setTeam(1);
+        Player ally = new Player(3, "Ally");
+        ally.setTeam(1);
+        game.addPlayer(3, ally);
+        var sub = formation(30, 3, 2, 2);
+        var commander = sub.getUnits().getFirst();
+        commander.getSpecialAbilities().setSUA(megamek.common.alphaStrike.BattleForceSUA.SCOM);
+        game.setCurrentRound(2);
+        game.scenarioProgress().recordLoss(2, sub, commander, 2, megamek.common.strategicBattleSystems.SBFScenarioProgress.LossCause.COMBAT);
+        game.removeFormationFromPlay(sub);
+        var loss = new FormationLosses(formation, true, 0, false, false, false);
+        resolve(List.of(loss), 7); // ordinary TN 6, with SCOM loss TN 8
+        assertEquals(MoraleStatus.SHAKEN, formation.moraleStatus());
+        game.setCurrentRound(3);
+        formation.setMoraleStatus(MoraleStatus.NORMAL);
+        resolve(List.of(loss), 7);
+        assertEquals(MoraleStatus.NORMAL, formation.moraleStatus());
     }
 
     @Test
@@ -139,6 +181,36 @@ class SBFMoraleResolverTest {
     }
 
     @Test
+    void occupantGrantAndClosureAffectBothDirectFireAndEndPhaseRally() {
+        formation.setMoraleStatus(MoraleStatus.SHAKEN);
+        SBFFormation viewer = formation(22, 2, 4, 5);
+        game.getBoard(0).setHex(formation.getPosition().coords(), new Hex(0, "woods:1", ""));
+        var shot = new SBFStandardUnitAttack(viewer.getId(), 0, formation.getId(), ASRange.LONG);
+        game.combatOrders().setSight(formation, viewer, true, false);
+        assertFalse(SBFToHitData.compileToHit(game, shot).cannotSucceed());
+        assertTrue(SBFWithdrawal.visualExposure(game, viewer, formation.getPosition()) > 0);
+        resolve(List.of());
+        assertEquals(MoraleStatus.SHAKEN, formation.moraleStatus());
+        game.combatOrders().setSight(formation, viewer, false, false);
+        assertTrue(SBFToHitData.compileToHit(game, shot).cannotSucceed());
+        assertEquals(0, SBFWithdrawal.visualExposure(game, viewer, formation.getPosition()));
+        resolve(List.of(), 12);
+        assertEquals(MoraleStatus.NORMAL, formation.moraleStatus());
+    }
+
+    @Test
+    void shakenMovementEvaluatesTerrainAtTheCandidateHexAndKeepsSameHexAndRangeLimits() {
+        SBFFormation viewer = formation(22, 2, 4, 5);
+        game.getBoard(0).setHex(4, 5, new Hex(0, "woods:1", ""));
+        game.getBoard(0).setHex(5, 5, new Hex(0, "woods:1", ""));
+        assertEquals(0, SBFWithdrawal.visualExposure(game, viewer, at(5, 5)));
+        assertTrue(SBFWithdrawal.visualExposure(game, viewer, at(4, 5)) > 0);
+        assertTrue(SBFWithdrawal.visualExposure(game, viewer, at(4, 3)) > 0);
+        assertEquals(0, SBFWithdrawal.visualExposure(game, viewer, at(4, 2)));
+        assertEquals(0, SBFWithdrawal.visualExposure(game, viewer, BoardLocation.of(new Coords(4, 5), 1)));
+    }
+
+    @Test
     void commanderLossCanEnrageTheEntireForceInsteadOfRequiringChecks() {
         game.setCurrentRound(8);
         SBFFormation other = formation(22, 1, 1, 4);
@@ -149,6 +221,19 @@ class SBFMoraleResolverTest {
         assertTrue(other.hasEnragedDamageBonus(9));
         assertTrue(other.hasEnragedDamageBonus(10));
         assertFalse(other.hasEnragedDamageBonus(11));
+    }
+
+    @Test
+    void aCommanderLossAffectsAlliedOwnersButLeavesTheEnemyUnchanged() {
+        owner.setTeam(1);
+        Player alliedPlayer = new Player(3, "Ally");
+        alliedPlayer.setTeam(1);
+        game.addPlayer(3, alliedPlayer);
+        SBFFormation ally = formation(23, 3, 1, 4);
+        SBFFormation enemy = formation(22, 2, 7, 7);
+        resolve(List.of(new FormationLosses(formation, false, 1, true, true, false)), 11);
+        assertTrue(ally.isEnraged());
+        assertFalse(enemy.isEnraged());
     }
 
     @Test
@@ -226,6 +311,8 @@ class SBFMoraleResolverTest {
         assertTrue(SBFToHitData.compileToHit(game, attack).cannotSucceed());
         formation.setEngagedWith(target.getId(), true);
         target.setEngagedWith(formation.getId(), true);
+        game.combatOrders().setManeuver(new SBFCombatOrders.Maneuver(formation.getId(), target.getId(),
+              formation.getId(), -1, ASRange.LONG));
         assertFalse(SBFToHitData.compileToHit(game, attack).cannotSucceed());
     }
 

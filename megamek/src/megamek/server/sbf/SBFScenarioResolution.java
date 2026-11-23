@@ -111,6 +111,7 @@ final class SBFScenarioResolution {
                     copy.setName(marker.generalName());
                     copy.setOwnerId(marker.getOwnerId());
                     copy.setVictoryPointValue(marker.getVictoryPointValue());
+                    copy.setHeadquarters(marker.isHeadquarters());
                     visible.computeIfAbsent(coords, ignored -> new ArrayList<>()).add(copy);
                 }
             }

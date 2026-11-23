@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -56,6 +57,7 @@ import megamek.common.Team;
 import megamek.common.alphaStrike.ASGame;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.ObjectiveMarker;
@@ -72,6 +74,7 @@ import megamek.common.icons.FileCamouflage;
 import megamek.common.interfaces.IStartingPositions;
 import megamek.common.interfaces.PlanetaryConditionsUsing;
 import megamek.common.jacksonAdapters.BoardDeserializer;
+import megamek.common.jacksonAdapters.CoordsDeserializer;
 import megamek.common.jacksonAdapters.BotParser;
 import megamek.common.jacksonAdapters.EntityDeserializer;
 import megamek.common.jacksonAdapters.GeneralEventDeserializer;
@@ -86,6 +89,7 @@ import megamek.common.jacksonAdapters.dtos.GroundObjectInfo;
 import megamek.common.options.BasicGameOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFScenarioProgress;
 import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
 import megamek.common.util.C3Util;
@@ -203,6 +207,17 @@ public class ScenarioV2 implements Scenario {
         parseGameVictories(game, node);
 
         game.setupTeams();
+        if (game instanceof SBFGame sbf) {
+            sbf.scenarioProgress().setScenarioType(node.path("scenariotype").asText(""));
+            for (JsonNode faction : node.path(PARAM_FACTIONS)) {
+                if (faction.hasNonNull("role")) {
+                    Player player = game.getPlayersList().stream().filter(p -> p.getName().equals(faction.get(NAME).asText()))
+                          .findFirst().orElseThrow();
+                    var role = SBFScenarioProgress.ScenarioRole.valueOf(faction.get("role").asText().toUpperCase(Locale.ROOT));
+                    sbf.scenarioProgress().setRole(SBFScenarioProgress.sideId(sbf, player), role);
+                }
+            }
+        }
 
         game.receiveBoards(new HashMap<>());
 
@@ -277,7 +292,30 @@ public class ScenarioV2 implements Scenario {
             twGame.setVictoryContext(new HashMap<>());
             twGame.createVictoryConditions();
         } else if (game instanceof SBFGame) {
-            validateSBFGame((SBFGame) game);
+            SBFGame sbf = (SBFGame) game;
+            for (JsonNode faction : node.path(PARAM_FACTIONS)) {
+                Player player = sbf.getPlayersList().stream().filter(p -> p.getName().equals(faction.get(NAME).asText()))
+                      .findFirst().orElseThrow();
+                for (JsonNode battery : faction.path("offboardartillery")) {
+                    var formation = sbf.getFormation(battery.path("id").asInt(-1)).orElseThrow();
+                    var origin = BoardLocation.of(CoordsDeserializer.parseNode(battery.required("at")), battery.path("board").asInt(0));
+                    if (formation.getOwnerId() != player.getId() || !sbf.hasBoard(origin.boardId()) || sbf.hasBoardLocation(origin)
+                          || formation.isAerospace() || formation.getUnits().stream().noneMatch(u ->
+                                u.getSpecialAbilities().getInternalRepr().keySet().stream().anyMatch(BattleForceSUA::isArtillery))) {
+                        throw new IllegalArgumentException("Invalid off-board artillery deployment: " + battery);
+                    }
+                    formation.deployOffMapArtillery(origin);
+                }
+                for (JsonNode hex : faction.path("artillerypreplots")) {
+                    BoardLocation location = BoardLocation.of(CoordsDeserializer.parseNode(hex.has("at") ? hex.get("at") : hex),
+                          hex.path("board").asInt(0));
+                    if (!sbf.hasBoardLocation(location)) {
+                        throw new IllegalArgumentException("Artillery pre-plot outside the map: " + location);
+                    }
+                    sbf.artillery().setScenarioPreplot(SBFScenarioProgress.sideId(sbf, player), location);
+                }
+            }
+            validateSBFGame(sbf);
         }
 
         // TODO: check the game for inconsistencies such as units outside board
