@@ -3668,7 +3668,8 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void bingMyTurn() {
-        if (dead) {
+        // A bot's turn is the bot's own: its window neither sounds nor asks about the turn notification
+        if (dead || client instanceof BotClient) {
             return;
         }
         if (!GUIP.getSoundPromptSuppress() && firstBing) {
