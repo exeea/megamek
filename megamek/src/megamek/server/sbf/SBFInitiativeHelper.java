@@ -123,11 +123,21 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
               .filter(f -> f.assignedToCombatArea(area))
               .filter(f -> !reconMovement || !game().visibilityHelper().isUncountedMover(f.getId()))
               .filter(f -> SBFFormationTurn.isEligible(f, phase, game().getCurrentRound()))
+              .filter(f -> !phase.isFiring() || !f.overrunsIn(game().getCurrentRound()))
               .filter(f -> !phase.isMovement() || movementGroups.add(f.movementGroup()))
               .map(f -> new SBFFormationTurn(f.getOwnerId(), area))
               .collect(Collectors.groupingBy(SBFFormationTurn::playerId));
         List<ArrayDeque<SBFTurn>> sides = new ArrayList<>();
         List<SBFTurn> remainingMovers = new ArrayList<>();
+        // Overrun Combat, IO:BF p. 224: "the overrunning Formations fall outside of the normal sequence"
+        List<SBFTurn> overrunning = new ArrayList<>();
+        if (phase.isFiring()) {
+            game().getActiveFormations().stream().filter(f -> f.overrunsIn(game().getCurrentRound()))
+                  .filter(f -> f.assignedToCombatArea(area))
+                  .filter(f -> SBFFormationTurn.isEligible(f, phase, game().getCurrentRound()))
+                  .forEach(f -> overrunning.add(new SBFFormationTurn(f.getOwnerId(), area, true)));
+        }
+        Team overrunWinner = phase.isMovement() && !reconMovement ? overrunWinner() : null;
         Comparator<Team> initiative = Comparator.comparing(Team::getInitiative);
         for (Team team : game().getTeams().stream().sorted(winnerFirst ? initiative.reversed() : initiative).toList()) {
             ArrayDeque<SBFTurn> side = new ArrayDeque<>();
@@ -139,12 +149,17 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
                           remainingMovers.add(new SBFFormationTurn(player.getId(), area));
                       }
                   });
+            if (team == overrunWinner) {
+                for (int count = Math.min(overrunCount(team), side.size()); count > 0; count--) {
+                    overrunning.add(new SBFFormationTurn(side.removeFirst().playerId(), area, true));
+                }
+            }
             if (!side.isEmpty()) {
                 sides.add(side);
             }
         }
 
-        List<SBFTurn> turns = new ArrayList<>();
+        List<SBFTurn> turns = new ArrayList<>(overrunning);
         while (!sides.isEmpty()) {
             int smallestSide = sides.stream().mapToInt(ArrayDeque::size).min().orElseThrow();
             for (var side : sides) {
@@ -157,6 +172,33 @@ public record SBFInitiativeHelper(SBFGameManager gameManager) implements SBFGame
         }
         turns.addAll(remainingMovers);
         return turns;
+    }
+
+    /** The side that won this turn's Initiative, when it won by a margin of 2 or more and has Overrun Combat. */
+    private Team overrunWinner() {
+        List<Team> ranked = game().getTeams().stream().filter(team -> !team.isObserverTeam())
+              .sorted(Comparator.comparing(Team::getInitiative).reversed()).toList();
+        return (ranked.size() >= 2) && (overrunCount(ranked.getFirst()) > 0) ? ranked.getFirst() : null;
+    }
+
+    /**
+     * Overrun Combat, IO:BF p. 224: a Force with this ability that "wins an Initiative roll by a margin of 2 points or
+     * more ... divides the number of points by which he has won the Initiative roll by 2, rounding all results down ...
+     * This becomes the number of Formations with which the player may move and attack before any other Formations can
+     * act in the current turn." The ability is carried by a commander Unit (p. 224).
+     */
+    private int overrunCount(Team winner) {
+        List<Team> ranked = game().getTeams().stream().filter(team -> !team.isObserverTeam())
+              .sorted(Comparator.comparing(Team::getInitiative).reversed()).toList();
+        if ((ranked.size() < 2) || (ranked.getFirst() != winner) || winner.nonObserverPlayers().isEmpty()) {
+            return 0;
+        }
+        var first = ranked.getFirst().getInitiative();
+        var second = ranked.get(1).getInitiative();
+        int index = Math.min(first.size(), second.size()) - 1;
+        int margin = (index < 0) ? 0 : first.getRoll(index) - second.getRoll(index);
+        return (margin >= 2) && new SBFInitiativeModifiers(game(), winner.nonObserverPlayers().getFirst())
+              .hasAbility(InitiativeAbility.OVERRUN_COMBAT) ? margin / 2 : 0;
     }
 
     /** IO:BF p. 195. The winning side completes reconnaissance first. Ready votes are saved with the game. */

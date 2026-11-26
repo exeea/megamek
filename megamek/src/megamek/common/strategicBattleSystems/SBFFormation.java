@@ -902,6 +902,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         this.brawlers = brawlers;
     }
 
+    /** Overrun Combat, IO:BF p. 224: this Formation moved out of sequence and attacks first in that round. */
+    private Integer overrunRound;
+
+    public boolean overrunsIn(int round) {
+        return (overrunRound != null) && (overrunRound == round);
+    }
+
+    public void markOverrun(int round) {
+        overrunRound = round;
+    }
+
     /** Communications Disruption, IO:BF p. 226: an enemy disrupted this Formation's communications for this turn. */
     private boolean communicationsDisrupted;
 

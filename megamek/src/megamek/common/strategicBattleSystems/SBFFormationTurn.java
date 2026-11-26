@@ -52,10 +52,24 @@ public class SBFFormationTurn extends SBFTurn {
     }
 
     private final String combatArea;
+    private final boolean overrun;
 
     public SBFFormationTurn(int playerId, String combatArea) {
+        this(playerId, combatArea, false);
+    }
+
+    /**
+     * @param overrun Overrun Combat, IO:BF p. 224: a turn before the normal sequence. In Movement the player picks the
+     *                Formation; in Combat only the Formations that overran this round may take it.
+     */
+    public SBFFormationTurn(int playerId, String combatArea, boolean overrun) {
         super(playerId);
         this.combatArea = combatArea;
+        this.overrun = overrun;
+    }
+
+    public boolean isOverrun() {
+        return overrun;
     }
 
     @Override
@@ -67,7 +81,9 @@ public class SBFFormationTurn extends SBFTurn {
     public boolean isValidEntity(InGameObject unit, IGame game) {
         return (unit.getOwnerId() == playerId()) && unit instanceof SBFFormation formation
               && (!game.getPhase().isMovement() || !(game instanceof SBFGame sbf) || sbf.mayMoveWithActiveGroup(formation))
-              && formation.assignedToCombatArea(combatArea) && isEligible(formation, game.getPhase(), game.getCurrentRound());
+              && formation.assignedToCombatArea(combatArea)
+              && isEligible(formation, game.getPhase(), game.getCurrentRound())
+              && (!overrun || !game.getPhase().isFiring() || formation.overrunsIn(game.getCurrentRound()));
     }
 
     public static boolean isEligible(SBFFormation formation, GamePhase phase, int round) {

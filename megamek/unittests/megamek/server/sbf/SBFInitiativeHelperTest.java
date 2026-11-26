@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 
 import megamek.common.Player;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.options.SBFRuleOptions;
@@ -46,6 +47,8 @@ import megamek.common.enums.GamePhase;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFTurn;
+import megamek.common.strategicBattleSystems.SBFUnit;
+import megamek.common.strategicBattleSystems.SBFUnit.InitiativeAbility;
 import org.junit.jupiter.api.Test;
 
 class SBFInitiativeHelperTest {
@@ -71,6 +74,44 @@ class SBFInitiativeHelperTest {
         assertEquals(List.of(1, 2, 3, 2, 2, 3), manager.initiativeHelper.formationTurns(GamePhase.MOVEMENT)
               .stream().map(SBFTurn::playerId).toList());
         assertEquals(List.of(1, 2, 2, 2, 3, 3), manager.initiativeHelper.formationTurns(GamePhase.FIRING)
+              .stream().map(SBFTurn::playerId).toList());
+    }
+
+    @Test
+    void overrunCombatLetsTheWinnerMoveAndAttackFirstWithHalfItsMargin() {
+        // Overrun Combat, IO:BF p. 224: "divides the number of points by which he has won the Initiative roll by 2 ...
+        // the number of Formations with which the player may move and attack before any other Formations can act".
+        // A margin of about 40 lets both of the winner's Formations go first.
+        SBFGame game = new SBFGame();
+        SBFGameManager manager = new SBFGameManager();
+        manager.setGame(game);
+        game.setCurrentRound(1);
+        Player loser = addPlayer(game, 1, 1, 0);
+        Player winner = addPlayer(game, 2, 2, 0);
+        game.getTeamForPlayer(loser).getInitiative().addRoll(-20, "");
+        game.getTeamForPlayer(winner).getInitiative().addRoll(20, "");
+        for (int owner : List.of(1, 1, 2, 2)) {
+            SBFFormation formation = new SBFFormation();
+            formation.setId(game.getActiveFormations().size() + 10);
+            formation.setOwnerId(owner);
+            formation.setDeployed(true);
+            game.addUnit(formation);
+        }
+        assertEquals(List.of(1, 2, 1, 2), manager.initiativeHelper.formationTurns(GamePhase.MOVEMENT)
+              .stream().map(SBFTurn::playerId).toList());
+
+        var commander = new SBFUnit();
+        commander.setArmor(4);
+        commander.setCurrentArmor(4);
+        commander.getSpecialAbilities().setSUA(BattleForceSUA.COM);
+        commander.getInitiativeAbilities().add(InitiativeAbility.OVERRUN_COMBAT);
+        game.getFormation(12).orElseThrow().addUnit(commander);
+        assertEquals(List.of(2, 2, 1, 1), manager.initiativeHelper.formationTurns(GamePhase.MOVEMENT)
+              .stream().map(SBFTurn::playerId).toList());
+
+        game.getFormation(12).orElseThrow().markOverrun(1);
+        game.getFormation(13).orElseThrow().markOverrun(1);
+        assertEquals(List.of(2, 2, 1, 1), manager.initiativeHelper.formationTurns(GamePhase.FIRING)
               .stream().map(SBFTurn::playerId).toList());
     }
 

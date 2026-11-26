@@ -561,6 +561,11 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      */
     void endCurrentTurn(SBFFormation entityUsed) {
         final int playerId = (entityUsed == null) ? Player.PLAYER_NONE : entityUsed.getOwnerId();
+        if ((entityUsed != null) && game.getPhase().isMovement() && (game.getTurn() instanceof SBFFormationTurn turn)
+              && turn.isOverrun()) {
+            // Overrun Combat, IO:BF p. 224: the Formation that moved first also attacks first this turn
+            entityUsed.markOverrun(game.getCurrentRound());
+        }
         if (entityUsed != null && game.getPhase().isMovement() && game.adjustsFormations()
               && game.continueDetachmentMovement(entityUsed)) {
             game.engagementOrders().finishMovement();

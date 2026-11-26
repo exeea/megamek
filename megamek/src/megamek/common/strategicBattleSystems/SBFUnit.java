@@ -168,7 +168,7 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
      * The Special Command Abilities a commander Unit carries (IO:BF p. 224: "tied to the Force Commander (COM) Unit or a
      * specific sub-commander ... If this Unit is destroyed, the ability is lost"), authored as "initiativeabilities".
      */
-    public enum InitiativeAbility { BANKING, FORCING, ZONE_OF_CONTROL, COMMUNICATIONS_DISRUPTION }
+    public enum InitiativeAbility { BANKING, FORCING, ZONE_OF_CONTROL, COMMUNICATIONS_DISRUPTION, OVERRUN_COMBAT }
 
     private Map<BattleForceSUA, Set<SBFArtilleryAmmo>> artilleryLoadouts;
 
