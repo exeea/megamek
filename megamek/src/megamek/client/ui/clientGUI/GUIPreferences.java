@@ -211,7 +211,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE = "UnitDisplayAutoDisplayReportPhase";
     public static final String UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE = "UnitDisplayAutoDisplayNonReportPhase";
     public static final String UNIT_DISPLAY_ENABLED = "UnitDisplayEnabled";
-    public static final String UNIT_DISPLAY_LOCATION = "UnitDisplayLocation";
     public static final String UNIT_DISPLAY_HEAT_COLOR_1 = "UnitDisplayHeatColor1";
     public static final String UNIT_DISPLAY_HEAT_COLOR_2 = "UnitDisplayHeatColor2";
     public static final String UNIT_DISPLAY_HEAT_COLOR_3 = "UnitDisplayHeatColor3";
@@ -760,7 +759,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, 0);
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
         store.setDefault(UNIT_DISPLAY_ENABLED, true);
-        store.setDefault(UNIT_DISPLAY_LOCATION, 0);
         // -1 is the "no saved position yet" sentinel so the floating dialog centers on first use; a real saved
         // position (including a legitimate top-left 0,0) is restored instead.
         store.setDefault(BOT_COMMANDS_POS_X, -1);
@@ -1172,10 +1170,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getUnitDisplayWeaponListHeight() {
         return store.getInt(UNIT_DISPLAY_WEAPON_LIST_HEIGHT);
-    }
-
-    public int getUnitDisplayLocation() {
-        return store.getInt(UNIT_DISPLAY_LOCATION);
     }
 
     public Color getUnitDisplayHeatLevel1() {
@@ -2205,15 +2199,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUnitDisplayWeaponListHeight(int i) {
         store.setValue(UNIT_DISPLAY_WEAPON_LIST_HEIGHT, i);
-    }
-
-    public void toggleUnitDisplayLocation() {
-        store.setValue(UNIT_DISPLAY_LOCATION, ((getInt(UNIT_DISPLAY_LOCATION) + 1) % 2));
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setUnitDisplayLocation(int i) {
-        store.setValue(UNIT_DISPLAY_LOCATION, i);
     }
 
     public void setUnitDisplayHeatColorLevel1(Color c) {

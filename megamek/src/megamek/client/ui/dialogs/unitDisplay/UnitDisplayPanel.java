@@ -237,7 +237,6 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
         splitB1 = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         splitC1 = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         JButton butSwitchView = new JButton(Messages.getString("UnitDisplay.SwitchView"));
-        JButton butSwitchLocation = new JButton(Messages.getString("UnitDisplay.SwitchLocation"));
 
         splitABC.setOneTouchExpandable(true);
         splitBC.setOneTouchExpandable(true);
@@ -276,17 +275,11 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
         c.insets = new Insets(0, 1, 1, 1);
         c.weightx = 1.0;
         c.weighty = 0.0;
-        c.gridwidth = 1;
+        c.gridwidth = GridBagConstraints.REMAINDER;
         c.anchor = GridBagConstraints.WEST;
 
         ((GridBagLayout) getLayout()).setConstraints(butSwitchView, c);
         add(butSwitchView);
-
-        c.weightx = 1.0;
-        c.anchor = GridBagConstraints.EAST;
-        c.gridwidth = GridBagConstraints.REMAINDER;
-        ((GridBagLayout) getLayout()).setConstraints(butSwitchLocation, c);
-        add(butSwitchLocation);
 
         butSwitchView.addActionListener(e -> {
             if (clientgui != null) {
@@ -315,8 +308,6 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
                 }
             }
         });
-
-        butSwitchLocation.addActionListener(e -> GUI_PREFERENCES.toggleUnitDisplayLocation());
 
         if (GUI_PREFERENCES.getUnitDisplayStartTabbed()) {
             setDisplayTabbed();

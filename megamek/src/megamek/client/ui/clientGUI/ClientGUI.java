@@ -4527,7 +4527,7 @@ public class ClientGUI extends AbstractClientGUI
                     roundsInAirDialog.refresh();
                 }
             }
-            case GUIPreferences.UNIT_DISPLAY_ENABLED, GUIPreferences.UNIT_DISPLAY_LOCATION ->
+            case GUIPreferences.UNIT_DISPLAY_ENABLED ->
                   setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
             case GUIPreferences.FORCE_DISPLAY_ENABLED -> setForceDisplayVisible(GUIP.getForceDisplayEnabled());
             case GUIPreferences.MINI_REPORT_ENABLED -> setMiniReportVisible(GUIP.getMiniReportEnabled());
