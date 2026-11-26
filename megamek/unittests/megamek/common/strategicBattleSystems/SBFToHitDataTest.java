@@ -112,6 +112,25 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void engineeringUnitsBuildingAFortificationCannotFire() {
+        // Fortified Positions, IO:BF p. 220: "the Units with the TRN or ENG special ability may not make weapon
+        // attacks of any kind. The other Units in the Formation may attack as normal."
+        var builder = attacker.getUnits().getFirst();
+        builder.getSpecialAbilities().setSUA(BattleForceSUA.TRN);
+        attacker.addUnit(new SBFUnit());
+        var otherUnit = new SBFStandardUnitAttack(attacker.getId(), 1, target.getId(), ASRange.LONG);
+        attacker.beginFieldConstruction(builder, 1);
+
+        var building = SBFToHitData.compileToHit(game, attack());
+        assertTrue(building.cannotSucceed());
+        // The firing choice shows this reason to the player
+        assertEquals("building a fortification", building.getDesc());
+        assertFalse(SBFToHitData.compileToHit(game, otherUnit).cannotSucceed());
+        attacker.finishFieldConstruction();
+        assertFalse(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+    }
+
+    @Test
     void secondaryPenaltyAppliesToTheSecondDeclaredTargetOnly() {
         var secondary = formation(21, 2, target.getPosition().coords());
         game.addUnit(secondary);

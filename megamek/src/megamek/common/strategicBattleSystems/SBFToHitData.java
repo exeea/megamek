@@ -89,6 +89,10 @@ public class SBFToHitData extends TargetRoll {
         if (attackingFormation.unpackingCargo(game.getCurrentRound()) || !attackingFormation.canAttackAfterEngagement()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "cannot fire after evading");
         }
+        if (firingUnit.isConstructing()) {
+            // Fortified Positions, IO:BF p. 220: the TRN and ENG Units "may not make weapon attacks of any kind"
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "building a fortification");
+        }
         if (!firingUnit.canFire()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "targeting systems destroyed");
         }
