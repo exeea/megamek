@@ -506,10 +506,13 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) && !illuminated(game, target) &&
               (game.getPlanetaryConditions().getLight().isDuskDawn()
                     || game.getPlanetaryConditions().getLight().isMoonlessOrPitchBack())) ? 1 : 0;
-        // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMek/Vehicle column.
-        boolean mekOrVehicle = formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.MX,
+        // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMek/Vehicle column. On a roof (p. 217) "infantry
+        // units use the visual ranges for BattleMechs and Vehicles" and the building's height extends the range.
+        boolean onRoof = game.usesUrbanCombat() && formation.isOnTopOfBuildings();
+        boolean mekOrVehicle = onRoof || formation.isAnyTypeOf(SBFElementType.BM, SBFElementType.V, SBFElementType.MX,
               SBFElementType.PM, SBFElementType.AS);
-        return switch (visualLevel(game, target)) {
+        int roof = onRoof ? SBFUrbanCombat.roofVisualBonus(game.getHex(formation.getPosition())) : 0;
+        return roof + switch (visualLevel(game, target)) {
             case 4 -> srchModifier;
             case 3 -> 1 + srchModifier;
             case 2 -> srchModifier + (mekOrVehicle ? 2 : 1);

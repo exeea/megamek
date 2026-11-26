@@ -97,6 +97,27 @@ class SBFDetectionHelperTest {
     }
 
     @Test
+    void observersOnTheRoofsSeeFartherAndInfantryUseTheBattleMekVehicleColumn() {
+        // Urban Hexes, IO:BF p. 217: "For every 4 levels of building height, Visual Range ... is increased by 1 hex to a
+        // maximum of 2 hexes. Additionally, infantry units use the visual ranges for BattleMechs and Vehicles."
+        var game = new SBFGame();
+        game.setBoard(0, Board.createEmptyBoard(2, 2));
+        game.getPlanetaryConditions().setLight(Light.DAY);
+        game.getPlanetaryConditions().setWeather(Weather.CLEAR);
+        var observer = deploy(game, 0, 20);
+        observer.setType(SBFElementType.CI);
+        var hex = game.getHex(observer.getPosition());
+        hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 9));
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        assertEquals(2, SBFDetectionHelper.visualRange(game, observer));
+        observer.setOnTopOfBuildings(true);
+        assertEquals(6, SBFDetectionHelper.visualRange(game, observer));
+        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 5));
+        assertEquals(5, SBFDetectionHelper.visualRange(game, observer));
+    }
+
+    @Test
     void hailLightningAndIceStormsUseVisualThreeWithNormalLightingAndSearchlightRules() {
         var game = new SBFGame();
         var observer = deploy(game, 0, 20);

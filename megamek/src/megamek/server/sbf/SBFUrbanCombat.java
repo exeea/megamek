@@ -61,6 +61,14 @@ final class SBFUrbanCombat {
         return formation.isExclusivelyWheeled() ? Math.max(0, cost - 1) : cost;
     }
 
+    /**
+     * p. 217 Top of Building Line of Sight: "For every 4 levels of building height, Visual Range (see p. 195) is
+     * increased by 1 hex to a maximum of 2 hexes."
+     */
+    static int roofVisualBonus(Hex hex) {
+        return (hex == null) ? 0 : Math.min(2, Math.max(0, hex.terrainLevel(Terrains.BLDG_ELEV)) / 4);
+    }
+
     /** p. 217 Building Weight Capacity: the largest Size the roofs carry (Light 1, Medium 2, Heavy 3, Hardened 4). */
     static int weightCapacity(Hex hex) {
         return Math.clamp(hex.terrainLevel(Terrains.BUILDING), 1, 4);
