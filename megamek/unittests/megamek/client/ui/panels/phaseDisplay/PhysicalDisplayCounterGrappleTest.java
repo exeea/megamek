@@ -124,7 +124,6 @@ class PhysicalDisplayCounterGrappleTest {
         mockClientGUI.controller = mockController;
         BoardClientState boardState = mock(BoardClientState.class);
         when(mockClientGUI.getClient()).thenReturn(mockClient);
-        when(mockClientGUI.boardViews()).thenReturn(List.of());
         when(mockClientGUI.getMenuBar()).thenReturn(mock(CommonMenuBar.class));
         when(mockClientGUI.getBoardState((Targetable) any())).thenReturn(boardState);
         when(mockClientGUI.getBoardState(anyInt())).thenReturn(boardState);

@@ -63,7 +63,6 @@ class ClientGUIBoardLifecycleTest {
                 BoardClientState first = gui.getBoardState();
                 assertNotNull(first);
                 assertSame(gui.getTilesetManager(), first.getTilesetManager());
-                assertTrue(gui.boardViews().isEmpty());
                 int listeners = game.getGameListeners().size();
                 int callbacks = session.closeListeners().size();
                 for (int i = 0; i < 3; i++) {

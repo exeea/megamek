@@ -137,7 +137,6 @@ class MovementDisplayWalkOnFleeTest {
         BoardClientState boardState = mock(BoardClientState.class);
         menuBar = mock(CommonMenuBar.class);
         when(mockClientGUI.getClient()).thenReturn(mockClient);
-        when(mockClientGUI.boardViews()).thenReturn(List.of());
         when(mockClientGUI.getMenuBar()).thenReturn(menuBar);
         when(mockClientGUI.getUnitDisplayState()).thenReturn(new UnitDisplayState(null));
         when(mockClientGUI.getBoardState((Targetable) any())).thenReturn(boardState);
