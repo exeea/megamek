@@ -621,8 +621,10 @@ class BoardRoadSlopeTest {
         UnitMotion movement = new UnitMotion(new BoardScene.Waypoint(BoardScenes.FIRST, 2, 1));
         movement.append(List.of(new BoardScene.Waypoint(BoardScenes.FIRST, 2, 1), new BoardScene.Waypoint(BoardScenes.SECOND, 0, 1)),
               EntityMovementType.MOVE_WALK, 0);
-        movement.advance(movement.remainingSeconds() * 0.4, 1);
+        // Travel sets off at UnitMotion#LAUNCH_SPEED: 30 % of the time is on the upper hex's ramp, 40 % past its edge.
+        movement.advance(movement.remainingSeconds() * 0.3, 1);
         Vector3 moving = movement.surfacePosition(scene);
+        assertTrue(BoardGeometry.contains(BoardScenes.FIRST, moving.x, moving.y), "Sample the walk on the upper hex");
         assertEquals(high.height(moving.x, moving.y), moving.z, 0.01f, "Walking must not sink into the upper road shoulder");
     }
 
@@ -654,11 +656,14 @@ class BoardRoadSlopeTest {
                 movement.append(List.of(new BoardScene.Waypoint(BoardScenes.FIRST, 2, direction),
                       new BoardScene.Waypoint(neighbor, 0, direction)), EntityMovementType.MOVE_WALK, 0);
                 double duration = movement.remainingSeconds();
-                movement.advance(duration * 0.4, 1);
+                // Travel sets off at UnitMotion#LAUNCH_SPEED: 30 % of the time is on the upper hex, 50 % on the lower.
+                movement.advance(duration * 0.3, 1);
                 Vector3 moving = movement.surfacePosition(scene);
+                assertTrue(BoardGeometry.contains(BoardScenes.FIRST, moving.x, moving.y), "Sample the walk on the upper hex");
                 assertEquals(high.height(moving.x, moving.y), moving.z, 0.01f);
                 movement.advance(duration * 0.2, 1);
                 moving = movement.surfacePosition(scene);
+                assertTrue(BoardGeometry.contains(neighbor, moving.x, moving.y), "Sample the walk on the lower hex");
                 assertEquals(low.height(moving.x, moving.y), moving.z, 0.01f);
             }
         }
