@@ -809,8 +809,6 @@ class GpuBoardSourceTest {
 
     @Test
     void movingUnitGhostIsNotBakedIntoTiles() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean moveStep = preferences.getShowMoveStep();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords destination = new Coords(6, 5);
             BoardScene.Tile before = fixture.source.takeFrame().scene().tile(destination);
@@ -818,16 +816,13 @@ class GpuBoardSourceTest {
             path.add(new UnitLocation(fixture.entity.getId(), fixture.entity.getPosition(), 0, 0, 0));
             path.add(new UnitLocation(fixture.entity.getId(), destination, 1, 0, 0));
             SwingUtilities.invokeAndWait(() -> {
-                preferences.setShowMoveStep(true);
                 fixture.entity.setPosition(destination);
                 fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity, path));
                 fixture.source.refresh();
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(destination);
             assertTrue(samePixels(before.tileset(), after.tileset()),
-                  "The Legacy 2D moving-unit ghost must not be baked into the captured terrain");
-        } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setShowMoveStep(moveStep));
+                  "A moving unit must not be baked into the captured terrain");
         }
     }
 

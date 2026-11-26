@@ -78,13 +78,13 @@ class UiTreeSmokeTest {
                           "unitDisplay.sensors", "unitDisplay.fonts")),
               sidebar("miniMap", "miniMap.theme", "miniMap.display"),
               sidebar("report", "report.appearance", "report.content", "report.filter"),
-              sidebar("overlays", "overlays.overview", "overlays.planetary", "overlays.toasts", "overlays.trace"),
+              sidebar("overlays", "overlays.planetary", "overlays.toasts", "overlays.trace"),
               sidebar("buttonOrder", "buttonOrder.movement", "buttonOrder.deployment", "buttonOrder.firing",
                     "buttonOrder.physical", "buttonOrder.targeting"),
-              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.minimap", "autoDisplay.report",
+              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.report",
                     "autoDisplay.players", "autoDisplay.force", "autoDisplay.bots", "autoDisplay.tabs"),
               sidebar("aiDisplay", "aiDisplay.settings"),
-              sidebar("advanced", "advanced.chat", "advanced.timing", "advanced.safety"));
+              sidebar("advanced", "advanced.timing", "advanced.safety"));
     }
 
     private static final List<String> TOP = List.of("main", "audio", "keyBinds", "gameBoard", "unitDisplay", "miniMap",
@@ -115,9 +115,9 @@ class UiTreeSmokeTest {
             assertFalse(tree.expanded("main"));
             TextField search = panel.findActor("tree-search");
             search.setText("view");
-            // "Field of View" by its label (and its sections' summaries), Overlays by its section "Unit Overview".
+            // "Field of View" by its label (and its sections' summaries).
             // Nothing of "Unit Display" says "view" (the Swing dialog's own search does not list it either).
-            assertEquals(List.of("gameBoard", "gameBoard.fov", "overlays"), tree.shown());
+            assertEquals(List.of("gameBoard", "gameBoard.fov"), tree.shown());
             search.setText("display");
             assertTrue(tree.shown().containsAll(List.of("unitDisplay", "unitDisplay.interface", "autoDisplay")),
                   "Unit Display under its parent: " + tree.shown());

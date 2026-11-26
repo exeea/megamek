@@ -230,10 +230,8 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_FORCE_DISPLAY = "viewForceDisplay";
     public static final String VIEW_NOVA_NETWORKS = "viewNovaNetworks";
     public static final String VIEW_UNIT_DISPLAY = "viewMekDisplay";
-    public static final String VIEW_KEYBINDS_OVERLAY = "viewKeyboardShortcuts";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
     public static final String VIEW_MINI_MAP = "viewMinimap";
-    public static final String VIEW_UNIT_OVERVIEW = "viewUnitOverview";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
     public static final String VIEW_GRAPHICS_CLASSIC = "viewGraphicsClassic";
     public static final String VIEW_GRAPHICS_ENHANCED = "viewGraphicsEnhanced";

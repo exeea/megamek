@@ -79,9 +79,7 @@ class GpuSwingCutSmokeTest {
           GUIPreferences.FORCE_DISPLAY_ENABLED, GUIPreferences.UNIT_DISPLAY_ENABLED,
           GUIPreferences.MINI_REPORT_ENABLED, GUIPreferences.BOT_COMMANDS_ENABLED);
     /** The phase rules' auto-display choices, set to show their windows in every phase. */
-    private static final List<String> SHOWN = List.of(GUIPreferences.MINI_MAP_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE,
-          GUIPreferences.PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE,
+    private static final List<String> SHOWN = List.of(GUIPreferences.PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE,
           GUIPreferences.PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE,
           GUIPreferences.FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
           GUIPreferences.FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE,
@@ -129,10 +127,8 @@ class GpuSwingCutSmokeTest {
                 await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
                 await(() -> onGl(() -> frames() > 5));
 
-                // The minimap stays on through the report phases, whatever the old auto-display preferences say.
+                // The minimap stays on through the report phases.
                 onSwing(() -> {
-                    preferences.setValue(GUIPreferences.MINI_MAP_AUTO_DISPLAY_REPORT_PHASE, GUIPreferences.HIDE);
-                    preferences.setValue(GUIPreferences.MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE, GUIPreferences.SHOW);
                     preferences.setMinimapEnabled(true);
                     return null;
                 });

@@ -52,7 +52,6 @@ import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.design.swing.MegaMekDarkLaf;
 import megamek.client.ui.design.swing.MegaMekLightLaf;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.enums.WeaponSortOrder;
@@ -64,29 +63,8 @@ import megamek.common.units.EntityMovementType;
 
 public class GUIPreferences extends PreferenceStoreProxy {
 
-    /*
-     * --Begin advanced settings section-- Options with the "ADVANCED" prefix
-     * are treated specially. They are quick and easy to add, at the expense of
-     * some user-friendliness (that's why they are "advanced"<grin>). Only the
-     * appropriate declaration below and the default value (further down in this
-     * file) need be added. The code will then automatically add the option to
-     * the advanced tab of the client settings. In order to retrieve one of
-     * these settings, use a line like:
-     * GUIPreferences.getInstance().getInt("AdvancedWhateverOption"), where
-     * getInt is replaced with getBoolean, getString, etc. as necessary. The
-     * reason these options were made this way is that GUI options have a way of
-     * quickly multiplying, and we need a quick and dirty way of adding them
-     * without having to code too many new lines. In addition, keeping them
-     * separated in the settings dialog shields new users from unnecessary
-     * complication.
-     */
-    public static final String ADVANCED_MOVE_STEP_DELAY = "AdvancedMoveStepDelay";
-    public static final String ADVANCED_CHATBOX2_BACKCOLOR = "AdvancedChatbox2BackColor";
-    public static final String ADVANCED_CHATBOX2_TRANSPARENCY = "AdvancedChatbox2Transparency";
-    public static final String ADVANCED_CHATBOX2_AUTO_SLIDE_DOWN = "AdvancedChatbox2AutoSlideDown";
     public static final String ADVANCED_KEY_REPEAT_DELAY = "AdvancedKeyRepeatDelay";
     public static final String ADVANCED_KEY_REPEAT_RATE = "AdvancedKeyRepeatRate";
-    public static final String ADVANCED_SHOW_FPS = "AdvancedShowFPS";
     // Testing/observer aid: reveal otherwise-obscured artillery markers (e.g. enemy incoming) on the local view only
     public static final String ADVANCED_REVEAL_OBSCURED_ARTILLERY = "AdvancedRevealObscuredArtillery";
     // Testing aid: have Princess paint her artillery heat map (predicted impacts + chosen targets) on the board
@@ -107,8 +85,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_MOVE_FONT_TYPE = "BoardMoveFontType";
     public static final String BOARD_MOVE_FONT_SIZE = "BoardMoveFontSize";
     public static final String BOARD_MOVE_FONT_STYLE = "BoardMoveFontStyle";
-    public static final String BOARD_FIRE_SOLUTION_CAN_SEE_COLOR = "BoardFireSolutionCanSeeColor";
-    public static final String BOARD_FIRE_SOLUTION_NO_SEE_COLOR = "BoardFireSolutionNoSeeColor";
     public static final String BOARD_BUILDING_TEXT_COLOR = "BoardBuildingTextColor";
     public static final String BOARD_LOW_FOLIAGE_COLOR = "BoardLowFoliageColor";
     public static final String BOARD_TEXT_COLOR = "BoardTextColor";
@@ -150,22 +126,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_BOMB_DRIFTS = "ShowBombDrifts";
     public static final String SHOW_DEPLOY_ZONES_ARTY_AUTO = "ShowDeployZonesArtyAuto";
 
-    public static final String UNIT_OVERVIEW_TEXT_SHADOW_COLOR = "UnitOverviewTextShadowColor";
-    public static final String UNIT_OVERVIEW_CONDITION_SHADOW_COLOR = "UnitOverviewConditionShadowColor";
-
-    public static final String PLANETARY_CONDITIONS_COLOR_TITLE = "PlanetaryConditionsColorTitle";
     public static final String PLANETARY_CONDITIONS_COLOR_TEXT = "PlanetaryConditionsColorText";
-    public static final String PLANETARY_CONDITIONS_COLOR_COLD = "PlanetaryConditionsColorCold";
-    public static final String PLANETARY_CONDITIONS_COLOR_HOT = "PlanetaryConditionsColorHot";
-    public static final String PLANETARY_CONDITIONS_COLOR_BACKGROUND = "PlanetaryConditionsColorBackground";
     public static final String PLANETARY_CONDITIONS_SHOW_DEFAULTS = "PlanetaryConditionsShowDefaults";
-    public static final String PLANETARY_CONDITIONS_SHOW_HEADER = "PlanetaryConditionsShowHeader";
     public static final String PLANETARY_CONDITIONS_SHOW_LABELS = "PlanetaryConditionsShowLabels";
     public static final String PLANETARY_CONDITIONS_SHOW_VALUES = "PlanetaryConditionsShowValues";
     public static final String PLANETARY_CONDITIONS_SHOW_INDICATORS = "PlanetaryConditionsShowIndicators";
-    public static final String PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY =
-          "PlanetaryConditionsBackgroundTransparency";
-
     public static final String TRACE_OVERLAY_TRANSPARENCY = "TraceOverlayTransparency";
     public static final String TRACE_OVERLAY_SCALE = "TraceOverlayScale";
     public static final String TRACE_OVERLAY_ORIGIN_X = "TraceOverlayOriginX";
@@ -194,7 +159,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String INCLINES = "Inclines";
     public static final String LEVEL_HIGHLIGHT = "LevelHighlight";
     public static final String MM_SYMBOL = "MmSymbol";
-    public static final String SOFT_CENTER = "SoftCenter";
     public static final String AUTO_CENTER = "AutoCenter";
     public static final String AUTO_SELECT_NEXT = "AutoSelectNextUnit";
     /** Stored under a new name, so that the old "AutoEndFiring" (on by default) is ignored: everyone starts off. */
@@ -268,8 +232,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_DISPLAY_MEK_ARMOR_MEDIUM_FONT_SIZE = "UnitDisplayMekArmorMediumFontSize";
     public static final String UNIT_DISPLAY_MEK_ARMOR_SMALL_FONT_SIZE = "UnitDisplayMekArmorSmallFontSize";
     public static final String UNIT_DISPLAY_MEK_LARGE_FONT_SIZE = "UnitDisplayMekLargeFontSize";
-    public static final String UNIT_DISPLAY_MEK_MEDIUM_FONT_SIZE = "UnitDisplayMekMediumFontSize";
-
     public static final String UNIT_TOOLTIP_SEEN_BY_RESOLUTION = "UnitToolTipSeenByResolution";
     public static final String UNIT_TOOLTIP_ARMOR_MINI_UNITS_PER_BLOCK = "UnitToolTipArmorMiniUnitsPerBlock";
     public static final String UNIT_TOOLTIP_ARMOR_MINI_ARMOR_CHAR = "UnitToolTipArmorMiniArmorChar";
@@ -286,12 +248,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_TOOLTIP_LIGHT_FG_COLOR = "UnitToolTipLightFGColor";
     public static final String UNIT_TOOLTIP_BUILDING_FG_COLOR = "UnitToolTipBuildingFGColor";
     public static final String UNIT_TOOLTIP_ALT_FG_COLOR = "UnitToolTipAltFGColor";
-    public static final String UNIT_TOOLTIP_BLOCK_FG_COLOR = "UnitToolTipBlockFGColor";
     public static final String UNIT_TOOLTIP_TERRAIN_FG_COLOR = "UnitToolTipTerrainFGColor";
     public static final String UNIT_TOOLTIP_BGCOLOR = "UnitToolTipBGColor";
     public static final String UNIT_TOOLTIP_BUILDING_BGCOLOR = "UnitToolTipBuildingBGColor";
     public static final String UNIT_TOOLTIP_ALT_BGCOLOR = "UnitToolTipAltBGColor";
-    public static final String UNIT_TOOLTIP_BLOCK_BGCOLOR = "UnitToolTipBlockBGColor";
     public static final String UNIT_TOOLTIP_TERRAIN_BGCOLOR = "UnitToolTipTerrainBGColor";
     public static final String UNIT_TOOLTIP_HIGHLIGHT_COLOR = "UnitToolTipHighlightColor";
     public static final String UNIT_TOOLTIP_WEAPON_COLOR = "UnitToolTipWeaponColor";
@@ -301,8 +261,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GIF_GAME_SUMMARY_MINIMAP = "GifGameSummaryMinimap";
     public static final String GIF_GAME_SUMMARY_RECORDING = "GifGameSummaryRecording";
     public static final String GIF_GAME_SUMMARY_SAVE_DIRECTORY = "GifGameSummarySaveDirectory";
-    public static final String SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP = "ShowUnitDisplayNamesOnMinimap";
-    public static final String ENTITY_OWNER_LABEL_COLOR = "EntityOwnerLabelColor";
     public static final String UNIT_LABEL_BORDER = "EntityOwnerLabelColor";
     public static final String TEAM_COLORING = "EntityTeamLabelColor";
     public static final String FOCUS = "Focus";
@@ -320,7 +278,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String FOV_HIGHLIGHT_RINGS_COLORS_HSB = "FovHighlightRingsColorsInHSB";
     public static final String FOV_DARKEN = "FovDarken";
     public static final String FOV_DARKEN_ALPHA = "FovDarkenAlpha";
-    public static final String FOV_STRIPES = "FoVFogStripes";
     public static final String FOV_GRAYSCALE = "FoVFogGrayscale";
     public static final String FOV_SPOTTING_MODE = "FovSpottingMode";
     public static final String SHOW_OBJECTIVE_OVERLAYS = "ShowObjectiveOverlays";
@@ -411,19 +368,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String START_SCREEN_REPLAY_KEY = "StartScreenReplayKey";
     public static final String PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE = "PlayerListAutoDisplayReportPhase";
     public static final String PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE = "PlayerListAutoDisplayNonReportPhase";
-    public static final String MINI_MAP_COLOURS = "MinimapColours";
     public static final String MINI_MAP_ENABLED = "MinimapEnabled";
-    public static final String MINI_MAP_POS_X = "MinimapPosX";
-    public static final String MINI_MAP_POS_Y = "MinimapPosY";
     public static final String MINI_MAP_ZOOM = "MinimapZoom";
     public static final String MINI_MAP_HEIGHT_DISPLAY_MODE = "MinimapHeightDisplayMode";
-    public static final String MINI_MAP_SYMBOLS_DISPLAY_MODE = "MinimapSymbolsDisplayMode";
-    public static final String MINI_MAP_AUTO_DISPLAY_REPORT_PHASE = "MinimapAutoDisplayReportPhase";
-    public static final String MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE = "MinimapAutoDisplayNonReportPhase";
-    public static final String MINI_MAP_SHOW_SENSOR_RANGE = "MinimapShowSensorRange";
-    public static final String MINI_MAP_SHOW_FACING_ARROW = "MinimapShowFacingArrow";
+    // The facing arrows' getter and setter used to read this key crossed with the sensor range's; saved values keep it
+    public static final String MINI_MAP_SHOW_FACING_ARROW = "MinimapShowSensorRange";
     public static final String MINI_MAP_PAINT_BORDERS = "MinimapPaintBorders";
-    public static final String MINI_MAP_MOVE_PATH_PERSISTENCE = "MinimapMovePathPersistence";
     /** The 3D board's battle HUD shows its contacts panel; its Contacts utility switches it as Map does the minimap. */
     public static final String GPU_CONTACTS_ENABLED = "GpuContactsEnabled";
     public static final String FIRE_DISPLAY_TAB_DURING_PHASES = "FireDisplayTabDuringPhases";
@@ -431,8 +381,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String HIGH_PERFORMANCE_GRAPHICS = "HighPerformanceGraphics";
     public static final String MINIMUM_SIZE_HEIGHT = "MinimumSizeHeight";
     public static final String MINIMUM_SIZE_WIDTH = "MinimumSizeWidth";
-    public static final String MOUSE_WHEEL_ZOOM = "MouseWheelZoom";
-    public static final String MOUSE_WHEEL_ZOOM_FLIP = "MouseWheelZoomFlip";
     public static final String NAG_FOR_CRUSHING_BUILDINGS = "NagForCrushingBuildings";
     public static final String NAG_FOR_MASC = "NagForMASC";
     public static final String NAG_FOR_NO_ACTION = "NagForNoAction";
@@ -456,7 +404,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String NAG_FOR_ODD_SIZED_BOARD = "NagForOddSizedBoard";
     public static final String RULER_COLOR_1 = "RulerColor1";
     public static final String RULER_COLOR_2 = "RulerColor2";
-    public static final String SCROLL_SENSITIVITY = "ScrollSensitivity";
     public static final String SHOW_FIELD_OF_FIRE = "ShowFieldOfFire";
     public static final String SHOW_SENSOR_RANGE = "ShowSensorRange";
     public static final String SHOW_MAP_HEX_POPUP = "ShowMapHexPopup";
@@ -464,7 +411,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_WPS_LOC_IN_TT = "ShowWpsLocinTT";
     public static final String SHOW_ARMOR_MINI_VIS_TT = "showArmorMiniVisTT";
     public static final String SHOW_PILOT_PORTRAIT_TT = "showPilotPortraitTT";
-    public static final String SHOW_MOVE_STEP = "ShowMoveStep";
     public static final String SHOW_WRECKS = "ShowWrecks";
     public static final String SOUND_BING_FILENAME_CHAT = "SoundBingFilenameChat";
     public static final String SOUND_BING_FILENAME_MY_TURN = "SoundBingFilenameMyTurn";
@@ -478,7 +424,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SOUND_PROMPT_SUPPRESS = "SoundPrompt";
     public static final String TOOLTIP_DELAY = "TooltipDelay";
     public static final String TOOLTIP_DISMISS_DELAY = "TooltipDismissDelay";
-    public static final String TOOLTIP_DIST_SUPPRESSION = "TooltipDistSuppression";
     public static final String WINDOW_POS_X = "WindowPosX";
     public static final String WINDOW_POS_Y = "WindowPosY";
     public static final String WINDOW_SIZE_HEIGHT = "WindowSizeHeight";
@@ -493,8 +438,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GPU_BOARD_SIZE_WIDTH = "GpuBoardSizeWidth";
     public static final String GPU_BOARD_SIZE_HEIGHT = "GpuBoardSizeHeight";
     public static final String GPU_BOARD_MAXIMIZED = "GpuBoardMaximized";
-    /** Width of the GPU board's report panel, as last dragged. */
-    public static final String GPU_REPORT_PANEL_WIDTH = "GpuReportPanelWidth";
     public static final String PLANETARY_CONDITIONS_POS_X = "PlanetaryConditionsPosX";
     public static final String PLANETARY_CONDITIONS_POS_Y = "PlanetaryConditionsPosY";
     public static final String RND_ARMY_SIZE_HEIGHT = "RndArmySizeHeight";
@@ -518,7 +461,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String LOS_MEK_IN_FIRST = "LOSMekInFirst";
     public static final String LOS_MEK_IN_SECOND = "LOSMekInSecond";
     public static final String SHOW_MAP_SHEETS = "ShowMapSheets";
-    public static final String SHOW_UNIT_OVERVIEW = "ShowUnitOverview";
     public static final String SHOW_DAMAGE_LEVEL = "ShowDamageLevel";
     public static final String SHOW_DAMAGE_DECAL = "ShowDamageDecal";
     public static final String SKIN_FILE = "SkinFile";
@@ -527,14 +469,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UI_THEME = "UITheme";
     public static final String REDUCE_MOTION = "ReduceMotion";
     public static final String COLOR_BLIND_PALETTE = "ColorBlindPalette";
-    public static final String BOARD_EDIT_LOAD_SIZE_HEIGHT = "BoardEditLoadSizeHeight";
-    public static final String BOARD_EDIT_LOAD_SIZE_WIDTH = "BoardEditLoadSizeWidth";
     public static final String BOARD_EDIT_RANDOM_DIALOG_START = "BoardEditRandomDialogStart";
     public static final String BOARD_SAVE_INCLUDE_LICENSE = "BoardSaveIncludeLicense";
     public static final String ALLY_UNIT_COLOR = "AllyUnitColor";
     public static final String MY_UNIT_COLOR = "MyUnitColor";
     public static final String ENEMY_UNIT_COLOR = "EnemyUnitColor";
-    public static final String SHOW_KEYBINDS_OVERLAY = "ShowKeybindsOverlay";
     public static final String SHOW_PLANETARY_CONDITIONS_OVERLAY = "ShowPlanetaryConditionsOverlay";
     public static final String SHOW_TRACE_OVERLAY = "ShowTraceOverlay";
     public static final String UNIT_LABEL_STYLE = "UnitLabelStyle";
@@ -550,8 +489,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOT_COMMANDS_LOCATION = "BotCommandsLocation";
     public static final String BOT_COMMANDS_POS_X = "BotCommandsPosX";
     public static final String BOT_COMMANDS_POS_Y = "BotCommandsPosY";
-    public static final String BOT_COMMANDS_WIDTH = "BotCommandsWidth";
-    public static final String BOT_COMMANDS_HEIGHT = "BotCommandsHeight";
     public static final String BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE = "BotCommandsAutoDisplayNonReportPhase";
     public static final String BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE = "BotCommandsAutoDisplayReportPhase";
 
@@ -656,28 +593,17 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(ADVANCED_NO_SAVE_NAG, false);
         store.setDefault(ADVANCED_SAVE_LOBBY_ON_START, false);
         store.setDefault(ADVANCED_LOBBY_BACKUPS_TO_KEEP, 5);
-        store.setDefault(ADVANCED_MOVE_STEP_DELAY, 50);
-        setDefault(ADVANCED_CHATBOX2_BACKCOLOR, DEFAULT_WHITE);
-        store.setDefault(ADVANCED_CHATBOX2_TRANSPARENCY, 50);
-        store.setDefault(ADVANCED_CHATBOX2_AUTO_SLIDE_DOWN, true);
         store.setDefault(ADVANCED_KEY_REPEAT_DELAY, 0);
         store.setDefault(ADVANCED_KEY_REPEAT_RATE, 20);
-        store.setDefault(ADVANCED_SHOW_FPS, false);
         store.setDefault(SHOW_COORDS, true);
         store.setDefault(SHOW_HEX_TYPES, false);
         store.setDefault(HEX_LABEL_OUTLINE, false);
 
-        setDefault(PLANETARY_CONDITIONS_COLOR_TITLE, Color.WHITE);
         setDefault(PLANETARY_CONDITIONS_COLOR_TEXT, DEFAULT_PLANETARY_CONDITIONS_TEXT_COLOR);
-        setDefault(PLANETARY_CONDITIONS_COLOR_COLD, DEFAULT_PLANETARY_CONDITIONS_COLD_COLOR);
-        setDefault(PLANETARY_CONDITIONS_COLOR_HOT, DEFAULT_PLANETARY_CONDITIONS_HOT_COLOR);
-        setDefault(PLANETARY_CONDITIONS_COLOR_BACKGROUND, DEFAULT_PLANETARY_CONDITIONS_BACKGROUND_COLOR);
         setDefault(PLANETARY_CONDITIONS_SHOW_DEFAULTS, true);
-        setDefault(PLANETARY_CONDITIONS_SHOW_HEADER, true);
         setDefault(PLANETARY_CONDITIONS_SHOW_LABELS, true);
         setDefault(PLANETARY_CONDITIONS_SHOW_VALUES, true);
         setDefault(PLANETARY_CONDITIONS_SHOW_INDICATORS, true);
-        setDefault(PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY, 200);
 
         setDefault(TRACE_OVERLAY_TRANSPARENCY, 64);
         setDefault(TRACE_OVERLAY_SCALE, 100);
@@ -729,8 +655,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(BOARD_MOVE_RUN_COLOR, DEFAULT_YELLOW);
         setDefault(BOARD_MOVE_BACK_COLOR, DEFAULT_YELLOW);
         setDefault(BOARD_MOVE_SPRINT_COLOR, DEFAULT_PINK);
-        setDefault(BOARD_FIRE_SOLUTION_CAN_SEE_COLOR, DEFAULT_CYAN);
-        setDefault(BOARD_FIRE_SOLUTION_NO_SEE_COLOR, DEFAULT_RED);
         setDefault(BOARD_BUILDING_TEXT_COLOR, DEFAULT_GOLD);
         setDefault(BOARD_LOW_FOLIAGE_COLOR, DEFAULT_MAP_BRIGHT_GREEN);
         setDefault(BOARD_TEXT_COLOR, DEFAULT_BLACK);
@@ -771,8 +695,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SHOW_BOMB_DRIFTS, false);
         store.setDefault(SHOW_DEPLOY_ZONES_ARTY_AUTO, false);
 
-        setDefault(UNIT_OVERVIEW_TEXT_SHADOW_COLOR, Color.black);
-        setDefault(UNIT_OVERVIEW_CONDITION_SHADOW_COLOR, Color.darkGray);
 
         setDefault(PLAYERS_REMAINING_TO_SHOW, 3);
         store.setDefault(BUTTONS_PER_ROW, 12);
@@ -789,7 +711,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(FOV_HIGHLIGHT_ALPHA, 40);
         store.setDefault(FOV_DARKEN, true);
         store.setDefault(FOV_DARKEN_ALPHA, 100);
-        store.setDefault(FOV_STRIPES, 35);
         store.setDefault(FOV_GRAYSCALE, false);
         store.setDefault(FOV_SPOTTING_MODE, false);
         store.setDefault(SHOW_OBJECTIVE_OVERLAYS, true);
@@ -858,8 +779,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE, MANUAL);
         // The minimap needs the same defaults: without them both values read 0 (= HIDE) and the minimap is closed
         // again on every phase change, so opening it with Ctrl+M never lasts.
-        store.setDefault(MINI_MAP_AUTO_DISPLAY_REPORT_PHASE, MANUAL);
-        store.setDefault(MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE, MANUAL);
         store.setDefault(SPLIT_PANE_A_DIVIDER_LOCATION, 300);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_1, DEFAULT_HEAT_1_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_2, DEFAULT_HEAT_2_COLOR);
@@ -878,7 +797,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(UNIT_DISPLAY_MEK_ARMOR_MEDIUM_FONT_SIZE, 10);
         store.setDefault(UNIT_DISPLAY_MEK_ARMOR_SMALL_FONT_SIZE, 9);
         store.setDefault(UNIT_DISPLAY_MEK_LARGE_FONT_SIZE, 12);
-        store.setDefault(UNIT_DISPLAY_MEK_MEDIUM_FONT_SIZE, 10);
         setDefault(UNIT_DISPLAY_WEAPON_LIST_HEIGHT, 200);
 
         store.setDefault(UNIT_TOOLTIP_SEEN_BY_RESOLUTION, 3);
@@ -896,18 +814,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(UNIT_TOOLTIP_LIGHT_FG_COLOR, new Color(0x000000));
         setDefault(UNIT_TOOLTIP_BUILDING_FG_COLOR, new Color(0x000000));
         setDefault(UNIT_TOOLTIP_ALT_FG_COLOR, new Color(0xEEE6D9));
-        setDefault(UNIT_TOOLTIP_BLOCK_FG_COLOR, new Color(0xEEE6D9));
         setDefault(UNIT_TOOLTIP_TERRAIN_FG_COLOR, new Color(0x000000));
         setDefault(UNIT_TOOLTIP_BGCOLOR, new Color(0x313131));
         setDefault(UNIT_TOOLTIP_BUILDING_BGCOLOR, new Color(0xCCCC99));
         setDefault(UNIT_TOOLTIP_ALT_BGCOLOR, new Color(0x003333));
-        setDefault(UNIT_TOOLTIP_BLOCK_BGCOLOR, new Color(0x000060));
         setDefault(UNIT_TOOLTIP_TERRAIN_BGCOLOR, new Color(0x8DAF8D));
         setDefault(UNIT_TOOLTIP_HIGHLIGHT_COLOR, new Color(0xB496DC));
         setDefault(UNIT_TOOLTIP_WEAPON_COLOR, new Color(0x9696D2));
         setDefault(UNIT_TOOLTIP_QUIRK_COLOR, new Color(0x64B4B4));
 
-        store.setDefault(ENTITY_OWNER_LABEL_COLOR, true);
         store.setDefault(UNIT_LABEL_BORDER, true);
         store.setDefault(UNIT_LABEL_STYLE, LabelDisplayStyle.NICKNAME_AND_ABBREVIATED.name());
         store.setDefault(NAMEPLATE_MODE, NameplateMode.ALWAYS.name());
@@ -955,14 +870,9 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(RND_ARMY_LAST_UNIT_COUNT, "");
         store.setDefault(RND_ARMY_LAST_TAB, "");
 
-        store.setDefault(MINI_MAP_COLOURS, "defaultminimap.txt");
         store.setDefault(MINI_MAP_ENABLED, true);
-        store.setDefault(MINI_MAP_AUTO_DISPLAY_REPORT_PHASE, 0);
-        store.setDefault(MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
-        store.setDefault(MINI_MAP_SHOW_SENSOR_RANGE, true);
         store.setDefault(MINI_MAP_SHOW_FACING_ARROW, true);
         store.setDefault(MINI_MAP_PAINT_BORDERS, true);
-        store.setDefault(MINI_MAP_MOVE_PATH_PERSISTENCE, 2);
         store.setDefault(GPU_CONTACTS_ENABLED, true);
         store.setDefault(GIF_GAME_SUMMARY_RECORDING, GifRecordingMode.ASK.name());
         // Migrate the pre-0.51.01 boolean GIF setting: an explicit player choice carries over (true -> ALWAYS,
@@ -973,7 +883,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
                         ? GifRecordingMode.ALWAYS.name()
                         : GifRecordingMode.NEVER.name());
         }
-        store.setDefault(SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP, false);
         store.setDefault(MOVE_DISPLAY_TAB_DURING_PHASES, true);
         store.setDefault(FIRE_DISPLAY_TAB_DURING_PHASES, true);
         store.setDefault(MOVE_ENVELOPE, true);
@@ -1013,8 +922,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE, 1);
         store.setDefault(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE, 0);
 
-        store.setDefault(MOUSE_WHEEL_ZOOM, true);
-        store.setDefault(MOUSE_WHEEL_ZOOM_FLIP, true);
 
         store.setDefault(NAG_FOR_CRUSHING_BUILDINGS, true);
         store.setDefault(NAG_FOR_DOOMED_MOVE, true);
@@ -1037,11 +944,9 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(RULER_COLOR_1, DEFAULT_CYAN);
         setDefault(RULER_COLOR_2, DEFAULT_MAGENTA);
 
-        store.setDefault(SCROLL_SENSITIVITY, 3);
         store.setDefault(SHOW_FIELD_OF_FIRE, true);
         store.setDefault(SHOW_SENSOR_RANGE, true);
         store.setDefault(SHOW_MAP_HEX_POPUP, true);
-        store.setDefault(SHOW_MOVE_STEP, true);
         store.setDefault(SHOW_WRECKS, true);
 
         store.setDefault(MASTER_VOLUME, 100);
@@ -1057,7 +962,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(TOOLTIP_DELAY, 1000);
         store.setDefault(TOOLTIP_DISMISS_DELAY, -1);
-        store.setDefault(TOOLTIP_DIST_SUPPRESSION, (int) Math.round(Math.hypot(HexTileset.HEX_W, HexTileset.HEX_H)));
         store.setDefault(SHOW_WPS_IN_TT, true);
         store.setDefault(SHOW_WPS_LOC_IN_TT, true);
         store.setDefault(SHOW_ARMOR_MINI_VIS_TT, true);
@@ -1072,7 +976,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GPU_BOARD_SIZE_WIDTH, 1280);
         store.setDefault(GPU_BOARD_SIZE_HEIGHT, 800);
         store.setDefault(GPU_BOARD_MAXIMIZED, true);
-        store.setDefault(GPU_REPORT_PANEL_WIDTH, 362);
         store.setDefault(PLANETARY_CONDITIONS_POS_X, -1);
         store.setDefault(PLANETARY_CONDITIONS_POS_Y, -1);
 
@@ -1081,18 +984,14 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(RND_MAP_POS_X, 400);
         store.setDefault(RND_MAP_POS_Y, 400);
         store.setDefault(RND_MAP_ADVANCED, false);
-        store.setDefault(BOARD_EDIT_LOAD_SIZE_WIDTH, 400);
-        store.setDefault(BOARD_EDIT_LOAD_SIZE_HEIGHT, 300);
 
         store.setDefault(SHOW_MAP_SHEETS, false);
 
-        store.setDefault(SHOW_UNIT_OVERVIEW, true);
         store.setDefault(DEFAULT_WEAPON_SORT_ORDER, WeaponSortOrder.DEFAULT.name());
         store.setDefault(SENSOR_PREFERENCE_ORDER, joinSensorPreference(SensorFamily.defaultOrder()));
         store.setDefault(SHOW_DAMAGE_LEVEL, true);
         store.setDefault(SHOW_DAMAGE_DECAL, true);
         store.setDefault(SKIN_FILE, "BW - Default.xml");
-        store.setDefault(SOFT_CENTER, false);
         store.setDefault(AUTO_CENTER, true);
         store.setDefault(AUTO_SELECT_NEXT, true);
         store.setDefault(UI_THEME, MegaMekDarkLaf.class.getName());
@@ -1116,7 +1015,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(MY_UNIT_COLOR, DEFAULT_MAP_GREEN);
         setDefault(TEAM_COLORING, true);
 
-        setDefault(SHOW_KEYBINDS_OVERLAY, true);
         setDefault(SHOW_PLANETARY_CONDITIONS_OVERLAY, true);
         setDefault(SHOW_TRACE_OVERLAY, false);
 
@@ -1358,10 +1256,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getInt(UNIT_DISPLAY_MEK_LARGE_FONT_SIZE);
     }
 
-    public int getUnitDisplayMekMediumFontSize() {
-        return getInt(UNIT_DISPLAY_MEK_MEDIUM_FONT_SIZE);
-    }
-
     public Color getUnitTooltipArmorMiniColorIntact() {
         return getColor(UNIT_TOOLTIP_ARMOR_MINI_COLOR_INTACT);
     }
@@ -1421,15 +1315,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getGifGameSummaryRecording() == GifRecordingMode.ALWAYS;
     }
 
-    public boolean showUnitDisplayNamesOnMinimap() {
-        return store.getBoolean(SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getEntityOwnerLabelColor() {
-        return store.getBoolean(ENTITY_OWNER_LABEL_COLOR);
-    }
-
     public boolean getUnitLabelBorder() {
         return store.getBoolean(UNIT_LABEL_BORDER);
     }
@@ -1476,10 +1361,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getFovDarkenAlpha() {
         return store.getInt(FOV_DARKEN_ALPHA);
-    }
-
-    public int getFovStripes() {
-        return store.getInt(FOV_STRIPES);
     }
 
     public boolean getFovGrayscale() {
@@ -1559,25 +1440,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getInt(RND_ARMY_SPLIT_POS);
     }
 
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public String getMinimapColours() {
-        return store.getString(MINI_MAP_COLOURS);
-    }
-
     public boolean getMinimapEnabled() {
         return store.getBoolean(MINI_MAP_ENABLED);
     }
 
     public boolean getGpuContactsEnabled() {
         return store.getBoolean(GPU_CONTACTS_ENABLED);
-    }
-
-    public int getMinimapAutoDisplayReportPhase() {
-        return store.getInt(MINI_MAP_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
-    public int getMinimapAutoDisplayNonReportPhase() {
-        return store.getInt(MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE);
     }
 
     public boolean getFireDisplayTabDuringFiringPhases() {
@@ -1588,24 +1456,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getBoolean(MOVE_DISPLAY_TAB_DURING_PHASES);
     }
 
-    public int getMinimapPosX() {
-        return store.getInt(MINI_MAP_POS_X);
-    }
-
-    public int getMinimapPosY() {
-        return store.getInt(MINI_MAP_POS_Y);
-    }
-
     public int getMinimapZoom() {
         return store.getInt(MINI_MAP_ZOOM);
     }
 
     public int getMinimapHeightDisplayMode() {
         return store.getInt(MINI_MAP_HEIGHT_DISPLAY_MODE);
-    }
-
-    public int getMinimapSymbolsDisplayMode() {
-        return store.getInt(MINI_MAP_SYMBOLS_DISPLAY_MODE);
     }
 
     public boolean getMiniReportEnabled() {
@@ -1684,14 +1540,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getInt(MINIMUM_SIZE_WIDTH);
     }
 
-    public int getBoardEditLoadHeight() {
-        return store.getInt(BOARD_EDIT_LOAD_SIZE_HEIGHT);
-    }
-
-    public int getBoardEditLoadWidth() {
-        return store.getInt(BOARD_EDIT_LOAD_SIZE_WIDTH);
-    }
-
     public int getMiniReportPosX() {
         return store.getInt(MINI_REPORT_POS_X);
     }
@@ -1706,14 +1554,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getMiniReportSizeWidth() {
         return store.getInt(MINI_REPORT_SIZE_WIDTH);
-    }
-
-    public boolean getMouseWheelZoom() {
-        return store.getBoolean(MOUSE_WHEEL_ZOOM);
-    }
-
-    public boolean getMouseWheelZoomFlip() {
-        return store.getBoolean(MOUSE_WHEEL_ZOOM_FLIP);
     }
 
     public boolean getNagForDoomedMove() {
@@ -1815,11 +1655,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getColor(RULER_COLOR_2);
     }
 
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public int getScrollSensitivity() {
-        return store.getInt(SCROLL_SENSITIVITY);
-    }
-
     public boolean getShowFieldOfFire() {
         return store.getBoolean(SHOW_FIELD_OF_FIRE);
     }
@@ -1846,10 +1681,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getShowPilotPortraitTT() {
         return store.getBoolean(SHOW_PILOT_PORTRAIT_TT);
-    }
-
-    public boolean getShowMoveStep() {
-        return store.getBoolean(SHOW_MOVE_STEP);
     }
 
     public boolean getShowWrecks() {
@@ -1898,10 +1729,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getTooltipDismissDelay() {
         return store.getInt(TOOLTIP_DISMISS_DELAY);
-    }
-
-    public int getTooltipDistSuppression() {
-        return store.getInt(TOOLTIP_DIST_SUPPRESSION);
     }
 
     public float getGUIScale() {
@@ -2053,10 +1880,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getBoolean(GPU_BOARD_MAXIMIZED);
     }
 
-    public int getGpuReportPanelWidth() {
-        return store.getInt(GPU_REPORT_PANEL_WIDTH);
-    }
-
     public int getPlanetaryConditionsPosX() {
         return store.getInt(PLANETARY_CONDITIONS_POS_X);
     }
@@ -2075,10 +1898,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getShowMapSheets() {
         return store.getBoolean(SHOW_MAP_SHEETS);
-    }
-
-    public boolean getShowUnitOverview() {
-        return store.getBoolean(SHOW_UNIT_OVERVIEW);
     }
 
     public String getSkinFile() {
@@ -2177,18 +1996,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getFloat(AS_CARD_SIZE);
     }
 
-    public int getMoveStepDelay() {
-        return store.getInt(ADVANCED_MOVE_STEP_DELAY);
-    }
-
-    public boolean getShowFPS() {
-        return store.getBoolean(ADVANCED_SHOW_FPS);
-    }
-
-    public boolean getSoftCenter() {
-        return store.getBoolean(SOFT_CENTER);
-    }
-
     public boolean getAutoCenter() {
         return store.getBoolean(AUTO_CENTER);
     }
@@ -2219,18 +2026,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
      */
     public int getLobbyBackupsToKeep() {
         return store.getInt(ADVANCED_LOBBY_BACKUPS_TO_KEEP);
-    }
-
-    public boolean getChatbox2AutoSlideDown() {
-        return store.getBoolean(ADVANCED_CHATBOX2_AUTO_SLIDE_DOWN);
-    }
-
-    public Color getChatbox2BackColor() {
-        return getColor(ADVANCED_CHATBOX2_BACKCOLOR);
-    }
-
-    public int getChatBox2Transparency() {
-        return store.getInt(ADVANCED_CHATBOX2_TRANSPARENCY);
     }
 
     public void setDefaultWeaponSortOrder(final WeaponSortOrder weaponSortOrder) {
@@ -2507,10 +2302,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(UNIT_DISPLAY_MEK_LARGE_FONT_SIZE, i);
     }
 
-    public void setUnitDisplayMekMediumFontSize(int i) {
-        store.setValue(UNIT_DISPLAY_MEK_MEDIUM_FONT_SIZE, i);
-    }
-
     public void setUnitTooltipArmorMiniColorIntact(Color c) {
         store.setValue(UNIT_TOOLTIP_ARMOR_MINI_COLOR_INTACT, getColorString(c));
     }
@@ -2555,15 +2346,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     @Deprecated(since = "0.51.01", forRemoval = true)
     public void setGifGameSummaryMinimap(boolean state) {
         setGifGameSummaryRecording(state ? GifRecordingMode.ALWAYS : GifRecordingMode.NEVER);
-    }
-
-    public void setShowUnitDisplayNamesOnMinimap(boolean state) {
-        store.setValue(SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP, state);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setEntityOwnerLabelColor(boolean i) {
-        store.setValue(ENTITY_OWNER_LABEL_COLOR, i);
     }
 
     public void setUnitLabelBorder(boolean i) {
@@ -2612,10 +2394,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setFovDarkenAlpha(int i) {
         store.setValue(FOV_DARKEN_ALPHA, i);
-    }
-
-    public void setFovStripes(int i) {
-        store.setValue(FOV_STRIPES, i);
     }
 
     public void setFovGrayscale(boolean state) {
@@ -2720,32 +2498,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
     }
 
 
-    public void setMinimapPosX(int i) {
-        store.setValue(MINI_MAP_POS_X, i);
-    }
-
-    public void setMinimapPosY(int i) {
-        store.setValue(MINI_MAP_POS_Y, i);
-    }
-
     public void setMinimapZoom(int zoom) {
         store.setValue(MINI_MAP_ZOOM, zoom);
     }
 
     public void setMinimapHeightDisplayMode(int zoom) {
         store.setValue(MINI_MAP_HEIGHT_DISPLAY_MODE, zoom);
-    }
-
-    public void setMiniMapSymbolsDisplayMode(int i) {
-        store.setValue(MINI_MAP_SYMBOLS_DISPLAY_MODE, i);
-    }
-
-    public void setMinimapAutoDisplayReportPhase(int i) {
-        store.setValue(MINI_MAP_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setMinimapAutoDisplayNonReportPhase(int i) {
-        store.setValue(MINI_MAP_AUTO_DISPLAY_NON_REPORT_PHASE, i);
     }
 
     public void setFireDisplayTabDuringFiringPhases(boolean b) {
@@ -2849,14 +2607,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE, i);
     }
 
-    public void setBoardEditLoadHeight(int i) {
-        store.setValue(BOARD_EDIT_LOAD_SIZE_HEIGHT, i);
-    }
-
-    public void setBoardEditLoadWidth(int i) {
-        store.setValue(BOARD_EDIT_LOAD_SIZE_WIDTH, i);
-    }
-
     public void setTeamColoring(boolean bt) {
         store.setValue(TEAM_COLORING, bt);
     }
@@ -2867,14 +2617,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setMiniReportSizeWidth(int i) {
         store.setValue(MINI_REPORT_SIZE_WIDTH, i);
-    }
-
-    public void setMouseWheelZoom(boolean b) {
-        store.setValue(MOUSE_WHEEL_ZOOM, b);
-    }
-
-    public void setMouseWheelZoomFlip(boolean b) {
-        store.setValue(MOUSE_WHEEL_ZOOM_FLIP, b);
     }
 
     public void setNagForCrushingBuildings(boolean b) {
@@ -2937,11 +2679,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(NAG_FOR_WIGE_LANDING, b);
     }
 
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setScrollSensitivity(int i) {
-        store.setValue(SCROLL_SENSITIVITY, i);
-    }
-
     public void setShowFieldOfFire(boolean state) {
         store.setValue(SHOW_FIELD_OF_FIRE, state);
     }
@@ -2969,10 +2706,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setShowPilotPortraitTT(boolean state) {
         store.setValue(SHOW_PILOT_PORTRAIT_TT, state);
-    }
-
-    public void setShowMoveStep(boolean state) {
-        store.setValue(SHOW_MOVE_STEP, state);
     }
 
     public void setShowWrecks(boolean state) {
@@ -3046,10 +2779,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     }
 
 
-    public void setTooltipDistSuppression(int i) {
-        store.setValue(TOOLTIP_DIST_SUPPRESSION, i);
-    }
-
     public void setWindowPosX(int i) {
         store.setValue(WINDOW_POS_X, i);
     }
@@ -3086,10 +2815,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(GPU_BOARD_MAXIMIZED, maximized);
     }
 
-    public void setGpuReportPanelWidth(int width) {
-        store.setValue(GPU_REPORT_PANEL_WIDTH, width);
-    }
-
     public void setPlanetaryConditionsPosX(int x) {
         store.setValue(PLANETARY_CONDITIONS_POS_X, x);
     }
@@ -3110,10 +2835,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setShowMapSheets(boolean b) {
         store.setValue(SHOW_MAP_SHEETS, b);
-    }
-
-    public void setShowUnitOverview(boolean b) {
-        store.setValue(SHOW_UNIT_OVERVIEW, b);
     }
 
     public void setShowDamageLevel(boolean b) {
@@ -3150,10 +2871,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setColorBlindPalette(boolean colorBlind) {
         store.setValue(COLOR_BLIND_PALETTE, colorBlind);
-    }
-
-    public void setSoftCenter(boolean b) {
-        store.setValue(SOFT_CENTER, b);
     }
 
     public void setAutoCenter(boolean b) {
@@ -3414,22 +3131,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(BOARD_MOVE_FONT_TYPE, s);
     }
 
-    public Color getFireSolnCanSeeColor() {
-        return getColor(BOARD_FIRE_SOLUTION_CAN_SEE_COLOR);
-    }
-
-    public void setFireSolutionCanSeeColor(Color color) {
-        store.setValue(BOARD_FIRE_SOLUTION_CAN_SEE_COLOR, getColorString(color));
-    }
-
-    public Color getFireSolnNoSeeColor() {
-        return getColor(BOARD_FIRE_SOLUTION_NO_SEE_COLOR);
-    }
-
-    public void setFireSolutionNoSeeColor(Color color) {
-        store.setValue(BOARD_FIRE_SOLUTION_NO_SEE_COLOR, getColorString(color));
-    }
-
     public Color getBuildingTextColor() {
         return getColor(BOARD_BUILDING_TEXT_COLOR);
     }
@@ -3678,22 +3379,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(BOARD_TMM_PIP_MODE, i);
     }
 
-    public Color getUnitOverviewTextShadowColor() {
-        return getColor(UNIT_OVERVIEW_TEXT_SHADOW_COLOR);
-    }
-
-    public void setUnitOverviewTextShadowColor(Color color) {
-        store.setValue(UNIT_OVERVIEW_TEXT_SHADOW_COLOR, getColorString(color));
-    }
-
-    public Color getUnitOverviewConditionShadowColor() {
-        return getColor(UNIT_OVERVIEW_CONDITION_SHADOW_COLOR);
-    }
-
-    public void setUnitOverviewConditionShadowColor(Color color) {
-        store.setValue(UNIT_OVERVIEW_CONDITION_SHADOW_COLOR, getColorString(color));
-    }
-
     public int getButtonsPerRow() {
         return getInt(BUTTONS_PER_ROW);
     }
@@ -3770,10 +3455,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getColor(UNIT_TOOLTIP_ALT_FG_COLOR);
     }
 
-    public Color getUnitToolTipBlockFGColor() {
-        return getColor(UNIT_TOOLTIP_BLOCK_FG_COLOR);
-    }
-
     public Color getUnitToolTipTerrainFGColor() {
         return getColor(UNIT_TOOLTIP_TERRAIN_FG_COLOR);
     }
@@ -3788,10 +3469,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public Color getUnitToolTipAltBGColor() {
         return getColor(UNIT_TOOLTIP_ALT_BGCOLOR);
-    }
-
-    public Color getUnitToolTipBlockBGColor() {
-        return getColor(UNIT_TOOLTIP_BLOCK_BGCOLOR);
     }
 
     public Color getUnitToolTipTerrainBGColor() {
@@ -3877,32 +3554,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(MINI_REPORT_FONT_TYPE, font);
     }
 
-    public Color getPlanetaryConditionsColorTitle() {
-        return getColor(PLANETARY_CONDITIONS_COLOR_TITLE);
-    }
-
     public Color getPlanetaryConditionsColorText() {
         return getColor(PLANETARY_CONDITIONS_COLOR_TEXT);
     }
 
-    public Color getPlanetaryConditionsColorCold() {
-        return getColor(PLANETARY_CONDITIONS_COLOR_COLD);
-    }
-
-    public Color getPlanetaryConditionsColorHot() {
-        return getColor(PLANETARY_CONDITIONS_COLOR_HOT);
-    }
-
-    public Color getPlanetaryConditionsColorBackground() {
-        return getColor(PLANETARY_CONDITIONS_COLOR_BACKGROUND);
-    }
-
     public Boolean getPlanetaryConditionsShowDefaults() {
         return getBoolean(PLANETARY_CONDITIONS_SHOW_DEFAULTS);
-    }
-
-    public Boolean getPlanetaryConditionsShowHeader() {
-        return getBoolean(PLANETARY_CONDITIONS_SHOW_HEADER);
     }
 
     public Boolean getPlanetaryConditionsShowLabels() {
@@ -3917,36 +3574,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getBoolean(PLANETARY_CONDITIONS_SHOW_INDICATORS);
     }
 
-    public int getPlanetaryConditionsBackgroundTransparency() {
-        return getInt(PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY);
-    }
-
-    public void setPlanetaryConditionsColorTitle(Color color) {
-        store.setValue(PLANETARY_CONDITIONS_COLOR_TITLE, getColorString(color));
-    }
-
     public void setPlanetaryConditionsColorText(Color color) {
         store.setValue(PLANETARY_CONDITIONS_COLOR_TEXT, getColorString(color));
     }
 
-    public void setPlanetaryConditionsColorCold(Color color) {
-        store.setValue(PLANETARY_CONDITIONS_COLOR_COLD, getColorString(color));
-    }
-
-    public void setPlanetaryConditionsColorHot(Color color) {
-        store.setValue(PLANETARY_CONDITIONS_COLOR_HOT, getColorString(color));
-    }
-
-    public void setPlanetaryConditionsColorBackground(Color color) {
-        store.setValue(PLANETARY_CONDITIONS_COLOR_BACKGROUND, getColorString(color));
-    }
-
     public void setPlanetaryConditionsShowDefaults(Boolean state) {
         store.setValue(PLANETARY_CONDITIONS_SHOW_DEFAULTS, state);
-    }
-
-    public void setPlanetaryConditionsShowHeader(Boolean state) {
-        store.setValue(PLANETARY_CONDITIONS_SHOW_HEADER, state);
     }
 
     public void setPlanetaryConditionsShowLabels(Boolean state) {
@@ -3959,10 +3592,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setPlanetaryConditionsShowIndicators(Boolean state) {
         store.setValue(PLANETARY_CONDITIONS_SHOW_INDICATORS, state);
-    }
-
-    public void setPlanetaryConditionsBackgroundTransparency(int i) {
-        store.setValue(PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY, i);
     }
 
     public int getTraceOverlayTransparency() {
@@ -4098,10 +3727,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(UNIT_TOOLTIP_ALT_FG_COLOR, getColorString(c));
     }
 
-    public void setUnitTooltipBlockFGColor(Color c) {
-        store.setValue(UNIT_TOOLTIP_BLOCK_FG_COLOR, getColorString(c));
-    }
-
     public void setUnitTooltipTerrainFGColor(Color c) {
         store.setValue(UNIT_TOOLTIP_TERRAIN_FG_COLOR, getColorString(c));
     }
@@ -4116,10 +3741,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUnitTooltipAltBGColor(Color c) {
         store.setValue(UNIT_TOOLTIP_ALT_BGCOLOR, getColorString(c));
-    }
-
-    public void setUnitTooltipBlockBGColor(Color c) {
-        store.setValue(UNIT_TOOLTIP_BLOCK_BGCOLOR, getColorString(c));
     }
 
     public void setUnitTooltipTerrainBGColor(Color c) {
@@ -4185,37 +3806,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getBotCommandsPosY() {
         return getInt(BOT_COMMANDS_POS_Y);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setBotCommandsHeight(int i) {
-        store.setValue(BOT_COMMANDS_HEIGHT, i);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public int getBotCommandsHeight() {
-        return getInt(BOT_COMMANDS_HEIGHT);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setBotCommandsWidth(int i) {
-        store.setValue(BOT_COMMANDS_WIDTH, i);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public int getBotCommandsWidth() {
-        return getInt(BOT_COMMANDS_WIDTH);
-    }
-
-    /**
-     * Toggles the state of the user preference for the Keybinds overlay.
-     */
-    public void toggleKeybindsOverlay() {
-        store.setValue(SHOW_KEYBINDS_OVERLAY, !getBoolean(SHOW_KEYBINDS_OVERLAY));
-    }
-
-    public boolean getShowKeybindsOverlay() {
-        return getBoolean(SHOW_KEYBINDS_OVERLAY);
     }
 
     public void togglePlanetaryConditionsOverlay() {
@@ -4371,18 +3961,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
     }
 
     public boolean getDrawFacingArrowsOnMiniMap() {
-        return getBoolean(MINI_MAP_SHOW_SENSOR_RANGE);
-    }
-
-    public boolean getDrawSensorRangeOnMiniMap() {
         return getBoolean(MINI_MAP_SHOW_FACING_ARROW);
     }
 
     public void setDrawFacingArrowsOnMiniMap(boolean state) {
-        store.setValue(MINI_MAP_SHOW_SENSOR_RANGE, state);
-    }
-
-    public void setDrawSensorRangeOnMiniMap(boolean state) {
         store.setValue(MINI_MAP_SHOW_FACING_ARROW, state);
     }
 
@@ -4392,14 +3974,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setPaintBorders(boolean state) {
         store.setValue(MINI_MAP_PAINT_BORDERS, state);
-    }
-
-    public int getMovePathPersistenceOnMiniMap() {
-        return getInt(MINI_MAP_MOVE_PATH_PERSISTENCE);
-    }
-
-    public void setMovePathPersistenceOnMiniMap(int rounds) {
-        store.setValue(MINI_MAP_MOVE_PATH_PERSISTENCE, rounds);
     }
 
     /**

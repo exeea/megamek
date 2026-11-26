@@ -262,8 +262,8 @@ class CommonSettingsDialogTest {
         JSpinner buttons = CommonSettingsDialog.createIntegerSpinner(12, 1, 1);
         JLabel playersLabel = new JLabel(Messages.getString("CommonSettingsDialog.playersRemainingToShow"));
         JSpinner players = CommonSettingsDialog.createIntegerSpinner(3, 0, 1);
-        JCheckBox zoom = new JCheckBox(Messages.getString("CommonSettingsDialog.mouseWheelZoom"));
-        JCheckBox flip = new JCheckBox(Messages.getString("CommonSettingsDialog.mouseWheelZoomFlip"));
+        JCheckBox zoom = new JCheckBox("Mouse wheel zooms map.");
+        JCheckBox flip = new JCheckBox("Flip mouse wheel zoom direction.");
         JCheckBox summary = new JCheckBox("Save game summary image of board");
         JLabel pathfinderLabel = new JLabel(Messages.getString("CommonSettingsDialog.pathFiderTimeLimit"));
         JSpinner pathfinder = CommonSettingsDialog.createIntegerSpinner(500, 1, 1);
@@ -346,8 +346,7 @@ class CommonSettingsDialogTest {
             "CommonSettingsDialog.nagForOverheat",
             "CommonSettingsDialog.nagForDishonor",
             "CommonSettingsDialog.nagForOddSizedBoard",
-            "CommonSettingsDialog.autoDeclareSearchlight",
-            "CommonSettingsDialog.useSoftCenter");
+            "CommonSettingsDialog.autoDeclareSearchlight");
 
         for (String key : keys) {
             JCheckBox checkBox = new JCheckBox(Messages.getString(key));
@@ -360,7 +359,7 @@ class CommonSettingsDialogTest {
 
     @Test
     void laysOutGameBoardAppearanceSectionsOnSharedBalancedTracks() {
-        JCheckBox animate = new JCheckBox(Messages.getString("CommonSettingsDialog.animateMove"));
+        JCheckBox animate = new JCheckBox("Animate movement.");
         JCheckBox wrecks = new JCheckBox(Messages.getString("CommonSettingsDialog.showWrecks"));
         JCheckBox quality = new JCheckBox(Messages.getString("CommonSettingsDialog.highQualityGraphics"));
         JCheckBox performance = new JCheckBox(Messages.getString("CommonSettingsDialog.highPerformanceGraphics"));
@@ -489,10 +488,8 @@ class CommonSettingsDialogTest {
         JSpinner outsidePercent = new JSpinner(new javax.swing.SpinnerNumberModel(0, 0, 100, 1));
         JPanel outsideOpacityControl = CommonSettingsDialog.createGameBoardFovOpacityControl(
                   outsideOpacity, outsidePercent);
-        JLabel stripesLabel = new JLabel(Messages.getString("TacticalOverlaySettingsDialog.FovStripes"));
-        JSpinner stripes = new JSpinner(new javax.swing.SpinnerNumberModel(35, 0, 50, 1));
         SettingsFormPanel outsideGrid = CommonSettingsDialog.createGameBoardFovOutsideGrid(
-                  outsideEnabled, grayscale, outsideOpacityLabel, outsideOpacityControl, stripesLabel, stripes);
+                  outsideEnabled, grayscale, outsideOpacityLabel, outsideOpacityControl);
 
         JPanel insideSection = settingsGroup(List.of(row(insideGrid)));
         JPanel outsideSection = settingsGroup(List.of(row(outsideGrid)));
@@ -504,12 +501,11 @@ class CommonSettingsDialogTest {
         SettingsFormPanel outsideOptions = (SettingsFormPanel) outsideGrid.getComponent(0);
         SettingsFormPanel outsideFields = (SettingsFormPanel) outsideGrid.getComponent(1);
         JPanel outsideOpacityField = (JPanel) outsideFields.getComponent(0);
-        JPanel stripesField = (JPanel) outsideFields.getComponent(1);
+        Component outsideFieldFiller = outsideFields.getComponent(1);
 
         assertSame(insideOpacity, insideOpacityLabel.getLabelFor());
         assertSame(ranges, rangesLabel.getLabelFor());
         assertSame(outsideOpacity, outsideOpacityLabel.getLabelFor());
-        assertSame(stripes, stripesLabel.getLabelFor());
         assertEquals(16, insidePercent.getValue());
         assertEquals(39, outsidePercent.getValue());
         assertFalse(insideOpacity.getPaintTicks());
@@ -519,7 +515,7 @@ class CommonSettingsDialogTest {
                     List.of(insideOpacityField, insideFieldFiller)));
                 assertAlignedBalancedRows(outsideGrid, List.of(
                     List.of(outsideEnabled, grayscale),
-                    List.of(outsideOpacityField, stripesField)));
+                    List.of(outsideOpacityField, outsideFieldFiller)));
             assertSame(outsideEnabled.getParent(), outsideOptions);
             assertEquals(insideFields.getX(), rangesField.getX());
             assertEquals(insideFields.getWidth(), rangesField.getWidth());
@@ -553,8 +549,7 @@ class CommonSettingsDialogTest {
         List<String> labelKeys = List.of(
             "TacticalOverlaySettingsDialog.FovHighlightAlpha",
             "TacticalOverlaySettingsDialog.FovHighlightRanges",
-            "TacticalOverlaySettingsDialog.FovDarkenAlpha",
-            "TacticalOverlaySettingsDialog.FovStripes");
+            "TacticalOverlaySettingsDialog.FovDarkenAlpha");
 
         for (String key : checkBoxKeys) {
             JCheckBox checkBox = new JCheckBox(Messages.getString(key));
@@ -574,7 +569,7 @@ class CommonSettingsDialogTest {
         JSpinner popup = CommonSettingsDialog.createTooltipIntegerSpinner(1000, 0, 100);
         JLabel dismissLabel = new JLabel(Messages.getString("CommonSettingsDialog.tooltipDismissDelay"));
         JSpinner dismiss = CommonSettingsDialog.createTooltipIntegerSpinner(-1, -1, 1);
-        JLabel suppressionLabel = new JLabel(Messages.getString("CommonSettingsDialog.tooltipDistSuppression"));
+        JLabel suppressionLabel = new JLabel("Cursor suppression distance (px)");
         JSpinner suppression = CommonSettingsDialog.createTooltipIntegerSpinner(60, 0, 1);
         JLabel fontLabel = new JLabel(Messages.getString("CommonSettingsDialog.unitTooltipFontSizeMod"));
         JComboBox<String> font = new JComboBox<>(new String[] { "small", "medium", "large" });
@@ -684,7 +679,6 @@ class CommonSettingsDialogTest {
         List<String> labelKeys = List.of(
             "CommonSettingsDialog.tooltipDelay",
             "CommonSettingsDialog.tooltipDismissDelay",
-            "CommonSettingsDialog.tooltipDistSuppression",
             "CommonSettingsDialog.unitTooltipFontSizeMod",
             "CommonSettingsDialog.armorMiniArmorChar",
             "CommonSettingsDialog.armorMiniCapArmorChar",
@@ -741,8 +735,7 @@ class CommonSettingsDialogTest {
         JLabel informationLargeLabel = new JLabel(Messages.getString(
             "CommonSettingsDialog.unitDisplayMekLargeFontSize"));
         JSpinner informationLarge = CommonSettingsDialog.createIntegerSpinner(12, 1, 1);
-        JLabel informationMediumLabel = new JLabel(Messages.getString(
-            "CommonSettingsDialog.unitDisplayMekMediumFontSize"));
+        JLabel informationMediumLabel = new JLabel("Unit information: medium text");
         JSpinner informationMedium = CommonSettingsDialog.createIntegerSpinner(10, 1, 1);
         SettingsFormPanel fontsGrid = CommonSettingsDialog.createGameBoardFieldGrid(
             "TestUnitDisplayFontsGrid",
@@ -918,30 +911,13 @@ class CommonSettingsDialogTest {
 
     @Test
     void laysOutOverlaySectionsOnBalancedTracksWithoutSliderLabels() {
-        ColourSelectorButton unitShadow = new ColourSelectorButton("Unit name shadow color");
-        ColourSelectorButton conditionShadow = new ColourSelectorButton("Condition shadow color");
-        SettingsFormPanel overviewGrid = CommonSettingsDialog.createOverlayOverviewGrid(
-                  unitShadow, conditionShadow);
-
-        ColourSelectorButton title = new ColourSelectorButton("Title color");
         ColourSelectorButton text = new ColourSelectorButton("Text color");
-        ColourSelectorButton background = new ColourSelectorButton("Background color");
-        ColourSelectorButton cold = new ColourSelectorButton("Cold indicator color");
-        ColourSelectorButton hot = new ColourSelectorButton("Hot indicator color");
         JCheckBox defaults = new JCheckBox("Show default conditions");
-        JCheckBox header = new JCheckBox("Show header");
         JCheckBox labels = new JCheckBox("Show labels");
         JCheckBox values = new JCheckBox("Show values");
         JCheckBox indicators = new JCheckBox("Show indicators");
-        JLabel backgroundOpacityLabel = new JLabel("Background opacity");
-        JSlider backgroundOpacity = new JSlider(0, 255, 128);
-        JSpinner backgroundPercentage = new JSpinner(
-            new javax.swing.SpinnerNumberModel(0, 0, 100, 1));
-        JPanel backgroundOpacityControl = CommonSettingsDialog.createGameBoardFovOpacityControl(
-                  backgroundOpacity, backgroundPercentage);
         SettingsFormPanel planetaryGrid = CommonSettingsDialog.createOverlayPlanetaryGrid(
-                  title, text, background, cold, hot, defaults, header, labels, values, indicators,
-                  backgroundOpacityLabel, backgroundOpacity, backgroundOpacityControl);
+                  text, defaults, labels, values, indicators);
 
         JCheckBox toasts = new JCheckBox("Show board toast notifications");
         JCheckBox reportEvents = new JCheckBox("Show round report events as toasts");
@@ -984,20 +960,17 @@ class CommonSettingsDialogTest {
                   horizontalLabel, horizontal, horizontalControl,
                   verticalLabel, vertical, verticalControl, imageLabel, image, imageControl);
 
-        JPanel overviewSection = settingsGroup(List.of(row(overviewGrid)));
         JPanel planetarySection = settingsGroup(List.of(row(planetaryGrid)));
         JPanel toastSection = settingsGroup(List.of(row(toastGrid)));
         JPanel traceSection = settingsGroup(List.of(row(traceGrid)));
         CommonSettingsPane pane = createSettingsPane(
-                  "overlays", overviewSection, planetarySection, toastSection, traceSection);
-        Component planetaryColorFiller = planetaryGrid.getComponent(5);
-        Component planetaryOptionFiller = planetaryGrid.getComponent(11);
+                  "overlays", planetarySection, toastSection, traceSection);
+        Component planetaryColorFiller = planetaryGrid.getComponent(1);
         JPanel opacityField = (JPanel) traceGrid.getComponent(0);
         JPanel scaleField = (JPanel) traceGrid.getComponent(1);
         JPanel horizontalField = (JPanel) traceGrid.getComponent(2);
         JPanel verticalField = (JPanel) traceGrid.getComponent(3);
 
-        assertSame(backgroundOpacity, backgroundOpacityLabel.getLabelFor());
         assertSame(duration, durationLabel.getLabelFor());
         assertSame(gap, gapLabel.getLabelFor());
         assertSame(opacity, opacityLabel.getLabelFor());
@@ -1005,41 +978,33 @@ class CommonSettingsDialogTest {
         assertSame(horizontal, horizontalLabel.getLabelFor());
         assertSame(vertical, verticalLabel.getLabelFor());
         assertSame(image, imageLabel.getLabelFor());
-        assertEquals(50, backgroundPercentage.getValue());
         assertEquals(25, opacityPercentage.getValue());
-        int sliderValueWidth = backgroundPercentage.getPreferredSize().width;
-        for (JSpinner spinner : List.of(
-                                    opacityPercentage, scalePercentage, horizontalPixels, verticalPixels)) {
+        int sliderValueWidth = opacityPercentage.getPreferredSize().width;
+        for (JSpinner spinner : List.of(scalePercentage, horizontalPixels, verticalPixels)) {
             assertEquals(sliderValueWidth, spinner.getPreferredSize().width);
         }
-        for (JSlider slider : List.of(backgroundOpacity, opacity, scale, horizontal, vertical)) {
+        for (JSlider slider : List.of(opacity, scale, horizontal, vertical)) {
             assertFalse(slider.getPaintTicks());
             assertFalse(slider.getPaintLabels());
         }
 
         assertAtConstrainedStandardAndWideWidths(pane,
-                  List.of(overviewSection, planetarySection, toastSection, traceSection), laidOutPane -> {
-                    assertAlignedBalancedRows(overviewGrid, List.of(
-                        List.of(unitShadow, conditionShadow)));
+                  List.of(planetarySection, toastSection, traceSection), laidOutPane -> {
                     assertAlignedBalancedRows(planetaryGrid, List.of(
-                        List.of(title, text), List.of(background, cold), List.of(hot, planetaryColorFiller),
-                        List.of(defaults, header), List.of(labels, values),
-                        List.of(indicators, planetaryOptionFiller),
-                        List.of(backgroundOpacityLabel, backgroundOpacityControl)));
+                        List.of(text, planetaryColorFiller), List.of(defaults, labels),
+                        List.of(values, indicators)));
                     assertAlignedBalancedRows(toastGrid, List.of(
                         List.of(toasts, reportEvents), List.of(durationLabel, duration),
                         List.of(gapLabel, gap)));
                     assertAlignedBalancedRows(traceGrid, List.of(
                         List.of(opacityField, scaleField), List.of(horizontalField, verticalField),
                         List.of(imageLabel, imageControl)));
-                assertEquals(overviewGrid.getWidth(), planetaryGrid.getWidth());
                 assertEquals(planetaryGrid.getWidth(), toastGrid.getWidth());
                 assertEquals(toastGrid.getWidth(), traceGrid.getWidth());
                 assertTrue(scale.getWidth() >= UIUtil.scaleForGUI(80));
                 assertTrue(horizontal.getWidth() >= UIUtil.scaleForGUI(80));
-                for (JSpinner spinner : List.of(
-                                                opacityPercentage, scalePercentage, horizontalPixels, verticalPixels)) {
-                    assertEquals(backgroundPercentage.getWidth(), spinner.getWidth());
+                for (JSpinner spinner : List.of(scalePercentage, horizontalPixels, verticalPixels)) {
+                    assertEquals(opacityPercentage.getWidth(), spinner.getWidth());
                 }
             });
     }
@@ -1073,7 +1038,7 @@ class CommonSettingsDialogTest {
         List<List<Component>> phaseControls = new ArrayList<>();
         List<JPanel> sections = new ArrayList<>();
         for (String name : List.of(
-                                    "UnitDisplay", "MiniMap", "MiniReport", "PlayerList", "ForceDisplay", "BotCommands")) {
+                                    "UnitDisplay", "MiniReport", "PlayerList", "ForceDisplay", "BotCommands")) {
             JLabel reportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
             JComboBox<String> reportControl = new JComboBox<>(new String[] { "Hide", "Show", "Manual" });
             JLabel nonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
@@ -1138,63 +1103,53 @@ class CommonSettingsDialogTest {
     }
 
     @Test
-    void laysOutAdvancedOptionsAsThreeSemanticBalancedSections() {
-        ColourSelectorButton backgroundColor = new ColourSelectorButton("Background color");
-        backgroundColor.setColour(Color.WHITE);
-        int initializedColorButtonHeight = backgroundColor.getPreferredSize().height;
-        JCheckBox autoSlide = new JCheckBox("Hide chat when inactive");
-        JLabel opacityLabel = new JLabel("Background opacity");
+    void laysOutAdvancedOptionsAsTwoSemanticBalancedSections() {
+        JLabel repeatDelayLabel = new JLabel("Repeat delay (milliseconds)");
+        JSpinner repeatDelay = CommonSettingsDialog.createBoundedIntegerSpinner(0, 0, Integer.MAX_VALUE, 10);
+        JLabel repeatRateLabel = new JLabel("Repeat rate (per second)");
+        JSpinner repeatRate = CommonSettingsDialog.createBoundedIntegerSpinner(20, 0, 100, 1);
+        SettingsFormPanel timingGrid = CommonSettingsDialog.createAdvancedTimingGrid(
+              repeatDelayLabel, repeatDelay, repeatRateLabel, repeatRate);
+
+        JCheckBox skipSavePrompt = new JCheckBox("Skip save reminder when leaving");
+        JCheckBox saveLobby = new JCheckBox("Save lobby backup when game starts");
+        SettingsFormPanel safetyGrid = CommonSettingsDialog.createAdvancedSafetyGrid(skipSavePrompt, saveLobby);
+
+        JPanel timingSection = settingsGroup(List.of(row(timingGrid)));
+        JPanel safetySection = settingsGroup(List.of(row(safetyGrid)));
+        CommonSettingsPane pane = createSettingsPane("advanced", timingSection, safetySection);
+
+        assertSame(repeatDelay, repeatDelayLabel.getLabelFor());
+        assertSame(repeatRate, repeatRateLabel.getLabelFor());
+        assertAtConstrainedStandardAndWideWidths(pane,
+              List.of(timingSection, safetySection), laidOutPane -> {
+                assertAlignedBalancedRows(timingGrid, List.of(
+                    List.of(repeatDelayLabel, repeatDelay), List.of(repeatRateLabel, repeatRate)));
+                assertAlignedBalancedRows(safetyGrid, List.of(List.of(skipSavePrompt, saveLobby)));
+                assertEquals(timingGrid.getWidth(), safetyGrid.getWidth());
+            });
+    }
+
+    @Test
+    void colourButtonsKeepTheirHeightAndOpacityControlsShowThePercentage() {
+        ColourSelectorButton colour = new ColourSelectorButton("Background color");
+        colour.setColour(Color.WHITE);
+        int initializedColorButtonHeight = colour.getPreferredSize().height;
         JSlider opacity = new JSlider(0, 255, 128);
         JSpinner opacityPercentage = new JSpinner(
             new javax.swing.SpinnerNumberModel(0, 0, 100, 1));
         JPanel opacityControl = CommonSettingsDialog.createGameBoardFovOpacityControl(
               opacity, opacityPercentage);
-        SettingsFormPanel chatGrid = CommonSettingsDialog.createAdvancedChatGrid(
-              backgroundColor, autoSlide, opacityLabel, opacity, opacityControl);
+        SettingsFormPanel grid = new SettingsFormPanel(
+              "CommonSettingsTestColourGrid", SettingsFormPanel.DEFAULT_LABEL_WIDTH, 0);
+        grid.addEqualWidthComponentGrid(2, colour, opacityControl);
+        createSettingsPane("advanced", settingsGroup(List.of(row(grid))));
 
-        JLabel repeatDelayLabel = new JLabel("Repeat delay (milliseconds)");
-        JSpinner repeatDelay = CommonSettingsDialog.createBoundedIntegerSpinner(0, 0, Integer.MAX_VALUE, 10);
-        JLabel repeatRateLabel = new JLabel("Repeat rate (per second)");
-        JSpinner repeatRate = CommonSettingsDialog.createBoundedIntegerSpinner(20, 0, 100, 1);
-        JLabel moveDelayLabel = new JLabel("Movement step delay (milliseconds)");
-        JSpinner moveDelay = CommonSettingsDialog.createBoundedIntegerSpinner(50, 0, Integer.MAX_VALUE, 10);
-        SettingsFormPanel timingGrid = CommonSettingsDialog.createAdvancedTimingGrid(
-              repeatDelayLabel, repeatDelay, repeatRateLabel, repeatRate, moveDelayLabel, moveDelay);
-
-        JCheckBox drawTime = new JCheckBox("Show board draw time");
-        JCheckBox skipSavePrompt = new JCheckBox("Skip save reminder when leaving");
-        JCheckBox saveLobby = new JCheckBox("Save lobby backup when game starts");
-        SettingsFormPanel safetyGrid = CommonSettingsDialog.createAdvancedSafetyGrid(
-              drawTime, skipSavePrompt, saveLobby);
-        Component safetyFiller = safetyGrid.getComponent(3);
-
-        JPanel chatSection = settingsGroup(List.of(row(chatGrid)));
-        JPanel timingSection = settingsGroup(List.of(row(timingGrid)));
-        JPanel safetySection = settingsGroup(List.of(row(safetyGrid)));
-        CommonSettingsPane pane = createSettingsPane(
-              "advanced", chatSection, timingSection, safetySection);
-
-        assertSame(opacity, opacityLabel.getLabelFor());
-        assertSame(repeatDelay, repeatDelayLabel.getLabelFor());
-        assertSame(repeatRate, repeatRateLabel.getLabelFor());
-        assertSame(moveDelay, moveDelayLabel.getLabelFor());
-        assertEquals(initializedColorButtonHeight, backgroundColor.getPreferredSize().height);
-        assertTrue(backgroundColor.getPreferredSize().height >= backgroundColor.getIcon().getIconHeight());
+        assertEquals(initializedColorButtonHeight, colour.getPreferredSize().height);
+        assertTrue(colour.getPreferredSize().height >= colour.getIcon().getIconHeight());
         assertEquals(50, opacityPercentage.getValue());
         assertFalse(opacity.getPaintTicks());
         assertFalse(opacity.getPaintLabels());
-        assertAtConstrainedStandardAndWideWidths(pane,
-              List.of(chatSection, timingSection, safetySection), laidOutPane -> {
-                assertAlignedBalancedRows(chatGrid, List.of(
-                    List.of(backgroundColor, autoSlide), List.of(opacityLabel, opacityControl)));
-                assertAlignedBalancedRows(timingGrid, List.of(
-                    List.of(repeatDelayLabel, repeatDelay), List.of(repeatRateLabel, repeatRate),
-                        List.of(moveDelayLabel, moveDelay)));
-                assertAlignedBalancedRows(safetyGrid, List.of(
-                    List.of(drawTime, skipSavePrompt), List.of(saveLobby, safetyFiller)));
-                assertEquals(chatGrid.getWidth(), timingGrid.getWidth());
-                assertEquals(timingGrid.getWidth(), safetyGrid.getWidth());
-            });
     }
 
     @Test
@@ -1218,13 +1173,8 @@ class CommonSettingsDialogTest {
     @Test
     void providesNamesAndOptionDetailsForEveryAdvancedControl() {
         for (String keyBase : List.of(
-            "AdvancedOptions.Chatbox2BackColor",
-            "AdvancedOptions.Chatbox2Transparency",
-            "AdvancedOptions.Chatbox2AutoSlideDown",
             "AdvancedOptions.KeyRepeatDelay",
             "AdvancedOptions.KeyRepeatRate",
-            "AdvancedOptions.MoveStepDelay",
-            "AdvancedOptions.ShowFPS",
             "AdvancedOptions.NoSaveNag",
             "AdvancedOptions.SaveLobbyOnStart")) {
             assertTrue(Messages.keyExists(keyBase + ".name"), keyBase);

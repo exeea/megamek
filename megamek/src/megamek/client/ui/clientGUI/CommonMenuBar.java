@@ -142,8 +142,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JCheckBoxMenuItem viewForceDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewForceDisplay"));
     private final JMenuItem viewNovaNetworks = new JMenuItem(getString("CommonMenuBar.viewNovaNetworks"));
     private final JMenu helpUiLibrary = new JMenu(getString("CommonMenuBar.helpUiLibrary"));
-    private final JCheckBoxMenuItem viewKeybindsOverlay = new JCheckBoxMenuItem(getString(
-          "CommonMenuBar.viewKeyboardShortcuts"));
     private final JCheckBoxMenuItem viewPlanetaryConditionsOverlay = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewPlanetaryConditions"));
     private final JMenuItem viewZoomIn = new JMenuItem(getString("CommonMenuBar.viewZoomIn"));
@@ -194,7 +192,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           "CommonMenuBar.turnDetailsOverlay"));
     private final JMenuItem viewMovModEnvelope = new JMenuItem(getString("CommonMenuBar.movementModEnvelope"));
     private final JMenuItem viewLOSSetting = new JMenuItem(getString("CommonMenuBar.viewLOSSetting"));
-    private final JCheckBoxMenuItem viewUnitOverview = new JCheckBoxMenuItem(getString("CommonMenuBar.viewUnitOverview"));
     private final JMenuItem viewClientSettings = new JMenuItem(getString("CommonMenuBar.viewClientSettings"));
     private final JMenuItem viewIncGUIScale = new JMenuItem(getString("CommonMenuBar.viewIncGUIScale"));
     private final JMenuItem viewDecGUIScale = new JMenuItem(getString("CommonMenuBar.viewDecGUIScale"));
@@ -312,13 +309,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initBotCommandsMenu(menu);
         menu.addSeparator();
 
-        initMenuItem(viewKeybindsOverlay, menu, VIEW_KEYBINDS_OVERLAY, GUIP.getShowKeybindsOverlay());
         initMenuItem(viewPlanetaryConditionsOverlay,
               menu,
               VIEW_PLANETARY_CONDITIONS_OVERLAY,
               GUIP.getShowPlanetaryConditionsOverlay());
         initMenuItem(viewTurnDetailsOverlay, menu, VIEW_TURN_DETAILS_OVERLAY, GUIP.getTurnDetailsOverlay());
-        initMenuItem(viewUnitOverview, menu, VIEW_UNIT_OVERVIEW, GUIP.getShowUnitOverview());
         menu.addSeparator();
 
         JMenuItem viewResetWindowPositions = new JMenuItem(getString("CommonMenuBar.viewResetWindowPos"));
@@ -426,12 +421,10 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewLabels.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DRAW_LABELS));
         toggleHexCoords.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.HEX_COORDS));
         viewMovModEnvelope.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.MOD_ENVELOPE));
-        viewKeybindsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.KEY_BINDS));
         viewPlanetaryConditionsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.PLANETARY_CONDITIONS));
         viewTurnDetailsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.TURN_DETAILS));
         viewForceDisplay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.FORCE_DISPLAY));
         viewMekDisplay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.UNIT_DISPLAY));
-        viewUnitOverview.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.UNIT_OVERVIEW));
         viewLOSSetting.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.LOS_SETTING));
         viewIncGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.INC_GUI_SCALE));
         viewDecGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DEC_GUI_SCALE));
@@ -457,11 +450,9 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case ClientGUI.VIEW_INC_GUI_SCALE -> changeGUIScale(true);
             case ClientGUI.VIEW_DEC_GUI_SCALE -> changeGUIScale(false);
             case ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY -> GUIP.togglePlanetaryConditionsOverlay();
-            case VIEW_KEYBINDS_OVERLAY -> GUIP.toggleKeybindsOverlay();
             case VIEW_TURN_DETAILS_OVERLAY -> GUIP.setTurnDetailsOverlay(!GUIP.getTurnDetailsOverlay());
             case ClientGUI.VIEW_LABELS -> GUIP.setUnitLabelStyle(GUIP.getUnitLabelStyle().next());
             case VIEW_TOGGLE_HEX_TYPES -> GUIP.toggleHexTypes();
-            case VIEW_UNIT_OVERVIEW -> GUIP.setShowUnitOverview(!GUIP.getShowUnitOverview());
             // A Renderer choice is saved here; the game's board follows the preference.
             case VIEW_GRAPHICS_CLASSIC, VIEW_GRAPHICS_ENHANCED ->
                   GUIP.setBoardGraphics(VIEW_GRAPHICS_CLASSIC.equals(event.getActionCommand())
@@ -561,13 +552,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewZoomReset.setEnabled(isInGameBoardView);
         viewZoomOverviewToggle.setEnabled(isInGameBoardView);
         toggleTactical.setEnabled(isInGameBoardView);
-        viewKeybindsOverlay.setEnabled(isInGameBoardView);
         viewPlanetaryConditionsOverlay.setEnabled(isInGameBoardView);
         toggleHexCoords.setEnabled(isInGameBoardView);
         toggleHexTypes.setEnabled(isInGameBoardView);
 
         viewLOSSetting.setEnabled(isInGameBoardView);
-        viewUnitOverview.setEnabled(isInGameBoardView);
         toggleSensorRange.setEnabled(isInGameBoardView);
         toggleFieldOfFire.setEnabled(isInGameBoardView);
         toggleFleeZone.setEnabled(isInGameBoardView);
@@ -642,11 +631,9 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
                 final boolean newState = (Boolean) e.getNewValue();
                 javax.swing.SwingUtilities.invokeLater(() -> toggleShowObjects.setSelected(newState));
             }
-            case GUIPreferences.SHOW_KEYBINDS_OVERLAY -> viewKeybindsOverlay.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_PLANETARY_CONDITIONS_OVERLAY ->
                   viewPlanetaryConditionsOverlay.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.TURN_DETAILS_OVERLAY -> viewTurnDetailsOverlay.setSelected((Boolean) e.getNewValue());
-            case GUIPreferences.SHOW_UNIT_OVERVIEW -> viewUnitOverview.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.MINI_MAP_ENABLED -> viewMinimap.setSelected(GUIP.getMinimapEnabled());
             case GUIPreferences.SHOW_COORDS -> toggleHexCoords.setSelected(GUIP.getCoordsEnabled());
             case GUIPreferences.SHOW_HEX_TYPES -> toggleHexTypes.setSelected(GUIP.getHexTypesEnabled());

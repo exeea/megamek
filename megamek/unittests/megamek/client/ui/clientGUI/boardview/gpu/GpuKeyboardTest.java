@@ -64,9 +64,9 @@ class GpuKeyboardTest {
         SwingUtilities.invokeAndWait(() -> {
             try {
                 fixture.source.close();
-                originalKeys = preferences.getShowKeybindsOverlay();
+                originalKeys = preferences.getTurnDetailsOverlay();
                 originalConditions = preferences.getShowPlanetaryConditionsOverlay();
-                preferences.setValue(GUIPreferences.SHOW_KEYBINDS_OVERLAY, true);
+                preferences.setValue(GUIPreferences.TURN_DETAILS_OVERLAY, true);
                 preferences.setValue(GUIPreferences.SHOW_PLANETARY_CONDITIONS_OVERLAY, true);
                 menu = CommonMenuBar.getMenuBarForGame();
                 menu.setPhase(GamePhase.MOVEMENT);
@@ -110,7 +110,7 @@ class GpuKeyboardTest {
             if (menu != null) {
                 menu.die();
             }
-            preferences.setValue(GUIPreferences.SHOW_KEYBINDS_OVERLAY, originalKeys);
+            preferences.setValue(GUIPreferences.TURN_DETAILS_OVERLAY, originalKeys);
             preferences.setValue(GUIPreferences.SHOW_PLANETARY_CONDITIONS_OVERLAY, originalConditions);
             if (controller != null) {
                 controller.close();
@@ -147,49 +147,29 @@ class GpuKeyboardTest {
     }
 
     @Test
-    void nativeUnitOverviewHasNoToggleAndPreservesTheLegacy2DPreference() throws Exception {
-        boolean original = preferences.getShowUnitOverview();
-        AtomicInteger clicks = new AtomicInteger();
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                preferences.setShowUnitOverview(false);
-                findItem(ClientGUI.VIEW_UNIT_OVERVIEW).addActionListener(event -> clicks.incrementAndGet());
-                source.refresh();
-            });
-            press(KeyCommandBind.UNIT_OVERVIEW);
-            assertEquals(0, clicks.get());
-            assertFalse(preferences.getShowUnitOverview());
-            assertFalse(source.takeFrame().globalCommands().stream().flatMap(command -> command.children().stream())
-                  .anyMatch(command -> command.id().contains(ClientGUI.VIEW_UNIT_OVERVIEW + ":")));
-        } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setShowUnitOverview(original));
-        }
-    }
-
-    @Test
     void remappedMenuShortcutsCheckLiveAvailabilityAndDialogSuppression() throws Exception {
-        JMenuItem keysItem = findItem(ClientGUI.VIEW_KEYBINDS_OVERLAY);
-        SwingUtilities.invokeAndWait(() -> keysItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F8,
+        JMenuItem detailsItem = findItem(ClientGUI.VIEW_TURN_DETAILS_OVERLAY);
+        SwingUtilities.invokeAndWait(() -> detailsItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F8,
               InputEvent.ALT_DOWN_MASK)));
-        press(KeyCommandBind.KEY_BINDS);
-        assertTrue(preferences.getShowKeybindsOverlay(), "The old accelerator no longer applies");
+        press(KeyCommandBind.TURN_DETAILS);
+        assertTrue(preferences.getTurnDetailsOverlay(), "The old accelerator no longer applies");
         press(KeyEvent.VK_F8, InputEvent.ALT_DOWN_MASK);
-        assertFalse(preferences.getShowKeybindsOverlay());
-        SwingUtilities.invokeAndWait(() -> keysItem.setEnabled(false));
+        assertFalse(preferences.getTurnDetailsOverlay());
+        SwingUtilities.invokeAndWait(() -> detailsItem.setEnabled(false));
         press(KeyEvent.VK_F8, InputEvent.ALT_DOWN_MASK);
-        assertFalse(preferences.getShowKeybindsOverlay());
+        assertFalse(preferences.getTurnDetailsOverlay());
         SwingUtilities.invokeAndWait(() -> {
-            keysItem.setEnabled(true);
+            detailsItem.setEnabled(true);
             when(gui.shouldIgnoreHotKeys()).thenReturn(true);
         });
         press(KeyEvent.VK_F8, InputEvent.ALT_DOWN_MASK);
-        assertFalse(preferences.getShowKeybindsOverlay());
+        assertFalse(preferences.getTurnDetailsOverlay());
         SwingUtilities.invokeAndWait(() -> when(gui.shouldIgnoreHotKeys()).thenReturn(false));
         press(KeyEvent.VK_F8, InputEvent.ALT_DOWN_MASK);
-        assertTrue(preferences.getShowKeybindsOverlay());
+        assertTrue(preferences.getTurnDetailsOverlay());
         SwingUtilities.invokeAndWait(source::close);
         press(KeyEvent.VK_F8, InputEvent.ALT_DOWN_MASK);
-        assertTrue(preferences.getShowKeybindsOverlay());
+        assertTrue(preferences.getTurnDetailsOverlay());
     }
 
     @Test
