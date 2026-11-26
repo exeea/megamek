@@ -82,6 +82,11 @@ public interface SBFRuleOptionsUser {
     /**
      * @return True when this game allows adjusting formations, IO:BF p.198.
      */
+    /** Urban Hexes (Buildings), IO:BF pp. 215-218. */
+    default boolean usesUrbanCombat() {
+        return getOptions().booleanOption(SBFRuleOptions.URBAN_COMBAT);
+    }
+
     /**
      * @return True when Formations may be adjusted at all: by the full rule (IO:BF p. 198) or, when players chose it, only
      *       for Forced Withdrawals (IO:BF p. 172)

@@ -54,6 +54,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.SBFRuleOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -184,6 +185,23 @@ class SBFToHitDataTest {
     void unplacedFormationIsImpossibleAndNeverDereferencesANullPosition() {
         attacker.setPosition(null);
         assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+    }
+
+    @Test
+    void urbanCombatLetsOnlyTheSameHexAttackAFormationInAnUrbanHex() {
+        // Urban Hexes, IO:BF p. 216: "Formations in an urban hex may only be attacked by another Formation in the same
+        // hex or by artillery or aerospace attacks." The occupant fired first, so standard LOS lets the attacker answer.
+        Board board = Board.createEmptyBoard(4, 4);
+        game.setBoard(0, board);
+        board.setHex(target.getPosition().coords(), new Hex(0, "building:1", ""));
+        target.setDeployed(true);
+        game.combatOrders().setSight(target, attacker, true, true);
+        assertFalse(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        assertTrue(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
+        attacker.setPosition(target.getPosition());
+        assertFalse(SBFToHitData.compileToHit(game, attack()).cannotSucceed());
     }
 
     @Test

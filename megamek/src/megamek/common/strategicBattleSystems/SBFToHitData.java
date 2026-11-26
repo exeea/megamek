@@ -132,6 +132,9 @@ public class SBFToHitData extends TargetRoll {
         if (range.isEmpty()) {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "target outside standard attack range");
         }
+        if ((attack.getWeaponMode() != WeaponMode.TAG) && shelteredInUrbanHex(game, attackingFormation, target)) {
+            return new SBFToHitData(TargetRoll.IMPOSSIBLE, "target is in an urban hex");
+        }
         toHit.range = range.get();
         switch (toHit.range) {
             case SHORT -> { }
@@ -327,6 +330,19 @@ public class SBFToHitData extends TargetRoll {
 
     private static int woodsCover(Hex hex) {
         return hex.containsTerrain(Terrains.SMOKE) ? 2 : Math.min(2, forestDensity(hex));
+    }
+
+    /**
+     * Urban Hexes, IO:BF p. 216: "Formations in an urban hex may only be attacked by another Formation in the same hex
+     * or by artillery or aerospace attacks." Artillery has its own attack path; TAG painting belongs to it.
+     */
+    private static boolean shelteredInUrbanHex(SBFGame game, SBFFormation attacker, SBFFormation target) {
+        if (!game.usesUrbanCombat() || attacker.isAerospace() || !target.occupiesGroundHex()
+              || target.getPosition().equals(attacker.getPosition())) {
+            return false;
+        }
+        Hex hex = game.getHex(target.getPosition());
+        return (hex != null) && hex.containsTerrain(Terrains.BUILDING);
     }
 
     /** IO:BF p. 170: target terrain modifiers also apply within the same hex. */

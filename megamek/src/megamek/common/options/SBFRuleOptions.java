@@ -50,6 +50,9 @@ public class SBFRuleOptions extends BasicGameOptions {
     /** On-map artillery attacks and spotting, IO:BF pp. 203-204. */
     public static final String ADVANCED_ARTILLERY = "sbf_artillery";
 
+    /** Urban Hexes (Buildings), IO:BF pp. 215-218. */
+    public static final String URBAN_COMBAT = "sbf_urban_combat";
+
     /** Random allocation instead of opposed Tactics for standard attacks, IO:BF p. 171. */
     public static final String BASE_SIMPLIFIED_DAMAGE = "base_sbf_simplified_damage";
 
@@ -129,6 +132,7 @@ public class SBFRuleOptions extends BasicGameOptions {
         addOption(base, BASE_SALVAGE, false);
         addOption(base, BASE_SIMPLIFIED_DAMAGE, false);
         addOption(base, ADVANCED_ARTILLERY, false);
+        addOption(base, URBAN_COMBAT, false);
         addOption(base, MOVE_EXPANDED_WOODS, false);
         addOption(base, MOVE_ADVANCED_TERRAIN, false);
 
