@@ -289,14 +289,16 @@ public final class UiTheme implements Disposable {
           Map<Character, BitmapFont.Glyph> layouts) { }
     /** Held weakly: a size no element holds any more drops out, its glyphs with the next raster. */
     private final Map<BitmapFont, HudRaster> rasters = new java.util.WeakHashMap<>();
-    /** The HUD fonts at the sizes elements asked for ({@link #sized}), by font and size. */
-    private final Map<String, java.lang.ref.WeakReference<BitmapFont>> sizes = new HashMap<>();
+    /** The HUD fonts at the sizes elements asked for ({@link #sized}), by root font and size. */
+    private final Map<SizeKey, java.lang.ref.WeakReference<BitmapFont>> sizes = new HashMap<>();
+    /** A root font (identity: BitmapFont keeps Object's equals) at a size. */
+    private record SizeKey(BitmapFont root, float size) { }
     /** Screen pixels a stage unit the HUD's glyphs are rasterised for, and the one a scene last reported. */
     private float pixelScale = 1, wantedScale = 1;
     private long wantedSince;
     private boolean scaled;
-    /** The work of the last raster for a new display scale and the frame time of its swap, in nanoseconds. */
-    private long rasterNanos, swapNanos;
+    /** Whether a raster has been swapped in: the first, at load, runs at once, later ones within the frame budget. */
+    private boolean rastered;
     /** The raster for a new display scale in progress ({@link #settle}), or null. */
     private RasterJob job;
     /** What a raster job may take of a frame. */
@@ -2306,29 +2308,34 @@ public final class UiTheme implements Disposable {
         boolean world = packer == worldGlyphs;
         FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback);
         generators.add(generator);
-        boolean display = packer == hudGlyphs;
-        HudParameter hud = display ? hudSettings(size, tracking, border, packer, pixelScale) : null;
-        Map<Character, BitmapFont.Glyph> layouts = new HashMap<>();
-        if (hud != null) { hud.layouts = layouts; }
-        BitmapFont font = display ? generator.generateFont(hud, new HudFontData(this, hud.rasterScale(size)))
-              : generator.generateFont(settings(size, tracking, border, packer));
-        if (display) {
-            // Laid out at 4x, in quarter units; drawn from its display raster (HudFontCache).
-            font.getData().setScale(.25f);
-            rasters.put(font, new HudRaster(generator, size, tracking, border, font, layouts));
-        } else {
-            if (world) {
-                // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
-                font.getData().padLeft = WORLD_GLYPH_PAD;
-                font.getData().padRight = font.getData().padLeft;
-            }
-            font.getData().setScale(0.25f);
+        if (packer == hudGlyphs) {
+            return add(name, hudFont(generator, size, tracking, border, null), BitmapFont.class);
         }
+        BitmapFont font = generator.generateFont(settings(size, tracking, border, packer));
         if (world) {
+            // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
+            font.getData().padLeft = WORLD_GLYPH_PAD;
+            font.getData().padRight = font.getData().padLeft;
             worldGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture()));
         }
+        font.getData().setScale(0.25f);
         font.setUseIntegerPositions(false);
         return add(name, font, BitmapFont.class);
+    }
+
+    /**
+     * A HUD font of {@code size} stage units: laid out at 4x, in quarter units, and drawn from its display raster
+     * (HudFontCache); {@code root} is the font it is a size of, null for a root.
+     */
+    private BitmapFont hudFont(FreeTypeFontGenerator generator, float size, float tracking, float border,
+          BitmapFont root) {
+        HudParameter hud = hudSettings(size, tracking, border, hudGlyphs, pixelScale);
+        hud.layouts = new HashMap<>();
+        BitmapFont font = generator.generateFont(hud, new HudFontData(this, hud.rasterScale(size)));
+        font.getData().setScale(.25f);
+        font.setUseIntegerPositions(false);
+        rasters.put(font, new HudRaster(generator, size, tracking, border, root == null ? font : root, hud.layouts));
+        return font;
     }
 
     /**
@@ -2340,19 +2347,10 @@ public final class UiTheme implements Disposable {
     private static HudParameter hudSettings(float size, float tracking, float border, PixmapPacker packer,
           float scale) {
         HudParameter settings = new HudParameter();
-        for (FreeTypeFontGenerator.FreeTypeFontParameter each : List.of(settings, settings.display)) {
-            float raster = each == settings ? 4 : scale;
-            each.size = Math.max(1, Math.round(size * raster));
-            each.borderWidth = Math.round(border * raster);
-            each.borderColor = Color.WHITE;
-            each.borderStraight = false;
-            each.spaceX = Math.round(tracking * size * raster) - (int) each.borderWidth;
-            each.packer = packer;
-            each.incremental = true;
-            each.minFilter = Texture.TextureFilter.Linear;
-            each.magFilter = Texture.TextureFilter.Linear;
-            each.characters = "\u0000";
-        }
+        raster(settings, size, tracking, border, 4, packer);
+        raster(settings.display, size, tracking, border, scale, packer);
+        settings.characters = "\u0000";
+        settings.display.characters = "\u0000";
         return settings;
     }
 
@@ -2362,23 +2360,28 @@ public final class UiTheme implements Disposable {
      */
     private static FreeTypeFontGenerator.FreeTypeFontParameter settings(float size, float tracking, float border,
           PixmapPacker world) {
-        float raster = 4;
         FreeTypeFontGenerator.FreeTypeFontParameter settings = new FreeTypeFontGenerator.FreeTypeFontParameter();
+        raster(settings, size, tracking, border, 4, world);
+        if (world != null) {
+            settings.genMipMaps = true;
+            settings.minFilter = Texture.TextureFilter.MipMapLinearLinear;
+        }
+        return settings;
+    }
+
+    /** {@code settings} for a font of {@code size} stage units rendered at {@code raster} pixels a unit. */
+    private static void raster(FreeTypeFontGenerator.FreeTypeFontParameter settings, float size, float tracking,
+          float border, float raster, PixmapPacker packer) {
         settings.size = Math.max(1, Math.round(size * raster));
         settings.borderWidth = Math.round(border * raster);
         settings.borderColor = Color.WHITE;
         settings.borderStraight = false;
         // FreeType widens every glyph's advance by the border; take it back so the text keeps its width.
         settings.spaceX = Math.round(tracking * size * raster) - (int) settings.borderWidth;
-        settings.packer = world;
+        settings.packer = packer;
         settings.incremental = true;
         settings.minFilter = Texture.TextureFilter.Linear;
         settings.magFilter = Texture.TextureFilter.Linear;
-        if (world != null) {
-            settings.genMipMaps = true;
-            settings.minFilter = Texture.TextureFilter.MipMapLinearLinear;
-        }
-        return settings;
     }
 
     private PixmapPacker hudPacker() {
@@ -2411,23 +2414,14 @@ public final class UiTheme implements Disposable {
         }
         if (job == null && due) { job = new RasterJob(wantedScale); }
         if (job == null) { return false; }
-        boolean swapped = job.step(rasterNanos == 0 && swapNanos == 0 ? Long.MAX_VALUE : RASTER_BUDGET_NANOS);
+        boolean swapped = job.step(rastered ? RASTER_BUDGET_NANOS : Long.MAX_VALUE);
         if (job.done()) { job = null; }
         return swapped;
     }
 
-    /** The glyph work of the last raster for a new display scale, in nanoseconds; 0 before the first. */
-    public long rasterNanos() { return rasterNanos; }
-
-    /** The time the last raster's swap took in its frame, in nanoseconds; 0 before the first. */
-    public long swapNanos() { return swapNanos; }
-
-    /** Whether a raster for a new display scale is being built (its fonts still draw the last one). */
-    public boolean rastering() { return job != null && !job.swapped; }
-
     /**
      * One display scale's raster: each HUD font's glyphs built aside into a new packer, only those it has drawn, a
-     * glyph at a time; then the swap, in one frame; then the characters FreeType prepares, filled in on the new pages.
+     * glyph at a time; then the swap, in one frame. A character drawn later is made at its first draw.
      */
     private final class RasterJob {
         final float scale;
@@ -2435,12 +2429,11 @@ public final class UiTheme implements Disposable {
         final List<BitmapFont> fonts = new ArrayList<>();
         final List<HudFontData> built = new ArrayList<>();
         final Set<BitmapFont> known = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        /** The font and character being worked on, in the build and in the fill. */
+        /** The font and character being built. */
         int font;
         int glyph;
         String chars = "";
         boolean swapped;
-        long nanos;
 
         RasterJob(float scale) {
             this.scale = scale;
@@ -2454,28 +2447,21 @@ public final class UiTheme implements Disposable {
             }
         }
 
-        boolean done() { return swapped && font >= fonts.size(); }
+        boolean done() { return swapped; }
 
         /** Works until the budget is spent; true in the frame of the swap. */
         boolean step(long budget) {
             long start = System.nanoTime();
             while (System.nanoTime() - start < budget) {
-                if (!swapped) {
+                if (font >= fonts.size()) {
+                    more();
                     if (font >= fonts.size()) {
-                        more();
-                        if (font >= fonts.size()) {
-                            nanos += System.nanoTime() - start;
-                            swap();
-                            return true;
-                        }
+                        swap();
+                        return true;
                     }
-                    build();
-                } else {
-                    if (font >= fonts.size()) { break; }
-                    fill();
                 }
+                build();
             }
-            if (!swapped) { nanos += System.nanoTime() - start; }
             return false;
         }
 
@@ -2505,20 +2491,8 @@ public final class UiTheme implements Disposable {
             font++;
         }
 
-        /** One step of the fill: a character FreeType prepares, on the font's new pages. */
-        private void fill() {
-            BitmapFont each = fonts.get(font);
-            if (glyph >= FreeTypeFontGenerator.DEFAULT_CHARS.length() || rasters.get(each) == null) {
-                font++;
-                glyph = 0;
-                return;
-            }
-            each.getData().getGlyph(FreeTypeFontGenerator.DEFAULT_CHARS.charAt(glyph++));
-        }
-
         /** Every font takes its new data, in one frame; the new pages go up and the old ones are freed. */
         private void swap() {
-            long start = System.nanoTime();
             Array<TextureRegion> pages = new Array<>();
             packer.updateTextureRegions(pages, Texture.TextureFilter.Linear, Texture.TextureFilter.Linear, false);
             for (int i = 0; i < fonts.size(); i++) {
@@ -2542,27 +2516,16 @@ public final class UiTheme implements Disposable {
                 data.setScale(.25f);
                 ((HudFontData) each.getData()).adopt(data);
             }
-            PixmapPacker old = hudGlyphs;
+            disposePages(hudGlyphs);
             hudGlyphs = packer;
             pixelScale = scale;
-            for (PixmapPacker.Page page : old.getPages()) {
-                if (page.getTexture() != null) { page.getTexture().dispose(); }
-            }
-            old.dispose();
+            rastered = true;
             swapped = true;
-            font = 0;
-            glyph = 0;
-            rasterNanos = nanos;
-            swapNanos = System.nanoTime() - start;
         }
 
         /** A raster for a scale that no longer holds: its pages go. */
         void discard() {
-            if (swapped) { return; }
-            for (PixmapPacker.Page page : packer.getPages()) {
-                if (page.getTexture() != null) { page.getTexture().dispose(); }
-            }
-            packer.dispose();
+            if (!swapped) { disposePages(packer); }
         }
     }
 
@@ -2613,7 +2576,8 @@ public final class UiTheme implements Disposable {
 
         /**
          * Every field of {@code other} (libGDX's, not the record of drawn characters) into this data: its glyphs,
-         * metrics, pages and generator. libGDX keeps them package-private; the font holding this data stays as it is.
+         * metrics, pages and generator, so the font holding this data keeps its object.
+         * Reflection: FreeTypeBitmapFontData keeps its generator, parameter, stroker, packer and glyph list private.
          */
         void adopt(HudFontData other) {
             try {
@@ -2699,6 +2663,7 @@ public final class UiTheme implements Disposable {
      */
     private static final class HudFontCache extends com.badlogic.gdx.graphics.g2d.BitmapFontCache {
         private static final Matrix4 COMBINED = new Matrix4();
+        /** Reflection: BitmapFontCache keeps its page arrays private and says nowhere how many it has. */
         private static final java.lang.reflect.Field PAGES;
 
         static {
@@ -2802,17 +2767,11 @@ public final class UiTheme implements Disposable {
         BitmapFont root = asked.root();
         HudRaster base = rasters.get(root);
         if (Math.abs(size - base.size()) < 1e-3f) { return root; }
-        String key = System.identityHashCode(root) + "@" + size;
+        SizeKey key = new SizeKey(root, size);
         java.lang.ref.WeakReference<BitmapFont> held = sizes.get(key);
         BitmapFont made = held == null ? null : held.get();
         if (made == null) {
-            HudParameter hud = hudSettings(size, base.tracking(), base.border(), hudGlyphs, pixelScale);
-            Map<Character, BitmapFont.Glyph> layouts = new HashMap<>();
-            hud.layouts = layouts;
-            made = base.generator().generateFont(hud, new HudFontData(this, hud.rasterScale(size)));
-            made.getData().setScale(.25f);
-            made.setUseIntegerPositions(false);
-            rasters.put(made, new HudRaster(base.generator(), size, base.tracking(), base.border(), root, layouts));
+            made = hudFont(base.generator(), size, base.tracking(), base.border(), root);
             sizes.put(key, new java.lang.ref.WeakReference<>(made));
         }
         return made;
@@ -2827,15 +2786,17 @@ public final class UiTheme implements Disposable {
     public void dispose() {
         skin.dispose();
         // The shared glyph pages belong to the theme, not to the fonts packed into them.
-        for (PixmapPacker packer : List.of(hudGlyphs, worldGlyphs)) {
-            for (PixmapPacker.Page page : packer.getPages()) {
-                if (page.getTexture() != null) {
-                    page.getTexture().dispose();
-                }
-            }
-            packer.dispose();
-        }
+        disposePages(hudGlyphs);
+        disposePages(worldGlyphs);
         generators.forEach(FreeTypeFontGenerator::dispose);
+    }
+
+    /** A packer and its pages' textures. */
+    private static void disposePages(PixmapPacker packer) {
+        for (PixmapPacker.Page page : packer.getPages()) {
+            if (page.getTexture() != null) { page.getTexture().dispose(); }
+        }
+        packer.dispose();
     }
 
     /**
