@@ -204,7 +204,7 @@ record SBFAerospace(SBFGameManager manager) {
         for (SBFRadarZone next : flight.zones()) {
             if (!zone.adjacent(next) || ((next == SBFRadarZone.CENTRAL) && !mayEnterCentral)
                   || ((squadron.capitalSector() != null || squadron.fallingFromOrbit()) && !next.isOuter()
-                        && !squadron.canDescendIntoAtmosphere())) {
+                        && !squadron.canDescendIntoAtmosphere(game))) {
                 return false;
             }
             zone = next;
@@ -346,7 +346,7 @@ record SBFAerospace(SBFGameManager manager) {
         List<FormationLosses> losses = new ArrayList<>();
         for (SBFFormation squadron : game.getActiveFormations()) {
             if (squadron.fallingFromOrbit() && !squadron.fellThisRound(game.getCurrentRound())
-                  && !squadron.canDescendIntoAtmosphere()) {
+                  && !squadron.canDescendIntoAtmosphere(game)) {
                 losses.addAll(SBFSpaceGravity.fallInward(manager, squadron));
             } else if (squadron.isOnRadarMap() && squadron.capitalSector() == null && !squadron.fellThisRound(game.getCurrentRound())
                   && !squadron.inHighDrop() && (squadron.getCurrentThrust() == 0)) {

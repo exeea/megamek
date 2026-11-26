@@ -63,6 +63,7 @@ import megamek.common.force.Force;
 import megamek.common.interfaces.ForceAssignable;
 import megamek.common.jacksonAdapters.SBFFormationDeserializer;
 import megamek.common.jacksonAdapters.SBFFormationSerializer;
+import megamek.common.options.OptionsConstants;
 import megamek.common.units.Terrains;
 import megamek.common.units.Deployable;
 import megamek.common.units.Entity;
@@ -1193,9 +1194,15 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
               : unit.getElements().stream().anyMatch(e -> e.getASUnitType() != null && e.isAerospaceFighter());
     }
 
-    public boolean canDescendIntoAtmosphere() {
+    /**
+     * Squadrons that cannot land stay on the Outer Ring (IO:BF p. 184). With the optional Design Quirks rules, neither
+     * may a Squadron with an Unstreamlined Element: it "may not enter the atmosphere" (p. 229).
+     */
+    public boolean canDescendIntoAtmosphere(SBFRuleOptionsUser game) {
         return getUnits().stream().noneMatch(unit -> unit.getMovementMode() == SBFMovementMode.WARSHIP
-              || unit.getMovementMode() == SBFMovementMode.STATION_KEEPING);
+              || unit.getMovementMode() == SBFMovementMode.STATION_KEEPING
+              || (game.usesDesignQuirks() && unit.hasElementQuirk(OptionsConstants.QUIRK_NEG_UNSTREAMLINED,
+                    SBFElementType.AS, SBFElementType.LA)));
     }
 
     public int fighterSlots() {

@@ -40,8 +40,11 @@ import static org.mockito.Mockito.*;
 import java.util.List;
 
 import megamek.common.Player;
+import megamek.common.alphaStrike.ASUnitType;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -326,6 +329,27 @@ class SBFCapitalAerospaceTest {
         assertEquals(parse("I2"), fighter.capitalSector());
         assertFalse(fighter.isEmbarked());
         assertTrue(fighter.isDone());
+    }
+
+    @Test
+    void unstreamlinedSquadronStaysOnTheOuterRingWithDesignQuirks() {
+        // Negative Design Quirks Table, IO:BF p. 229: Unstreamlined (Element; AS, LA) "If any Element in the Squadron
+        // has this quirk, it may not enter the atmosphere"; like a WarShip it stays on the Outer Ring (p. 184).
+        fighter.setCapitalSector(parse("I1"));
+        fighter.setDeployed(true);
+        turn(1, GamePhase.MOVEMENT);
+        game.getOptions().getOption(SBFRuleOptions.CAPITAL_GROUND_CENTER).setValue(true);
+        assertTrue(SBFSpaceCommand.move(manager, 1, fighter, List.of(parse("CENTRAL")), false));
+        fighter.setDone(false);
+        var dropShip = new AlphaStrikeElement();
+        dropShip.setType(ASUnitType.DS);
+        dropShip.getQuirks().getOption(OptionsConstants.QUIRK_NEG_UNSTREAMLINED).setValue(true);
+        fighter.getUnits().getFirst().setElements(List.of(dropShip));
+        var inward = new SBFMovePath.RadarFlight(List.of(SBFRadarZone.A), List.of(), false);
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertFalse(new SBFAerospace(manager).move(1, fighter, inward));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(false);
+        assertTrue(new SBFAerospace(manager).move(1, fighter, inward));
     }
 
     @Test
