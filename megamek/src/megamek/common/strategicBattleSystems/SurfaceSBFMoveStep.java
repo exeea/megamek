@@ -113,21 +113,27 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
               && !from.hasStrategicPassage(Hex.strategicPassage(entrance, direction));
         Hex entryTerrain = arrivalSide < 0 ? to : terrainAlongPassage(to);
         Hex departureTerrain = leavesPassage ? terrainAlongPassage(from) : from;
+        int levels = Math.abs(to.getLevel() - from.getLevel());
+        int elevationCost = 0;
         for (SBFTerrainMovement mover : movers) {
-            int cost = mover.cost(from, entryTerrain, direction, game);
+            int elevation = mover.elevationCost(levels, game);
+            int cost = mover.terrainCost(from, entryTerrain, direction, game);
             if (leavesPassage && cost != SBFTerrainMovement.PROHIBITED) {
                 // Entering by a cleared side waived the vegetation cost. Pay it once if turning into the woods.
-                int wooded = mover.cost(from, from, direction, game);
-                int clear = mover.cost(from, departureTerrain, direction, game);
+                int wooded = mover.terrainCost(from, from, direction, game);
+                int clear = mover.terrainCost(from, departureTerrain, direction, game);
                 cost = wooded == SBFTerrainMovement.PROHIBITED ? wooded : cost + wooded - clear;
             }
-            if (cost == SBFTerrainMovement.PROHIBITED) {
+            if (cost == SBFTerrainMovement.PROHIBITED || elevation == SBFTerrainMovement.PROHIBITED) {
                 isIllegal = true;
                 return;
             }
+            elevationCost = Math.max(elevationCost, elevation);
             mpUsed = Math.max(mpUsed, cost);
             roadBonusEligible &= mover.earnsRoadBonus();
         }
+        // Terrain Modifiers on Movement, p. 166. Each modifier uses the most restrictive mover.
+        mpUsed += elevationCost;
         if (to.hasStrategicInferno() && !formation.isAirVehicle()) {
             mpUsed++;
         }

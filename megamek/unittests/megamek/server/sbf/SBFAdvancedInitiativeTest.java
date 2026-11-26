@@ -160,6 +160,29 @@ class SBFAdvancedInitiativeTest {
     }
 
     @Test
+    void fourFormationsNeedFourMhqUnitsForTheAdditionalBattlefieldIntelligenceBonus() {
+        enable(INIT_BATTLEFIELD_INT);
+        var headquarters = formation(10, blue).getUnits().getFirst();
+        headquarters.getSpecialAbilities().replaceSUA(MHQ, 6);
+        headquarters.setElements(List.of(element(false, true)));
+        var second = formation(11, blue).getUnits().getFirst();
+        second.getSpecialAbilities().replaceSUA(MHQ, 5);
+        second.setElements(List.of(element(false, true)));
+        formation(20, red);
+        var third = formation(12, ally).getUnits().getFirst();
+        var fourth = formation(13, ally).getUnits().getFirst();
+
+        // Joshua's four Formations have two MHQ Units and no RCN. Only the MHQ3+ bonus applies.
+        manager.rollInitiative();
+        assertEquals(1, game.getTeamForPlayer(blue).getInitiative().getBonus(0));
+        third.getSpecialAbilities().replaceSUA(MHQ, 1);
+        assertEquals(1, modifiers(blue).total());
+        fourth.getSpecialAbilities().replaceSUA(MHQ, 1);
+        manager.rollInitiative();
+        assertEquals(2, game.getTeamForPlayer(blue).getInitiative().getBonus(0));
+    }
+
+    @Test
     void intelligenceRatingCountsElementsAndAssignmentsUseUnitDensityAndSharedECMHex() {
         enable(INIT_MODIFIERS);
         enable(INIT_BATTLEFIELD_INT);

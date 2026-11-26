@@ -41,7 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
+import megamek.client.ui.clientGUI.calculationReport.DummyCalculationReport;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.alphaStrike.ASUnitType;
@@ -108,6 +110,81 @@ class SurfaceSBFMoveStepTest {
         industrial.getSpecialAbilities().setSUA(SEAL);
         assertFalse(step().isIllegal());
         assertEquals(9, step().getMpUsed());
+    }
+
+    @Test
+    void battleArmorUsesInfantryCostsForWoodsElevationAndUnderwaterMovement() {
+        var squad = new AlphaStrikeElement();
+        squad.setType(ASUnitType.BA);
+        squad.setPrimaryMovementMode("");
+        var unit = new SBFUnit();
+        unit.setType(SBFElementType.BA);
+        unit.setElements(List.of(squad));
+        formation.setUnits(List.of(unit));
+        setMover(SBFElementType.BA, SBFMovementMode.BA_WALK);
+
+        to.addTerrain(new Terrain(Terrains.WOODS, 1));
+        assertEquals(1, step().getMpUsed());
+        to.removeTerrain(Terrains.WOODS);
+        to.setLevel(1);
+        assertEquals(3, step().getMpUsed());
+        to.setLevel(0);
+        from.setLevel(1);
+        assertEquals(3, step().getMpUsed());
+        from.setLevel(0);
+
+        to.addTerrain(new Terrain(Terrains.WATER, 1));
+        assertTrue(step().isIllegal());
+        to.addTerrain(new Terrain(Terrains.WATER, 2));
+        assertTrue(step().isIllegal());
+        squad.getSpecialAbilities().setSUA(UMU);
+        assertFalse(step().isIllegal());
+        assertEquals(9, step().getMpUsed());
+    }
+
+    @Test
+    void convertedBattleArmorRetainsUnderwaterEligibilityOnItsSummarySheet() {
+        var diver = new AlphaStrikeElement();
+        diver.setName("Diver");
+        diver.setType(ASUnitType.BA);
+        diver.setMovement(Map.of("", 4, "s", 2));
+        diver.getSpecialAbilities().setSUA(UMU);
+        var walker = new AlphaStrikeElement();
+        walker.setName("Walker");
+        walker.setType(ASUnitType.BA);
+        walker.setMovement(Map.of("", 4));
+        var report = new DummyCalculationReport();
+        var mixed = new SBFUnitConverter(List.of(diver, walker), "Mixed squads", report).createSbfUnit();
+        assertFalse(mixed.hasSUA(UMU));
+        var equipped = new SBFUnitConverter(List.of(diver), "Divers", report).createSbfUnit();
+        assertTrue(equipped.hasSUA(UMU));
+        formation.setUnits(List.of(equipped));
+        SBFFormationConverter.calculateStatsFromUnits(formation);
+        assertTrue(formation.hasSUA(UMU));
+
+        to.addTerrain(new Terrain(Terrains.WATER, 1));
+        equipped.setElements(List.of());
+        assertFalse(step().isIllegal());
+        formation.setUnits(List.of());
+        assertFalse(step().isIllegal());
+    }
+
+    @Test
+    void aMixedMekAndBattleArmorFormationPaysBothTheWoodsAndElevationModifiers() {
+        var battleArmor = new SBFUnit();
+        battleArmor.setType(SBFElementType.BA);
+        battleArmor.setMovementMode(SBFMovementMode.BA_WALK);
+        var mek = new SBFUnit();
+        mek.setType(SBFElementType.BM);
+        mek.setMovementMode(SBFMovementMode.MEK_WALK);
+        formation.setType(SBFElementType.MX);
+        formation.setUnits(List.of(battleArmor, mek));
+        to.addTerrain(new Terrain(Terrains.WOODS, 1));
+        to.setLevel(1);
+        assertEquals(4, step().getMpUsed());
+        to.setLevel(0);
+        from.setLevel(1);
+        assertEquals(4, step().getMpUsed());
     }
 
     @Test

@@ -93,14 +93,34 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         if (mode == SBFMovementMode.RAIL) {
             return (game.usesAdvancedTerrain() || railTerrainAllowed(hex)) && (hex.containsTerrain(Terrains.RAIL) || hex.containsTerrain(Terrains.BRIDGE_RAIL));
         }
-        return cost(hex, hex, 0, game) != PROHIBITED;
+        return terrainCost(hex, hex, 0, game) != PROHIBITED;
     }
 
-    int cost(Hex from, Hex to, int direction, SBFGame game) {
+    private boolean isInfantry() {
+        return type == SBFElementType.CI || type == SBFElementType.BA;
+    }
+
+    private boolean fliesOverTerrain(SBFGame game) {
+        return mode == SBFMovementMode.VTOL || (game.usesAdvancedTerrain() && mode == SBFMovementMode.AIRSHIP);
+    }
+
+    int elevationCost(int levels, SBFGame game) {
+        if (levels == 0 || fliesOverTerrain(game)) {
+            return 0;
+        }
+        if (mode == SBFMovementMode.SUBMARINE) {
+            return levels;
+        }
+        if (levels > 2 || (levels > 1 && type != SBFElementType.BM)) {
+            return PROHIBITED;
+        }
+        return levels * (isInfantry() || type == SBFElementType.V ? 2 : 1);
+    }
+
+    int terrainCost(Hex from, Hex to, int direction, SBFGame game) {
         boolean advanced = game.usesAdvancedTerrain();
         boolean expandedWoods = game.usesExpandedWoods();
-        int levels = Math.abs(to.getLevel() - from.getLevel());
-        if (mode == SBFMovementMode.VTOL || (advanced && mode == SBFMovementMode.AIRSHIP)) {
+        if (fliesOverTerrain(game)) {
             // Airborne VTOLs ignore the underlying terrain and maintain one level of clearance (IO:BF p. 166).
             return 1;
         }
@@ -111,12 +131,9 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         }
         boolean submarine = mode == SBFMovementMode.SUBMARINE;
         boolean naval = (mode == SBFMovementMode.NAVAL) || submarine;
-        boolean infantry = (type == SBFElementType.CI) || (type == SBFElementType.BA);
+        boolean infantry = isInfantry();
         boolean mek = type == SBFElementType.BM;
-        if (!submarine && ((levels > 2) || ((levels > 1) && !mek))) {
-            return PROHIBITED;
-        }
-        int cost = 1 + levels * ((infantry || (type == SBFElementType.V)) && !submarine ? 2 : 1);
+        int cost = 1;
         int depth = to.terrainLevel(Terrains.WATER);
         if (advanced && naval && to.containsTerrain(Terrains.ICE)) {
             return PROHIBITED;

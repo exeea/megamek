@@ -279,7 +279,7 @@ public class SBFUnitConverter {
         addUnitSUAsIfAny(WAT, PRB, AECM, BH, BT, ECM, HPG, LPRB, LECM);
         addUnitSUAs(elements.size() >= 6 ? 2 : 1, new BattleForceSUA[] {TAG});
         addUnitSUAsIfHalf(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
-        addUnitSUAsIfAll(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW, TRN);
+        addUnitSUAsIfAll(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW, TRN, UMU);
         sumUnitSUAs(CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
               VTS, AT, ATxD, DT, MT, PT, ST, STxD, SCR);
         sumUnitSUAsDivideBy3(ATAC, BOMB, PNT, IF);
