@@ -47,6 +47,7 @@ import megamek.common.Player;
 import megamek.common.units.Terrains;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.options.OptionsConstants;
+import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFScenarioProgress;
@@ -83,7 +84,7 @@ final class SBFInitiativeModifiers {
             long recon = units().mapToLong(u -> u.getElements().isEmpty() ? (u.hasSUA(RCN) ? 2 : 0)
                   : u.getElements().stream().filter(SBFUnitConverter::isReconElement).count()).sum();
             if (!intel) {
-                int mhq = units().mapToInt(SBFUnit::getMHQ).sum();
+                int mhq = units().mapToInt(u -> mhq(game, u)).sum();
                 result += (mhq >= 7 ? 2 : mhq >= 3 ? 1 : 0) * (recon >= 4 ? 2 : 1);
             }
             result += battlefieldBonus() + leadershipBonus() + statusPenalty(recon);
@@ -181,6 +182,24 @@ final class SBFInitiativeModifiers {
         return inPlay && units().anyMatch(u -> u.hasAnySUAOf(COM, SCOM) && u.getInitiativeAbilities().contains(ability));
     }
 
+    /** Battle Computer, a quirk of BattleMech and vehicle Elements (Design Quirks Table, IO:BF p. 228). */
+    private static boolean hasBattleComputer(SBFUnit unit) {
+        return unit.hasElementQuirk(OptionsConstants.QUIRK_POS_BATTLE_COMP, SBFElementType.BM, SBFElementType.V);
+    }
+
+    /**
+     * The Unit's MHQ rating with its design quirks, IO:BF p. 228: Battle Computer "Unit with the Element add MHQ6";
+     * Command BattleMech "Unit with this Element adds MHQ3".
+     */
+    static int mhq(SBFGame game, SBFUnit unit) {
+        int mhq = unit.getMHQ();
+        if (game.usesDesignQuirks()) {
+            mhq += hasBattleComputer(unit) ? 6 : 0;
+            mhq += unit.hasElementQuirk(OptionsConstants.QUIRK_POS_COMMAND_MEK, SBFElementType.BM) ? 3 : 0;
+        }
+        return mhq;
+    }
+
     private int battlefieldBonus() {
         int round = game.getCurrentRound();
         if (round < 1) {
@@ -197,7 +216,7 @@ final class SBFInitiativeModifiers {
         boolean computer = game.usesDesignQuirks() && active.stream()
               .filter(f -> f.moraleStatus() == SBFFormation.MoraleStatus.NORMAL)
               .flatMap(f -> f.getUnits().stream()).anyMatch(u -> u.getCurrentArmor() > 0 && u.hasSUA(COM)
-                    && u.getElements().stream().anyMatch(e -> e.hasQuirk(OptionsConstants.QUIRK_POS_BATTLE_COMP)));
+                    && hasBattleComputer(u));
         return Math.max(tier >= 2 ? tier : 0, computer ? 2 : 0);
     }
 
@@ -264,11 +283,11 @@ final class SBFInitiativeModifiers {
         return score;
     }
 
-    static boolean canCarry(IntelBonus bonus, SBFUnit unit) {
+    static boolean canCarry(SBFGame game, IntelBonus bonus, SBFUnit unit) {
         return switch (bonus) {
-            case HQ -> unit.getMHQ() >= 3;
+            case HQ -> mhq(game, unit) >= 3;
             case RECON -> unit.hasSUA(RCN);
-            case NETWORK -> unit.getMHQ() >= 1;
+            case NETWORK -> mhq(game, unit) >= 1;
         };
     }
 
@@ -279,7 +298,7 @@ final class SBFInitiativeModifiers {
         }
         boolean recon = active.stream().filter(f -> f.getUnits().stream()
               .anyMatch(u -> u.getCurrentArmor() > 0 && u.hasSUA(RCN))).count() * 4 >= active.size();
-        boolean network = units().filter(u -> u.getMHQ() >= 1).count() >= active.size();
+        boolean network = units().filter(u -> mhq(game, u) >= 1).count() >= active.size();
         int bonus = 0;
         for (IntelBonus type : IntelBonus.values()) {
             if ((type == IntelBonus.RECON && !recon) || (type == IntelBonus.NETWORK && !network)) {
@@ -288,7 +307,8 @@ final class SBFInitiativeModifiers {
             if (orders.assignment(type) == null) {
                 // Default only an unplaced token. A destroyed carrier never silently transfers its token.
                 for (SBFFormation f : active) {
-                    var unit = f.getUnits().stream().filter(u -> u.getCurrentArmor() > 0 && canCarry(type, u)).findFirst();
+                    var unit = f.getUnits().stream()
+                          .filter(u -> u.getCurrentArmor() > 0 && canCarry(game, type, u)).findFirst();
                     if (onField(f) && unit.isPresent()) {
                         orders.assign(type, f.getId(), unit.get());
                         break;

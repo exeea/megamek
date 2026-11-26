@@ -162,7 +162,7 @@ final class SBFInitiativeCommand extends ServerCommand {
         // Placement is fixed once the battle begins, including if its carrier subsequently dies or is jammed.
         if (setup(game) && game.getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT)) {
             IntelBonus token = IntelBonus.valueOf(operation);
-            if (SBFInitiativeModifiers.canCarry(token, unit)) {
+            if (SBFInitiativeModifiers.canCarry(game, token, unit)) {
                 force.orders.assign(token, formation.getId(), unit);
                 return true;
             }

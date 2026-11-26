@@ -88,6 +88,19 @@ class SBFAdvancedInitiativeTest {
     }
 
     @Test
+    void designQuirksAddTheCommandBattleMechsMhqToTheForce() {
+        // Design Quirks Table, IO:BF p. 228: Command BattleMech "Unit with this Element adds MHQ3"; MHQ 3 gives +1
+        enable(INIT_MODIFIERS);
+        var element = element(false, false);
+        element.getQuirks().getOption(OptionsConstants.QUIRK_POS_COMMAND_MEK).setValue(true);
+        formation(10, blue).getUnits().getFirst().setElements(List.of(element));
+        formation(20, red);
+        int withoutQuirks = modifiers(blue).total();
+        enable(DESIGN_QUIRKS);
+        assertEquals(withoutQuirks + 1, modifiers(blue).total());
+    }
+
+    @Test
     void alliedEquipmentAndLeadershipStackWithOnlyBestLastRoundBattlefieldEvent() {
         enable(INIT_MODIFIERS);
         enable(DESIGN_QUIRKS);

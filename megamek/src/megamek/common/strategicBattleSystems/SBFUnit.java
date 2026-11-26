@@ -364,6 +364,12 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
         return (getElements().size() >= 4) && getElements().stream().allMatch(element -> element.hasQuirk(quirk));
     }
 
+    /** An Element quirk (Design Quirks Table, IO:BF p. 228) on one of this Unit's Elements of the given types. */
+    public boolean hasElementQuirk(String quirk, SBFElementType type, SBFElementType... furtherTypes) {
+        return getElements().stream().anyMatch(element -> element.hasQuirk(quirk)
+              && SBFElementType.getUnitType(element).isAnyOf(type, furtherTypes));
+    }
+
     public List<AlphaStrikeElement> getElements() {
         return new ArrayList<>(elements);
     }
