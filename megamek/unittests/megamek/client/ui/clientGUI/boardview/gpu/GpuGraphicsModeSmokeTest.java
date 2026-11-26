@@ -114,11 +114,14 @@ class GpuGraphicsModeSmokeTest {
               "The woods have their trees");
         assertTrue(enhanced.stream().anyMatch(chunk -> materials(chunk).stream().anyMatch(GpuTerrain::sculpted)),
               "The relief is sculpted");
-        assertEquals(roadMasks, infrastructure(terrain), "Graphics modes install the same generated road paint");
+        // Enhanced paints a road's end over a drop and a paved road's end at a dirt track (GpuRoads#painted); Classic
+        // keeps its ordinary edges. The patches are the same in both; their paint differs there.
+        Set<GpuRoads.MaskData> enhancedMasks = infrastructure(terrain);
+        assertEquals(placements(roadMasks), placements(enhancedMasks), "Graphics modes paint the same road patches");
         capture("graphics-enhanced.png");
         view.setTacticalView(true);
         frames(view, 3);
-        assertEquals(roadMasks, infrastructure(terrain), "Enhanced Tactical keeps the same infrastructure");
+        assertEquals(enhancedMasks, infrastructure(terrain), "Enhanced Tactical keeps the same infrastructure");
         assertTrue(terrain.scatterHidden());
         assertFalse(terrain.busy(), "T starts no terrain rebuild");
         capture("graphics-enhanced-tactical.png");
@@ -201,7 +204,7 @@ class GpuGraphicsModeSmokeTest {
         assertNull(((GpuOcean) get(terrain, "ocean")).texture(), "No wave simulation");
         assertNull(((GpuOcean) get(terrain, "lavaOcean")).texture());
         assertEquals(WIDTH, get(get(terrain, "biomes"), "width"), "Only the per-hex biome texels, which the ice reads");
-        assertTrue(((Map<?, ?>) get(get(terrain, "groundCover"), "chunks")).isEmpty(), "No grass");
+        assertTrue(((List<?>) get(get(terrain, "groundCover"), "shown")).isEmpty(), "No grass");
         boolean building = false;
         for (Object chunk : (List<?>) get(terrain, "chunks")) {
             for (Object prop : (List<?>) get(chunk, "props")) {
@@ -284,6 +287,13 @@ class GpuGraphicsModeSmokeTest {
     }
 
     /** Installed generated coats and structural supports must survive either graphics and its Tactical View. */
+    /** Where each mask lies (its place and size in its hex), without its paint. */
+    private static Set<List<Float>> placements(Set<GpuRoads.MaskData> masks) {
+        Set<List<Float>> placements = new HashSet<>();
+        masks.forEach(mask -> placements.add(List.of(mask.x(), mask.y(), mask.width(), mask.height())));
+        return placements;
+    }
+
     private static Set<GpuRoads.MaskData> infrastructure(GpuTerrain terrain) {
         Set<GpuRoads.MaskData> masks = new HashSet<>();
         boolean bridge = false, rails = false;
