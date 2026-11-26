@@ -125,16 +125,61 @@ final class BoardRoadCut {
             // (BoardRoadBank splits the ground there), so the two meet vertex for vertex.
             List<Segment> sides = new ArrayList<>();
             outline(piece.area(), sides, epsilon);
-            for (Segment side : sides) { stations(side, segments); }
-            for (float[] line : piece.grade().creases()) { crease(piece.area(), line); }
+            List<float[]> creases = piece.grade().creases();
+            for (Segment side : sides) {
+                boolean climbing = climbing(piece.grade(), side);
+                for (float[] station : stations(side, segments)) {
+                    if (climbing) { tie(piece, station[0], station[1], creases, sides); }
+                }
+            }
+            for (float[] line : creases) { crease(piece.area(), line); }
         }
+    }
+
+    /** Whether a side of a piece runs level, along the sweep's rows, while the grade climbs along it. */
+    private boolean climbing(BoardRoadGrade grade, Segment side) {
+        return Math.abs(side.by() - side.ay()) <= epsilon && Math.abs(grade.height(side.ax(), side.ay())
+              - grade.height(side.bx(), side.by())) >= .001f * BoardGeometry.hexScale();
+    }
+
+    /**
+     * The sweep's rows run level, so a grid vertex of a level side climbing across an eased ramp stands on the curved
+     * grade with no partner on the rows beside it, where the mesh runs straight between the ramp's rows: the faces
+     * between would fold. A run from it along the grade's fall into the piece, to the nearest of the ramp's rows or the
+     * piece's sides, gives every row on the way a vertex there, on the grade.
+     */
+    private void tie(Piece piece, float x, float y, List<float[]> creases, List<Segment> sides) {
+        float[] fall = piece.grade().fall(x, y);
+        if (fall == null) { return; }
+        float reach = BoardGeometry.TILE_WIDTH * BoardGeometry.hexScale(), probe = 4 * epsilon;
+        float best = Float.POSITIVE_INFINITY, tx = 0, ty = 0;
+        for (int sign = -1; sign <= 1; sign += 2) {
+            float dx = sign * fall[0] * reach, dy = sign * fall[1] * reach;
+            if (!piece.area().contains(x + dx / reach * probe, y + dy / reach * probe)) { continue; }
+            float near = Float.POSITIVE_INFINITY;
+            for (float[] line : creases) {
+                float[] hit = intersection(x, y, x + dx, y + dy, line[0], line[1], line[2], line[3]);
+                if (hit != null && hit[0] * reach > probe) { near = Math.min(near, hit[0]); }
+            }
+            for (Segment side : sides) {
+                float[] hit = intersection(x, y, x + dx, y + dy, side.ax(), side.ay(), side.bx(), side.by());
+                if (hit != null && hit[0] * reach > probe) { near = Math.min(near, hit[0]); }
+            }
+            if (near < best) {
+                best = near;
+                tx = x + dx * near;
+                ty = y + dy * near;
+            }
+        }
+        if (best < Float.POSITIVE_INFINITY) { segments.add(new Segment(x, y, tx, ty)); }
     }
 
     /**
      * A segment split where it crosses the world's grid (BoardRoadBank#GRID), into {@code into}: on the grid plane
-     * exactly, where the bank puts its own vertex.
+     * exactly, where the bank puts its own vertex. Returns the points it was split at.
      */
-    private void stations(Segment s, List<Segment> into) {
+    private List<float[]> stations(Segment s, List<Segment> into) {
+        List<float[]> points = new ArrayList<>();
         float px = s.ax(), py = s.ay();
         for (float[] cut : crossings(s.ax(), s.ay(), s.bx(), s.by())) {
             float t = cut[0];
@@ -142,11 +187,13 @@ final class BoardRoadCut {
             float qy = cut[1] == 1 ? cut[2] : s.ay() + (s.by() - s.ay()) * t;
             if (Math.hypot(qx - px, qy - py) > epsilon && Math.hypot(s.bx() - qx, s.by() - qy) > epsilon) {
                 into.add(new Segment(px, py, qx, qy));
+                points.add(new float[] { qx, qy });
                 px = qx;
                 py = qy;
             }
         }
         into.add(new Segment(px, py, s.bx(), s.by()));
+        return points;
     }
 
     /**
@@ -1111,7 +1158,7 @@ final class BoardRoadCut {
      * horizontal sides kept, so no T junctions arise.
      */
     private static Sweep sweep(List<Segment> segments, float epsilon, Classifier classifier, Triangles out) {
-        List<Segment> split = split(segments, epsilon);
+        List<Segment> split = rows(split(segments, epsilon), epsilon);
         TreeMap<Float, List<Float>> levels = new TreeMap<>();
         for (Segment s : split) {
             levels.computeIfAbsent(s.ay(), key -> new ArrayList<>()).add(s.ax());
@@ -1191,6 +1238,43 @@ final class BoardRoadCut {
             if (x > from + epsilon && x < to - epsilon) { result.add(new Point(x, y)); }
         }
         if (to - from > epsilon) { result.add(new Point(to, y)); }
+        return result;
+    }
+
+    /**
+     * The segments with every end within the tolerance of a grid plane (BoardRoadBank#GRID) moved onto it, any other
+     * within the tolerance above a lower end's row onto that row, and those left coincident or of no length dropped:
+     * Area's outlines put one level edge a float step either side of a row, and a row that thin between them would hold
+     * only upright slivers.
+     */
+    private static List<Segment> rows(List<Segment> segments, float epsilon) {
+        java.util.TreeSet<Float> ys = new java.util.TreeSet<>();
+        for (Segment s : segments) {
+            ys.add(s.ay());
+            ys.add(s.by());
+        }
+        Map<Float, Float> row = new HashMap<>();
+        float grid = BoardRoadBank.GRID * BoardGeometry.hexScale(), start = Float.NaN;
+        for (float y : ys) {
+            // A row within the tolerance of a grid plane lies on it, as a hex's level borders do in both hexes.
+            long k = Math.round(y / grid);
+            float plane = k * grid;
+            if (Math.abs(y - plane) <= epsilon) {
+                row.put(y, plane);
+                continue;
+            }
+            if (Float.isNaN(start) || y - start > epsilon) { start = y; }
+            row.put(y, start);
+        }
+        List<Segment> result = new ArrayList<>(segments.size());
+        Set<List<Float>> seen = new HashSet<>();
+        for (Segment s : segments) {
+            float ay = row.get(s.ay()), by = row.get(s.by());
+            if (s.ax() == s.bx() && ay == by) { continue; }
+            boolean forward = s.ax() < s.bx() || s.ax() == s.bx() && ay < by;
+            if (!seen.add(forward ? List.of(s.ax(), ay, s.bx(), by) : List.of(s.bx(), by, s.ax(), ay))) { continue; }
+            result.add(ay == s.ay() && by == s.by() ? s : new Segment(s.ax(), ay, s.bx(), by));
+        }
         return result;
     }
 

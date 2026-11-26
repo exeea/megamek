@@ -486,6 +486,17 @@ final class BoardRoadGrade {
         return result;
     }
 
+    /**
+     * The unit direction an eased grade rises in at a point; null on Classic's straight ramps and where it is level.
+     */
+    float[] fall(float x, float y) {
+        if (!eased) { return null; }
+        float step = .05f * BoardGeometry.hexScale();
+        float gx = height(x + step, y) - height(x - step, y), gy = height(x, y + step) - height(x, y - step);
+        float slope = (float) Math.hypot(gx, gy);
+        return slope < .001f * step ? null : new float[] { gx / slope, gy / slope };
+    }
+
     /** A line parallel to this direction's edge at the given share of its run, across any carriageway. */
     private float[] crossSection(int direction, float run) {
         return crossSection(direction, run, PAST_CORNER);
