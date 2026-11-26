@@ -19,7 +19,7 @@ import megamek.common.units.Entity;
 /**
  * Immutable presentation of the shared E(C)CM rules ({@link ComputeECM}) on one board, in column order: what the 3D
  * board's ECM pass and its source badges draw. Built on the Swing thread from the fields the local player may see; the
- * render thread draws its bits and decides no rule. The Legacy 2D board keeps its own colour maps.
+ * render thread draws its bits and decides no rule.
  *
  * @param hexes    per hex: the {@link #OWN_ECM} to {@link #RING} bits, and from {@link #COUNT_SHIFT} the number of
  *                 displayed sources covering it

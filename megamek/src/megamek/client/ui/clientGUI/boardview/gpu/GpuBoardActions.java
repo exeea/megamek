@@ -188,7 +188,7 @@ final class GpuBoardActions {
             buttons.addAll(phase.getActionButtons());
         }
         collectButtons(owner.panel(), buttons);
-        // The off-board targets lead: they show only while they can be used, as the Legacy 2D board's arrows do.
+        // The off-board targets lead: they show only while they can be used.
         List<BoardScene.Command> result = new ArrayList<>(offBoardTargets(owner));
         for (AbstractButton button : buttons) {
             String id = Objects.toString(button.getActionCommand(), button.getText());

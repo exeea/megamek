@@ -1149,7 +1149,7 @@ final class GpuHud implements GpuBoardHud {
      * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
      * changes orders; Alt opens the native LOS ruler at the pointed height, and a plain left
      * click ends a measurement waiting for its second point with that measurement's modifier;
-     * while a bot order picks hexes, a left click picks one, as the Legacy 2D board's click does. Any other left
+     * while a bot order picks hexes, a left click picks one. Any other left
      * click takes the unit {@link #clickedUnit} gives.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {
@@ -1252,7 +1252,7 @@ final class GpuHud implements GpuBoardHud {
                 select(unit.id());
             }
         } else if (source.strategic()) {
-            // SBF: a left click is MegaMek's board click on the hex, a formation's too, as on the Legacy 2D board
+            // SBF: a left click is MegaMek's board click on the hex, a formation's too
             source.click(coords, false, modifiers);
         } else if (planning(inputs)) {
             if (shift) {

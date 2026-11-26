@@ -2180,7 +2180,7 @@ public class MapMenu extends JPopupMenu {
         }
     }
 
-    /** Applies the inspected target only when an action is chosen (or the Legacy 2D popup is shown). */
+    /** Applies the inspected target only when an action is chosen (or the popup is shown). */
     public void selectTarget() {
         if (client.isMyTurn() && myEntity != null) {
             findTarget();

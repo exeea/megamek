@@ -168,7 +168,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private BoardTactical.Ruler ruler;
     List<Coords> highlightedEntityHexes = new ArrayList<>(), demolitionChargeHighlightHexes = new ArrayList<>();
     private final Set<Integer> selectedEntities = new HashSet<>(), ecmEntities = new HashSet<>();
-    /** The 3D board's E(C)CM, rebuilt with the Legacy 2D maps above by {@link #updateEcmList()}. */
+    /** The 3D board's E(C)CM, rebuilt by {@link #updateEcmList()}. */
     private BoardElectronicWarfare electronicWarfare = BoardElectronicWarfare.EMPTY;
     private Shape[] facingPolys, movementPolys, finalFacingPolys;
     private Shape upArrow, downArrow;
@@ -910,7 +910,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         repaint();
     }
 
-    /** The planned move's marks, and the Legacy 2D sprites made from them. */
+    /** The planned move's marks. */
     private void setPath(List<TacticalMark.Step> steps, List<TacticalMark.FlightPath> flight) {
         pathSteps = List.copyOf(steps);
         flightPath = List.copyOf(flight);

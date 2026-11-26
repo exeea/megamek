@@ -79,9 +79,9 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
 
     /**
      * Where the copies of a label's text that draw its outline go, as x, y pairs in the units of its font, which is
-     * {@code size} large: a ring around the text, close enough for the copies to join into one outline. Legacy 2D and
-     * the saved image draw the outline so: far cheaper than stroking the glyphs' outlines for Legacy 2D, which draws
-     * its labels on every paint. The 3D board draws a real stroke instead (GpuHexText, GpuBoardSkin.OUTLINE_FONT).
+     * {@code size} large: a ring around the text, close enough for the copies to join into one outline. The saved
+     * image draws the outline so, far cheaper than stroking the glyphs' outlines. The 3D board draws a real stroke
+     * instead (GpuHexText, GpuBoardSkin.OUTLINE_FONT).
      */
     public static float[] outlineOffsets(float size) {
         float[] offsets = new float[2 * OUTLINE_COPIES];

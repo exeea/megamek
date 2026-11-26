@@ -2639,7 +2639,7 @@ class GpuBattleView extends ApplicationAdapter {
             fitted = true;
             cameraSelection = scene.selectedId();
             cameraFollowingPlayback = false;
-            // Start with the whole map, ignoring any earlier Legacy 2D board centering. Later board switches
+            // Start with the whole map, ignoring any earlier centering request. Later board switches
             // can follow a unit-list click, whose pending focus request must still be applied.
             centerSequence = centerSequence < 0 ? request.sequence() : 0;
         }
@@ -2713,7 +2713,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (playback.movement() != null) {
                 // The complete route is already framed. Do not chase the unit or recenter it on arrival.
                 cameraFollowingPlayback = false;
-                // The Legacy 2D board auto-centers each move's start; do not replay that request after arrival.
+                // The client asks to centre each move's start; do not replay that request after arrival.
                 if (request.entityId() == Entity.NONE
                       && playback.movement().path().getFirst().coords().equals(request.coords())) {
                     centerSequence = request.sequence();

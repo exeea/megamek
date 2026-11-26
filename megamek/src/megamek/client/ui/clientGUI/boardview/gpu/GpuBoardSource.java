@@ -1995,7 +1995,7 @@ final class GpuBoardSource implements BoardSource {
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 
-    /** Raise the Legacy 2D unit overview's SELECT_UNIT event; the phase display decides what selecting means. */
+    /** Raise the SELECT_UNIT board event; the phase display decides what selecting means. */
     void selectUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
@@ -2008,7 +2008,7 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
-    /** Centre on an own or visible unit as the Legacy 2D unit overview does; an own unit's other board is shown. */
+    /** Centre on an own or visible unit; an own unit's other board is shown. */
     void locateUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;

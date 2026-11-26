@@ -70,7 +70,7 @@ import megamek.common.units.Entity;
 
 /**
  * EDT: what an SBF game puts into the 3D board's frame where a Total Warfare game has its entities: the formations as
- * unit tokens (the Legacy 2D counter's picture: camouflage, the owner's colour, the formation type), the placeholders of
+ * unit tokens (a counter's picture: camouflage, the owner's colour, the formation type), the placeholders of
  * units only detected as sensor contacts, the formations' status for the HUD and the SBF reports for the log. The
  * {@link SBFGame} is the one source of truth; this keeps only the counter pictures, one per look, and the last
  * snapshots, returned again while nothing changed so the render thread can compare them by identity.
@@ -260,7 +260,7 @@ final class GpuSbfCapture {
               colour.getRGB()), GpuSbfCapture::draw);
     }
 
-    /** A counter as the Legacy 2D board draws it, with the camouflage showing: a plate rimmed in the owner's colour. */
+    /** A counter with the camouflage showing: a plate rimmed in the owner's colour. */
     private static BoardScene.Pixels draw(Counter look) {
         Image camouflage = look.camouflage() == null ? null : look.camouflage().getImage();
         Color colour = new Color(look.rgb(), true);

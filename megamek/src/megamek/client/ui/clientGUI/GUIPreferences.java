@@ -150,7 +150,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_COORDS = "showCoords";
     /** View > Hex Types: each hex's type as text at its bottom edge, under its level label (BoardHexText). */
     public static final String SHOW_HEX_TYPES = "showHexTypes";
-    /** The outline around the hex labels in Legacy 2D and on the 3D board; the saved board image always has it. */
+    /** The outline around the hex labels on the 3D board; the saved board image always has it. */
     public static final String HEX_LABEL_OUTLINE = "hexLabelOutline";
     public static final String HIGH_QUALITY_GRAPHICS = "HighQualityGraphics";
     public static final String SHADOW_MAP = "ShadowMap";

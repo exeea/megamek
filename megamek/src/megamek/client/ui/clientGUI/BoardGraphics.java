@@ -37,7 +37,7 @@ import jakarta.annotation.Nullable;
 
 /**
  * How the 3D board draws its terrain, a user preference that applies at once in the game, the map preview and the
- * board editor. The Legacy 2D board ignores it.
+ * board editor.
  */
 public enum BoardGraphics {
 

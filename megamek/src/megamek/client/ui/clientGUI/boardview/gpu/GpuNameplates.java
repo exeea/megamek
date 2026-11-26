@@ -40,10 +40,10 @@ import megamek.common.units.Entity;
  * Every unit with a head anchor gets a team pip, or a tag while it is the focus unit, hovered,
  * inspected, the physical target or a sensor contact, and every unit while the nameplate key shows them all or the
  * client's nameplate setting ({@link NameplateMode}) always does. A tag names the
- * unit as the client's label style does (the Legacy 2D board label's name) before its status words; a tag with neither
+ * unit as the client's label style does before its status words; a tag with neither
  * stays a pip (no phase words, no model repeated after the name).
  * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
- * tag: the Legacy 2D board's damage tile, armor and structure bars ({@link GpuBattleStatus.Marks}), and an E(C)CM
+ * tag: the damage tile, armor and structure bars ({@link GpuBattleStatus.Marks}), and an E(C)CM
  * source its "ECM"/"ECCM" chip beside them. A tag carries the unit's weight class letter and its gunnery and piloting
  * skills. The hovered unit's tag grows a second line with its pilot, movement points and heat (and, while deploying, a
  * coral note that it starts damaged), so the board needs no separate hover card. In the Tactical View the units' bases show the pips, marks and E(C)CM badges, so a unit has a tag or
@@ -82,7 +82,7 @@ final class GpuNameplates implements GpuHud.Component {
     private static final float[] SHADOW = { .5f, .2f };
     private static final Color FILL = rgba(23, 35, 35, .88f);
     /**
-     * The marks: the Legacy 2D label bars, 24 long and 3 tall, the structure bar 1 under the armor bar, 3 right of the
+     * The marks: the label bars, 24 long and 3 tall, the structure bar 1 under the armor bar, 3 right of the
      * damage tile, all 2 inside the tags' fill; the pip or tag stands 2 above them.
      */
     private static final float BAR_LENGTH = 24;
@@ -511,7 +511,7 @@ final class GpuNameplates implements GpuHud.Component {
     }
 
     /**
-     * A unit's marks on the tags' fill, as the Legacy 2D board label draws them (UnitAnnotations): the damage tile, if
+     * A unit's marks on the tags' fill, as UnitAnnotations draws them: the damage tile, if
      * any, then the armor bar over the structure bar, if the unit has one, each on the label's grey track.
      */
     private final class UnitMarks extends Actor {
@@ -534,7 +534,7 @@ final class GpuNameplates implements GpuHud.Component {
             Color.argb8888ToColor(damage, marks.damageArgb());
             Color.argb8888ToColor(armor, marks.armorArgb());
             Color.argb8888ToColor(structure, marks.structureArgb());
-            // A unit without armor at all (ARMOR_NA) shows an empty bar, as the Legacy 2D label does.
+            // A unit without armor at all (ARMOR_NA) shows an empty bar.
             armorShare = Math.max(0, (float) unit.armor());
             structureShare = Math.max(0, (float) unit.structure());
             float content = tile ? Math.max(GpuHudKit.DAMAGE_TILE, bars()) : bars();

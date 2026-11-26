@@ -265,7 +265,7 @@ final class GpuBattleStatus {
     private ArcKey arcKey;
 
     /**
-     * Lists the local player's units ({@code Game.getPlayerEntities}, as the Legacy 2D unit overview) and every other
+     * Lists the local player's units ({@code Game.getPlayerEntities}) and every other
      * {@code visible} unit; units that are not {@code identified} stay anonymous. {@code activeTurn} is the turn the
      * client lets the local player act in now, or null. An unchanged capture returns the previous snapshot, so the
      * render thread can compare by identity.

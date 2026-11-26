@@ -1079,7 +1079,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         List<List<Component>> comps = new ArrayList<>();
         ArrayList<Component> row;
 
-        // Tileset (the Legacy 2D board's artwork) and the 3D board's graphics
+        // Tileset (saved board images, the building editor's picture) and the 3D board's graphics
         JLabel tileSetChoiceLabel = new JLabel(Messages.getString("CommonSettingsDialog.tileset"));
         tileSetChoice = new JComboBox<>();
         tileSetChoice.setMaximumSize(new Dimension(400, tileSetChoice.getMaximumSize().height));
