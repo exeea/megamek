@@ -79,6 +79,11 @@ final class BoardRoadBank {
     /** The poured and wet hexes within reach. */
     private final List<Kept> kept = new ArrayList<>();
     private final float level = BoardGeometry.level(), scale = BoardGeometry.hexScale();
+    /**
+     * Every point #conform and #split cut on the grid. A face left whole beside one cut there has none of them on their
+     * shared edge (BoardSurface#closeTJunctions).
+     */
+    final Set<Vector3> cut = Collections.newSetFromMap(new IdentityHashMap<>());
     /** The hex's relief, which decides where containment walls retain the slopes beside a road. */
     private final BoardRelief relief;
 
@@ -370,6 +375,7 @@ final class BoardRoadBank {
             boolean ground = shade != null && shade.normal().z > .95f;
             relief.reshade(from, to, ground ? normal(from) : normals.get(to));
         }
+        cut.addAll(cuts.values());
         return result;
     }
 
@@ -391,6 +397,7 @@ final class BoardRoadBank {
                 result.add(face);
             }
         }
+        cut.addAll(cuts.values());
         return result;
     }
 

@@ -7,12 +7,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
 
@@ -658,6 +660,7 @@ final class BoardSurface {
             dig();
             quay(scene);
             relief.field(faces);
+            if (fieldWalls == null && bank != null) { closeTJunctions(List.of(faces), bank.cut); }
             int roughStart = faces.size();
             relief.boulders(faces);
             roughModels = BoardRough.place(this);
@@ -3822,6 +3825,128 @@ final class BoardSurface {
         return result;
     }
 
+    /** A position to a thousandth of a unit: copies of one point compare alike. */
+    private record Spot(int x, int y, int z) {
+        Spot(Vector3 p) { this(Math.round(p.x * 1000), Math.round(p.y * 1000), Math.round(p.z * 1000)); }
+    }
+
+    /**
+     * Closes the T junctions the bank's grid cuts ({@code cuts}, BoardRoadBank#cut) leave among these lists' faces: a face
+     * the bank split meets one it left whole along a straight edge (a wall split on the grid under a whole top), and a cut
+     * point lying inside the whole face's edge rasterizes as pinholes. Every edge only one face uses takes a copy of each
+     * such point lying strictly inside it, shaded along that edge, and its face is cut ear by ear in its own plane, which
+     * points on its own edges leave flat. A point a hair from an end is that end at another height, no junction. Dressing
+     * stays apart; the lists change in place, and a road face's pieces stay the road's.
+     */
+    private void closeTJunctions(List<List<Face>> lists, Set<Vector3> cuts) {
+        List<Face> all = new ArrayList<>();
+        lists.forEach(list -> list.stream().filter(f -> f.finish() != Finish.DRESSING && f.finish() != Finish.OUTCROP).forEach(all::add));
+        Set<Vector3> used = Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<Set<Spot>, Integer> uses = new HashMap<>();
+        for (var f : all) {
+            for (int i = 0; i < 3; i++) {
+                used.add(corner(f, i));
+                uses.merge(side(f, i), 1, Integer::sum);
+            }
+        }
+        // The cut points the faces use, by cell.
+        float cell = 4 * BoardGeometry.hexScale(), tolerance = .001f * BoardGeometry.hexScale();
+        Map<List<Integer>, List<Vector3>> points = new HashMap<>();
+        for (Vector3 v : cuts) {
+            if (used.contains(v)) {
+                points.computeIfAbsent(List.of((int) Math.floor(v.x / cell), (int) Math.floor(v.y / cell)), k -> new ArrayList<>()).add(v);
+            }
+        }
+        if (points.isEmpty()) { return; }
+        Map<Face, List<Face>> split = new IdentityHashMap<>();
+        for (var f : all) {
+            List<Vector3> ring = new ArrayList<>();
+            for (int i = 0; i < 3; i++) {
+                Vector3 p = corner(f, i), q = corner(f, i + 1), d = new Vector3(q).sub(p);
+                ring.add(p);
+                TreeMap<Float, Vector3> inside = new TreeMap<>();
+                Set<Spot> taken = new HashSet<>(List.of(new Spot(p), new Spot(q)));
+                for (int x = (int) Math.floor(Math.min(p.x, q.x) / cell); uses.get(side(f, i)) == 1 && x <= Math.floor(Math.max(p.x, q.x) / cell); x++) {
+                    for (int y = (int) Math.floor(Math.min(p.y, q.y) / cell); y <= Math.floor(Math.max(p.y, q.y) / cell); y++) {
+                        for (Vector3 v : points.getOrDefault(List.of(x, y), List.of())) {
+                            float u = new Vector3(v).sub(p).dot(d) / d.len2();
+                            if (u > 0 && u < 1 && new Vector3(p).mulAdd(d, u).dst(v) <= tolerance && v.dst(p) > 10 * tolerance
+                                  && v.dst(q) > 10 * tolerance && taken.add(new Spot(v))) { inside.put(u, v); }
+                        }
+                    }
+                }
+                inside.forEach((u, v) -> {
+                    Vector3 copy = new Vector3(v);
+                    relief.interpolateShade(p, q, u, copy);
+                    ring.add(copy);
+                });
+            }
+            List<Face> pieces = ring.size() > 3 ? fan(ring, f) : null;
+            if (pieces != null) { split.put(f, pieces); }
+        }
+        for (var list : lists) {
+            for (int i = list.size() - 1; i >= 0; i--) {
+                var pieces = split.get(list.get(i));
+                if (pieces != null) {
+                    list.remove(i);
+                    list.addAll(i, pieces);
+                }
+            }
+        }
+        if (reservedRoad.stream().anyMatch(split::containsKey)) {
+            List<Face> road = new ArrayList<>();
+            reservedRoad.forEach(f -> road.addAll(split.getOrDefault(f, List.of(f))));
+            reservedRoad.forEach(reservedFaces::remove);
+            reservedRoad = List.copyOf(road);
+            reservedFaces.addAll(road);
+        }
+    }
+
+    private static Vector3 corner(Face f, int i) { return i % 3 == 0 ? f.a() : i % 3 == 1 ? f.b() : f.c(); }
+
+    /** A face's edge from corner i, by its ends' spots. */
+    private static Set<Spot> side(Face f, int i) {
+        Spot p = new Spot(corner(f, i)), q = new Spot(corner(f, i + 1));
+        return p.equals(q) ? Set.of(p) : Set.of(p, q);
+    }
+
+    /**
+     * A face's convex outline (its corners and points on its edges) cut ear by ear in the plane its normal sees most of,
+     * with its winding; an ear holds no other point, not even on its cut. Null if it cannot be cut.
+     */
+    private static List<Face> fan(List<Vector3> ring, Face like) {
+        Vector3 n = new Vector3(like.b()).sub(like.a()).crs(new Vector3(like.c()).sub(like.a()));
+        int drop = Math.abs(n.x) >= Math.abs(n.y) && Math.abs(n.x) >= Math.abs(n.z) ? 0 : Math.abs(n.y) >= Math.abs(n.z) ? 1 : 2;
+        // Seen along y the plane's axes are x and z, which turn against the normal's y.
+        float turn = Math.signum(drop == 0 ? n.x : drop == 1 ? -n.y : n.z);
+        List<Vector3> left = new ArrayList<>(ring);
+        List<Face> pieces = new ArrayList<>();
+        while (left.size() > 2) {
+            int size = left.size(), ear = -1;
+            for (int i = 0; i < size && ear < 0; i++) {
+                Vector3 a = left.get((i + size - 1) % size), b = left.get(i), c = left.get((i + 1) % size);
+                if (turn * planeCross(a, b, c, drop) <= 1e-9f * a.dst2(c)) { continue; }
+                boolean empty = true;
+                for (Vector3 o : left) {
+                    empty &= o == a || o == b || o == c || turn * planeCross(a, b, o, drop) < 0 || turn * planeCross(b, c, o, drop) < 0
+                          || turn * planeCross(c, a, o, drop) < 0;
+                }
+                if (empty) { ear = i; }
+            }
+            if (ear < 0) { return null; }
+            pieces.add(new Face(left.get((ear + size - 1) % size), left.get(ear), left.get((ear + 1) % size), like.finish(),
+                  like.landEdge(), like.scatter()));
+            left.remove(ear);
+        }
+        return pieces;
+    }
+
+    /** Twice the signed area of a triangle in the plane seen along the given axis. */
+    private static float planeCross(Vector3 a, Vector3 b, Vector3 c, int drop) {
+        float ax = drop == 0 ? a.y : a.x, ay = drop == 2 ? a.y : a.z, bx = drop == 0 ? b.y : b.x, by = drop == 2 ? b.y : b.z;
+        return (bx - ax) * ((drop == 2 ? c.y : c.z) - ay) - (by - ay) * ((drop == 0 ? c.y : c.x) - ax);
+    }
+
     /** Neighbours must have completed construction; only their immutable edge topography is borrowed. */
     List<Face> walls(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         if (wallFaces == null || wallFloor != floor) {
@@ -3837,6 +3962,11 @@ final class BoardSurface {
                 var lower = scene.tile(tile.coords().translated(d));
                 if (lower == null || lower.elevation() >= tile.elevation()) { continue; }
                 for (var tunnel : BoardTunnel.entrances(scene, lower)) { tunnel.cut(wallFaces, relief); }
+            }
+            // The walls meet the hex's own ground at the bank's grid cuts (#closeTJunctions).
+            if (fieldWalls == null && !columns && bank != null) {
+                wallFaces = new ArrayList<>(wallFaces);
+                closeTJunctions(List.of(faces.subList(0, faces.size() - rough.size()), wallFaces), bank.cut);
             }
             wallFloor = floor;
         }
