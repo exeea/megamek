@@ -9,7 +9,6 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
-import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.Point;
@@ -132,9 +131,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private static final int[] allDirections = { 0, 1, 2, 3, 4, 5 };
     private static final Font FONT_10 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
     private static final Font font_note = FONT_10;
-    private static final Polygon HEX_POLY = HexDrawUtilities.rasterHex();
     public static final Color DEMO_CHARGE_HAZARD_COLOR = new Color(255, 213, 0);
-    private static final Color DEMO_CHARGE_OUTLINE_COLOR = new Color(0, 0, 0, 200);
     public static final Color ARTILLERY_DRIFT_LINE_COLOR = new Color(255, 191, 0);
     private static final Color[] HEAT_MAP_COLOR_RAMP = {
           new Color(0, 0, 128),      // navy blue - coldest
@@ -171,7 +168,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private BoardTactical.Ruler ruler;
     List<Coords> highlightedEntityHexes = new ArrayList<>(), demolitionChargeHighlightHexes = new ArrayList<>();
     private final Set<Integer> selectedEntities = new HashSet<>(), ecmEntities = new HashSet<>();
-    Map<Coords, Color> ecmHexes = Map.of(), eccmHexes = Map.of(), ecmCenters = Map.of(), eccmCenters = Map.of();
     /** The 3D board's E(C)CM, rebuilt with the Legacy 2D maps above by {@link #updateEcmList()}. */
     private BoardElectronicWarfare electronicWarfare = BoardElectronicWarfare.EMPTY;
     private Shape[] facingPolys, movementPolys, finalFacingPolys;
@@ -238,9 +234,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public Coords getSelected() { return selected; }
     public long getRevision() { return revision; }
     public FovHighlightingAndDarkening getFieldOfView() { return fieldOfView; }
-
-    /** A renderer may subscribe to invalidation; it does not own the state or calculate visibility. */
-    void setChanged(Runnable changed) { this.changed = Objects.requireNonNull(changed); }
 
     public void setSelected(Coords coords) {
         if (!Objects.equals(selected, coords)) {
@@ -332,14 +325,11 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);
         keyRegistrations.forEach(Runnable::run);
         keyRegistrations.clear();
-        hexDrawPlugins.clear();
         if (hexPick != null) { hexPick.cancel(); }
         listeners.clear();
         if (ownsTileset) { tileManager.close(); }
     }
 
-    /** Optional drawing projection of an attached renderer; absent in a native gameplay session. */
-    void setProjection(BoardGlyphContext projection) { this.projection = projection; }
     public ClientGUI getClientgui() { return clientgui; }
     public Player getLocalPlayer() { return localPlayer; }
     public void setLocalPlayer(Player player) { localPlayer = player; visibilityChanged(); }
@@ -381,13 +371,10 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             try { return graphics.getFontMetrics(key); } finally { graphics.dispose(); }
         });
     }
-    private Font getMinefieldFont() { return new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, Math.max(1, (int) (12 * getScale()))); }
     public void refreshDisplayables() { changed.run(); }
     public void repaint() { revision++; changed.run(); }
     public long getPlanarRevision() { return revision; }
     public BoardFocus getCenterRequest() { return focus; }
-    public void setUseLosTool(boolean use) { useLOSTool = use; }
-    public void setShowLobbyPlayerDeployment(boolean show) { showLobbyPlayerDeployment = show; repaint(); }
     public void addBoardViewListener(BoardViewListener listener) { if (!listeners.contains(listener)) { listeners.add(listener); } }
     public void removeBoardViewListener(BoardViewListener listener) { listeners.remove(listener); }
 
@@ -413,11 +400,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
     /** EDT: the running hex pick, or null. */
     public @Nullable BoardHexPick getHexPick() { return hexPick; }
-    private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();
-    public void addHexDrawPlugin(HexDrawPlugin plugin) { hexDrawPlugins.add(plugin); repaint(); }
-    public void drawHexPlugins(Graphics2D graphics, Coords coords) {
-        for (HexDrawPlugin plugin : hexDrawPlugins) { plugin.draw(graphics, getBoard().getHex(coords), game, coords, this); }
-    }
     /** The marks handlers and dialogs published, in the order they were added. */
     public List<TacticalMark> getMarks() { return List.copyOf(published); }
     /** The planned move's shown steps: their arrows, costs and announcements. */
@@ -578,33 +560,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return players;
     }
 
-    public static GradientPaint getGradientPaint(Color startingColor, float fogStripes, boolean reversed) {
-        Color endingColor = new Color(startingColor.getRed() / 2,
-              startingColor.getGreen() / 2,
-              startingColor.getBlue() / 2,
-              startingColor.getAlpha() / 2);
-
-        // the numbers make the lines align across hexes
-        // reversed changes stripe direction from bottom-left/top-right to top-left/bottom-right
-        if (reversed) {
-            return new GradientPaint(104.0f / fogStripes,
-                  0.0f,
-                  startingColor,
-                  42.0f / fogStripes,
-                  106.0f / fogStripes,
-                  endingColor,
-                  true);
-        } else {
-            return new GradientPaint(42.0f / fogStripes,
-                  0.0f,
-                  startingColor,
-                  104.0f / fogStripes,
-                  106.0f / fogStripes,
-                  endingColor,
-                  true);
-        }
-    }
-
     public void drawHexBorder(Graphics2D graphics2D, Color color, double padding, double lineWidth) {
         drawHexBorder(graphics2D, new Point(0, 0), color, padding, lineWidth);
     }
@@ -618,12 +573,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
     public void drawHexBorder(Graphics2D graphics2D, Point point, Color color) {
         drawHexBorder(graphics2D, point, color, 0, 1);
-    }
-
-    private static Graphics2D atHex(Graphics2D graphics, Point location) {
-        Graphics2D local = (Graphics2D) graphics.create();
-        local.translate(location.x, location.y);
-        return local;
     }
 
     public Mounted<?> getSelectedArtilleryWeapon() {
@@ -678,12 +627,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             }
         }
         return result;
-    }
-
-    public Rectangle markerHexArea(Graphics2D graphics) {
-        Rectangle clip = graphics.getClipBounds();
-        return new Rectangle(clip.x / (int) (HEX_WC * getScale()) - 1, clip.y / (int) (HEX_H * getScale()) - 1,
-              clip.width / (int) (HEX_WC * getScale()) + 4, clip.height / (int) (HEX_H * getScale()) + 4);
     }
 
     public List<BoardMarker> minefieldMarkers() {
@@ -1290,8 +1233,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void secondLOSHex(Coords targetCoords, Coords attackerCoords) {
         if (useLOSTool) {
             setLosEnds(losStart, targetCoords);
-            // LOS calculation and display is handled by RulerDialog via the
-            // BOARD_SECOND_LOS_HEX event fired by checkLOS()
+            // The ruler (RulerModel) measures on the BOARD_SECOND_LOS_HEX event fired by checkLOS()
         }
     }
 
@@ -1516,43 +1458,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         mouseAction(coords.getX(), coords.getY(), eventType, modifiers, mouseButton);
     }
 
-    public void processAffectedCoords(Coords coords, ECMEffects ecm, ECMEffects eccm, Map<Coords, Color> newECMHexes,
-          Map<Coords, Color> newECCMHexes) {
-        Color hexColorECM = null;
-
-        if (ecm != null) {
-            hexColorECM = ecm.getHexColor();
-        }
-
-        Color hexColorECCM = null;
-
-        if (eccm != null) {
-            hexColorECCM = eccm.getHexColor();
-        }
-
-        // Hex color is null if all effects cancel out
-        if ((hexColorECM == null) && (hexColorECCM == null)) {
-            return;
-        }
-
-        if ((hexColorECM != null) && (hexColorECCM == null)) {
-            if (ecm.isECCM()) {
-                newECCMHexes.put(coords, hexColorECM);
-            } else {
-                newECMHexes.put(coords, hexColorECM);
-            }
-        } else if (hexColorECM == null) {
-            if (eccm.isECCM()) {
-                newECCMHexes.put(coords, hexColorECCM);
-            } else {
-                newECMHexes.put(coords, hexColorECCM);
-            }
-        } else { // Both are non-null
-            newECMHexes.put(coords, hexColorECM);
-            newECCMHexes.put(coords, hexColorECCM);
-        }
-    }
-
     public boolean getChatterBoxActive() {
         return chatterBoxActive;
     }
@@ -1718,11 +1623,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     public void updateEcmList() {
-        Map<Coords, Color> newECMHexes = new HashMap<>();
-        Map<Coords, Color> newECMCenters = new HashMap<>();
-        Map<Coords, Color> newECCMHexes = new HashMap<>();
-        Map<Coords, Color> newECCMCenters = new HashMap<>();
-
         ecmEntities.clear();
         // Compute info about all E(C)CM on the board
         final ArrayList<ECMInfo> allEcmInfo = ComputeECM.computeAllEntitiesECMInfo(game.getEntitiesVector());
@@ -1753,15 +1653,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 continue;
             }
 
-            final Color ecmColor = ECMEffects.getECMColor(entity.getOwner());
-            // Update ECM center information
-            if (entity.getECMInfo() != null) {
-                newECMCenters.put(entity.getPosition(), ecmColor);
-            }
-            // Update ECCM center information
-            if (entity.getECCMInfo() != null) {
-                newECCMCenters.put(entity.getPosition(), ecmColor);
-            }
             if (entity.getECMInfo() != null || entity.getECCMInfo() != null) {
                 emitters.add(entity);
             }
@@ -1770,10 +1661,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
         }
 
-        // Keep track of allied ECM and enemy ECCM
-        Map<Coords, ECMEffects> ecmAffectedCoords = new HashMap<>();
-        // Keep track of allied ECCM and enemy ECM
-        Map<Coords, ECMEffects> eccmAffectedCoords = new HashMap<>();
         for (ECMInfo ecmInfo : allEcmInfo) {
             // Check if ECM source is on this board
             // Entity-based ECM: check if entity is on this board
@@ -1830,54 +1717,19 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                         continue;
                     }
                     covered.add(coords);
-
-                    // Check for allied ECCM or enemy ECM
-                    if ((!ecmInfo.isOpposed(localPlayer) && ecmInfo.isECCM()) || (ecmInfo.isOpposed(localPlayer)
-                          && ecmInfo.isECCM())) {
-                        ECMEffects ecmEffects = eccmAffectedCoords.computeIfAbsent(coords, k -> new ECMEffects());
-                        ecmEffects.addECM(ecmInfo);
-                    } else {
-                        ECMEffects ecmEffects = ecmAffectedCoords.computeIfAbsent(coords, k -> new ECMEffects());
-                        ecmEffects.addECM(ecmInfo);
-                    }
                 }
             }
         }
 
-        // Finally, determine the color for each affected hex
-        for (Coords coords : ecmAffectedCoords.keySet()) {
-            ECMEffects ecm = ecmAffectedCoords.get(coords);
-            ECMEffects eccm = eccmAffectedCoords.get(coords);
-            processAffectedCoords(coords, ecm, eccm, newECMHexes, newECCMHexes);
-        }
-
-        for (Coords coords : eccmAffectedCoords.keySet()) {
-            ECMEffects ecm = ecmAffectedCoords.get(coords);
-            ECMEffects eccm = eccmAffectedCoords.get(coords);
-            // Already processed all ECM affected coords
-
-            if (ecm != null) {
-                continue;
-            }
-
-            processAffectedCoords(coords, null, eccm, newECMHexes, newECCMHexes);
-        }
-
         BoardElectronicWarfare nextWarfare = BoardElectronicWarfare.capture(getBoard(), getLocalPlayer(), fields,
               emitters, GUIP.getECMTransparency());
-        boolean legacyChanged = !newECMHexes.equals(ecmHexes) || !newECCMHexes.equals(eccmHexes)
-              || !newECMCenters.equals(ecmCenters) || !newECCMCenters.equals(eccmCenters);
         boolean warfareChanged = !nextWarfare.equals(electronicWarfare);
         synchronized (this) {
-            ecmHexes = newECMHexes;
-            ecmCenters = newECMCenters;
-            eccmHexes = newECCMHexes;
-            eccmCenters = newECCMCenters;
             if (warfareChanged) {
                 electronicWarfare = nextWarfare;
             }
         }
-        if (legacyChanged || warfareChanged) {
+        if (warfareChanged) {
             visibilityChanged();
         }
         repaint();
@@ -1940,7 +1792,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void highlightSelectedEntities(List<Entity> entities) {
         selectedEntities.clear(); entities.forEach(entity -> selectedEntities.add(entity.getId())); repaint();
     }
-    public boolean isEntitySelected(Entity entity) { return selectedEntities.contains(entity.getId()); }
     public void selectEntity(Entity entity) { visibilityChanged(); updateEcmList(); highlightSelectedEntity(entity); }
     public void clearArtwork() {
         fieldOfView.invalidate();
@@ -1974,10 +1825,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return light.isMoonlessOrPitchBack() ? new Point(0, 0)
               : light.isDuskDawn() ? new Point(-38, 14) : new Point(-19, 7);
     }
-
-    private boolean showInvalidFields;
-    public boolean displayInvalidFields() { return showInvalidFields; }
-    public void setDisplayInvalidFields(boolean show) { showInvalidFields = show; repaint(); }
 
     public String getHexTooltip(Coords coords) {
         return getHexTooltip(coords, true);
@@ -2080,8 +1927,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     public boolean isClosed() { return closed; }
-    void setEntityRenderer(Consumer<Entity> renderer) { entityRenderer = renderer; }
-    void setInputEnabled(Supplier<Boolean> enabled) { inputEnabled = enabled; }
     public boolean isMovingUnits() { return movingUnits; }
     public boolean isShowingAnimation() { return movingUnits; }
     public void setMovingUnits(boolean moving) {
@@ -2223,7 +2068,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     private boolean tooltipSuspended;
-    public boolean isTooltipSuspended() { return tooltipSuspended; }
     public void suspendTooltip() { tooltipSuspended = true; }
     public void activateTooltip() { tooltipSuspended = false; }
 

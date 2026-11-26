@@ -26,7 +26,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
-import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Hex;
@@ -373,7 +372,7 @@ class GpuBoardSourceTest {
                 assertEquals(kind, scene.electronicWarfare().hex(new Coords(4, 4)) & 15, owner.getName());
                 assertEquals(owner != enemy, scene.electronicWarfare().sources().getFirst().own());
                 assertTrue(scene.tactical().fills().stream().noneMatch(fill ->
-                      fill.argb() == ECMEffects.getECMColor(owner).getRGB()), "No player-colour wash on the 3D board");
+                      fill.argb() == wash(owner)), "No player-colour wash on the 3D board");
             }
         }
     }
@@ -970,6 +969,13 @@ class GpuBoardSourceTest {
             hex.addTerrain(terrain);
         }
         return hex;
+    }
+
+    /** The colour the old 2D board washed a player's E(C)CM hexes with: the player's colour at the ECM opacity. */
+    private static int wash(Player owner) {
+        Color tint = owner.getColour().getColour();
+        return new Color(tint.getRed(), tint.getGreen(), tint.getBlue(),
+              GUIPreferences.getInstance().getECMTransparency()).getRGB();
     }
 
     private static boolean samePixels(BoardScene.Pixels first, BoardScene.Pixels second) {
