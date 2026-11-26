@@ -58,7 +58,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Vector;
 import javax.swing.JCheckBoxMenuItem;
-import javax.swing.JDialog;
 import javax.swing.JMenu;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -67,11 +66,7 @@ import javax.swing.SwingUtilities;
 import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.Client;
-import megamek.client.event.BoardViewEvent;
-import megamek.client.event.BoardViewListener;
-import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IClientGUI;
@@ -91,18 +86,7 @@ import megamek.common.board.BoardHelper;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
-import megamek.common.event.GameListenerAdapter;
-import megamek.common.event.GameNewActionEvent;
-import megamek.common.event.GamePhaseChangeEvent;
-import megamek.common.event.GameTurnChangeEvent;
-import megamek.common.event.board.BoardEvent;
-import megamek.common.event.board.BoardListener;
-import megamek.common.event.board.BoardListenerAdapter;
-import megamek.common.event.board.GameBoardChangeEvent;
-import megamek.common.event.board.GameBoardNewEvent;
-import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.game.Game;
-import megamek.common.game.GameTurn;
 import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.IPreferenceChangeListener;
@@ -143,12 +127,8 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private static final int SHOW_GROUND_HEIGHT = 1;
     private static final int SHOW_BUILDING_HEIGHT = 2;
     private static final int SHOW_TOTAL_HEIGHT = 3;
-    private static final int NBR_HEIGHT_MODES = 3;
-
     private static final int SHOW_SYMBOLS = 0;
     private static final int SHOW_NO_SYMBOLS = 1;
-    private static final int NBR_SYMBOLS_MODES = 1;
-
     private static final int DIALOG_MARGIN = 6;
     private static final int MARGIN = 3;
     private static final int BUTTON_HEIGHT = 14;
@@ -166,22 +146,14 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private static final String ACTION_HEIGHT_TOTAL = "HEIGHT_TOTAL";
     private static final String ACTION_SYMBOLS_NO = "SYMBOLS_NO";
     private static final String ACTION_SYMBOLS_SHOW = "SYMBOLS_SHOW";
-    private static final String ACTION_FACING_ARROWS_SHOW = "FACING_ARROWS_SHOW";
-    private static final String ACTION_SENSORS_SHOW = "SENSORS_SHOW";
-
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
     /** The colour theme file (in the minimap themes directory) used for every minimap. */
     private static final String MINIMAP_THEME_FILE = "defaultminimap.theme";
     private BufferedImage mapImage;
     private final BoardClientState bv;
-    private java.util.function.Consumer<Coords> hexClickHandler;
-    private GameListenerAdapter gameListener;
-
-    public void setHexClickHandler(java.util.function.Consumer<Coords> handler) { hexClickHandler = handler; }
     private final Game game;
     private Board board;
     private final int boardId;
-    private final JDialog dialog;
     private Client client;
     private final IClientGUI clientGui;
     private int margin = MARGIN;
@@ -194,8 +166,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * Indicates if the minimap has been rolled up using the wide green button. Can only be true when in a dialog.
      */
     private boolean minimized = false;
-    /** Stores the (non-minimized) height of the minimap when it is minimized. */
-    private int heightBuffer;
     private int unitSize = 6;
     /** A list of information on hexes with roads or bridges. */
     private final List<int[]> roadHexes = new ArrayList<>();
@@ -253,7 +223,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
                 throw new Exception("The given zoom index is out of bounds.");
             }
 
-            MinimapPanel tempMM = new MinimapPanel(null, game, boardView, clientGui, boardId);
+            MinimapPanel tempMM = new MinimapPanel(game, boardView, clientGui, boardId);
             tempMM.zoom = zoom;
             tempMM.movePathLines.clear();
             tempMM.movePathLines.addAll(movePathLines);
@@ -267,125 +237,20 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Creates a minimap panel. The only required parameter is a game that contains the board to display. When the
-     * dialog is not null, it is assumed that this minimap will be visible for a while, and it will register itself to
-     * various objects as a listener to changes. When the dialog is null, it is assumed that the minimap is only used to
-     * create a snapshot image. When a {@link BoardClientState} is given, the visible area is shown.
+     * Creates a minimap panel for a snapshot image ({@link #getMinimapImage}). The only required parameter is a game
+     * that contains the board to display. When a {@link BoardClientState} is given, the visible area is shown.
      */
-
-    public MinimapPanel(@Nullable MinimapDialog minimapDialog, Game game, @Nullable BoardClientState boardView,
-          @Nullable IClientGUI clientGUI, int boardId) {
+    private MinimapPanel(Game game, @Nullable BoardClientState boardView, @Nullable IClientGUI clientGUI, int boardId) {
         this.game = Objects.requireNonNull(game);
         board = Objects.requireNonNull(this.game.getBoard(boardId));
         this.boardId = boardId;
         bv = boardView;
-        dialog = minimapDialog;
         clientGui = clientGUI;
 
         if (clientGui != null && clientGui.getClient() instanceof Client castClient) {
             client = castClient;
         }
         initializeColors();
-        if (dialog != null) {
-            initializeDialog();
-            initializeListeners();
-            buttonHeight = BUTTON_HEIGHT;
-            margin = DIALOG_MARGIN;
-        }
-    }
-
-    /**
-     * Registers the minimap as listener to the given game, board, {@link BoardClientState} (that are not null).
-     */
-    private void initializeListeners() {
-        gameListener = new GameListenerAdapter() {
-
-            @Override
-            public void gamePhaseChange(GamePhaseChangeEvent e) {
-                // We clear the move path lines locally, since the game does not currently hold this information until the end of the turn
-                if (e.getNewPhase().isDeployment() || e.getNewPhase().isLounge() || e.getNewPhase().isVictory()) {
-                    movePathLines.clear();
-                } else {
-                    movePathLines.removeIf(line -> (line.round() + GUIP.getMovePathPersistenceOnMiniMap())
-                          <= game.getCurrentRound());
-                }
-                refreshMap();
-            }
-
-            @Override
-            public void gameTurnChange(GameTurnChangeEvent e) {
-                refreshMap();
-            }
-
-            @Override
-            public void gameEntityChange(GameEntityChangeEvent e) {
-                // We store the move path lines locally because the game does not currently hold this information until the end of the turn
-                var movePath = e.getMovePath();
-                if (movePath != null && !movePath.isEmpty()) {
-                    addMovePath(new ArrayList<>(movePath), e.getOldEntity());
-                    refreshMap();
-                }
-            }
-
-            @Override
-            public void gameBoardNew(GameBoardNewEvent e) {
-                if (gameListener == null || e.getBoardId() != boardId) {
-                    return;
-                }
-                if (e.getNewBoard() == null) {
-                    dispose();
-                    return;
-                }
-                // A newly created panel can receive the same event that created it. Move its actual subscription,
-                // not the event's old board, or the new board receives this listener twice.
-                if (board != e.getNewBoard()) {
-                    board.removeBoardListener(boardListener);
-                    board = e.getNewBoard();
-                    board.addBoardListener(boardListener);
-                }
-                initializeMap();
-            }
-
-            @Override
-            public void gameBoardChanged(GameBoardChangeEvent e) {
-                refreshMap();
-            }
-
-            @Override
-            public void gameNewAction(GameNewActionEvent e) {
-                refreshMap();
-            }
-        };
-        game.addGameListener(gameListener);
-
-        board.addBoardListener(boardListener);
-        if (bv != null) {
-            bv.addBoardViewListener(boardViewListener);
-        }
-        GUIP.addPreferenceChangeListener(this);
-    }
-
-    /** Detach the minimap when its owning window is disposed. */
-    public void dispose() {
-        if (gameListener != null) { game.removeGameListener(gameListener); gameListener = null; }
-        if (board != null) { board.removeBoardListener(boardListener); }
-        if (bv != null) { bv.removeBoardViewListener(boardViewListener); }
-        GUIP.removePreferenceChangeListener(this);
-        hexClickHandler = null;
-    }
-
-    /**
-     * Adds listeners to the dialog to manipulate the minimap if it has an associated dialog.
-     */
-    private void initializeDialog() {
-        if (dialog != null) {
-            if (dialog.getMouseListeners().length == 0) {
-                dialog.addMouseListener(minimapMouseListener);
-                dialog.addMouseMotionListener(minimapMouseMotionListener);
-                dialog.addMouseWheelListener(minimapMouseWheelListener);
-                dialog.addComponentListener(minimapComponentListener);
-            }
-        }
     }
 
     private @Nullable Player getLocalPlayer() {
@@ -559,27 +424,8 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
               : (((2 * board.getHeight()) + 1)
                  * HEX_SIDE_BY_COS30[zoom]) + (2 * margin) + buttonHeight;
 
-        if (dialog != null) {
-            setSize(new Dimension(requiredWidth, requiredHeight));
-            setPreferredSize(new Dimension(requiredWidth, requiredHeight));
-            dialog.pack();
-            mapImage = ImageUtil.createAcceleratedImage(getSize().width, getSize().height);
-            terrainBuffer = createImage(getSize().width, getSize().height);
-
-            // Center the minimap in the dialog
-            if (getSize().width > requiredWidth) {
-                leftMargin = ((getSize().width - requiredWidth) / 2) + DIALOG_MARGIN;
-            }
-            if (getSize().height > requiredHeight) {
-                topMargin = ((getSize().height - requiredHeight) / 2) + DIALOG_MARGIN;
-            }
-            // Start the refresh timer only for a "live" minimap in a dialog
-            refreshMap();
-            revalidate();
-        } else {
-            mapImage = ImageUtil.createAcceleratedImage(requiredWidth, requiredHeight);
-            terrainBuffer = ImageUtil.createAcceleratedImage(requiredWidth, requiredHeight);
-        }
+        mapImage = ImageUtil.createAcceleratedImage(requiredWidth, requiredHeight);
+        terrainBuffer = ImageUtil.createAcceleratedImage(requiredWidth, requiredHeight);
         Graphics gg = terrainBuffer.getGraphics();
         gg.setColor(BACKGROUND);
         gg.fillRect(0, 0, getSize().width, getSize().height);
@@ -659,10 +505,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             return;
         }
         lastDrawStarted = java.lang.System.currentTimeMillis();
-
-        if (!forceDraw && (dialog != null) && !dialog.isVisible()) {
-            return;
-        }
 
         Graphics g = mapImage.getGraphics();
         UIUtil.setHighQualityRendering(g);
@@ -753,7 +595,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
                 }
             }
 
-            drawDeploymentZone(g);
             drawEmbeddedBoards(g);
 
             // In case the flag SHOW SYMBOLS is set, it will draw the units and other stuff
@@ -807,10 +648,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             }
         }
 
-        if (dialog != null) {
-            drawButtons(g);
-            repaint();
-        }
     }
 
     private void paintMoveTracks(Graphics g) {
@@ -822,29 +659,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             paintMoveTrack(g2d, line);
         }
         g2d.dispose();
-    }
-
-    /** Indicates the deployment hexes. */
-    private void drawDeploymentZone(Graphics g) {
-        if ((client != null) && (game != null) && game.getPhase().isDeployment() && (bv != null)
-              && (bv.getDeployingEntity() != null) && (dialog != null) && (getLocalPlayer() != null)) {
-            GameTurn turn = game.getTurn();
-            if ((turn != null) && (turn.playerId() == getLocalPlayer().getId())) {
-                Entity deployingUnit = bv.getDeployingEntity();
-
-                for (int j = 0; j < board.getWidth(); j++) {
-                    for (int k = 0; k < board.getHeight(); k++) {
-                        Coords coords = new Coords(j, k);
-
-                        if (board.isLegalDeployment(coords, deployingUnit) &&
-                              !deployingUnit.isLocationProhibited(BoardLocation.of(coords, boardId)) &&
-                              !deployingUnit.isBoardProhibited(board)) {
-                            paintSingleCoordBorder(g, j, k, Color.yellow);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     /**
@@ -895,112 +709,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         g.drawLine(baseX + unitSize + 1, baseY, (baseX + unitSize) - 3, baseY);
         g.drawLine(baseX, baseY - unitSize - 1, baseX, (baseY - unitSize) + 3);
         g.drawLine(baseX, baseY + unitSize + 1, baseX, (baseY + unitSize) - 3);
-    }
-
-    /** Draws the green control buttons at the bottom of the Minimap. */
-    private void drawButtons(Graphics g) {
-        int w = getSize().width;
-        int h = getSize().height;
-        int w0 = w - BUTTON_HEIGHT;
-        int y0 = h - BUTTON_HEIGHT;
-
-        // the center bar for rolling up/down the Minimap
-        g.setColor(Color.green.darker().darker());
-        g.fillRect(0, y0, w, BUTTON_HEIGHT);
-        g.setColor(Color.green.darker());
-        g.drawLine(0, y0, w, y0);
-        g.drawLine(0, y0, 0, h);
-        g.setColor(Color.black);
-        g.drawLine(0, h - 1, w, h - 1);
-        g.drawLine(w - 1, y0, w - 1, h);
-
-        int[] xTriangle = new int[3];
-        int[] yTriangle = new int[3];
-        xTriangle[0] = Math.round((w - 11) / 2f);
-        xTriangle[1] = xTriangle[0] + 11;
-        if (minimized) {
-            yTriangle[0] = h - 10;
-            yTriangle[1] = yTriangle[0];
-            xTriangle[2] = xTriangle[0] + 6;
-            yTriangle[2] = yTriangle[0] + 5;
-        } else {
-            yTriangle[0] = h - 4;
-            yTriangle[1] = yTriangle[0];
-            xTriangle[2] = xTriangle[0] + 5;
-            yTriangle[2] = yTriangle[0] - 5;
-        }
-        g.setColor(Color.yellow);
-        g.fillPolygon(xTriangle, yTriangle, 3);
-
-        // the zoom control "+" and "-" buttons
-        if (!minimized) {
-            g.setColor(Color.black);
-            g.drawLine(BUTTON_HEIGHT - 1, y0, BUTTON_HEIGHT - 1, h);
-            g.drawLine(w0 - 1, y0, w0 - 1, h);
-            g.setColor(Color.green.darker());
-            g.drawLine(BUTTON_HEIGHT, y0, BUTTON_HEIGHT, getSize().height);
-            g.drawLine(w0, y0, w0, h);
-            if (zoom == 0) {
-                g.setColor(Color.gray.brighter());
-            } else {
-                g.setColor(Color.yellow);
-            }
-            g.fillRect(3, y0 + 6, 8, 2);
-            if (zoom == (HEX_SIDE.length - 1)) {
-                g.setColor(Color.gray.brighter());
-            } else {
-                g.setColor(Color.yellow);
-            }
-            g.fillRect(w0 + 3, y0 + 6, 8, 2);
-            g.fillRect(w0 + 6, y0 + 3, 2, 8);
-
-            if (zoom >= MIM_ZOOM_FOR_HEIGHT) {
-                // the button for displaying heights
-                int x = BUTTON_HEIGHT;
-                g.setColor(Color.yellow);
-                String label = switch (heightDisplayMode) {
-                    case SHOW_NO_HEIGHT -> Messages.getString("Minimap.NoHeightLabel");
-                    case SHOW_GROUND_HEIGHT -> Messages.getString("Minimap.GroundHeightLabel");
-                    case SHOW_BUILDING_HEIGHT -> Messages.getString("Minimap.BuildingHeightLabel");
-                    case SHOW_TOTAL_HEIGHT -> Messages.getString("Minimap.TotalHeightLabel");
-                    default -> "";
-                };
-                g.drawString(label, x + 2, y0 + 11);
-
-                x += BUTTON_HEIGHT;
-                g.setColor(Color.black);
-                g.drawLine(x - 1, y0, x - 1, h);
-                g.setColor(Color.green.darker());
-                g.drawLine(x, y0, x, h);
-
-                // the button for displaying symbols
-                g.setColor(Color.yellow);
-                label = switch (symbolsDisplayMode) {
-                    case SHOW_SYMBOLS -> Messages.getString("Minimap.SymbolsLabel");
-                    case SHOW_NO_SYMBOLS -> Messages.getString("Minimap.NoSymbolsLabel");
-                    default -> "";
-                };
-                g.drawString(label, x + 2, y0 + 11);
-
-                x += BUTTON_HEIGHT;
-                g.setColor(Color.black);
-                g.drawLine(x - 1, y0, x - 1, h);
-                g.setColor(Color.green.darker());
-                g.drawLine(x, y0, x, h);
-
-                // map size
-                String mapSize = board.getWidth() + " " + Messages.getString("Minimap.X") + " " + board.getHeight();
-                g.setColor(Color.yellow);
-                g.drawString(mapSize, x, y0 + 11);
-
-                int width = getFontMetrics(g.getFont()).stringWidth(mapSize);
-                x += width + 3;
-                g.setColor(Color.black);
-                g.drawLine(x - 1, y0, x, h);
-                g.setColor(Color.green.darker());
-                g.drawLine(x, y0, x, h);
-            }
-        }
     }
 
     /** Writes the height value (hex/building/none) in the minimap hexes. */
@@ -1613,52 +1321,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         return new Color(r, g, b);
     }
 
-    /** Returns a Board Coord for a given x and y pixel position. */
-    private Coords translateCoords(int x, int y) {
-        int gridX = (x / (HEX_SIDE_BY_SIN30[zoom] + HEX_SIDE[zoom]));
-        int restX = x % (HEX_SIDE_BY_SIN30[zoom] + HEX_SIDE[zoom]);
-        int gridY = (y / (2 * HEX_SIDE_BY_COS30[zoom]));
-        int restY = y % (2 * HEX_SIDE_BY_COS30[zoom]);
-
-        boolean evenColumn = (gridX & 1) == 0;
-
-        if (restY < HEX_SIDE_BY_COS30[zoom]) {
-            if (evenColumn) {
-                if (restX < ((((restY - HEX_SIDE_BY_COS30[zoom])
-                      * HEX_SIDE_BY_SIN30[zoom]) / HEX_SIDE_BY_COS30[zoom]) * -1)) {
-                    gridX--;
-                    gridY--;
-                }
-            } else {
-                if (restX < ((restY * HEX_SIDE_BY_SIN30[zoom]) / HEX_SIDE_BY_COS30[zoom])) {
-                    gridX--;
-                } else {
-                    gridY--;
-                }
-            }
-        } else {
-            if (evenColumn) {
-                if (restX < (((restY - HEX_SIDE_BY_COS30[zoom])
-                      * HEX_SIDE_BY_SIN30[zoom]) / HEX_SIDE_BY_COS30[zoom])) {
-                    gridX--;
-                }
-            } else {
-                if (restX < ((((restY - (2 * HEX_SIDE_BY_COS30[zoom]))
-                      * HEX_SIDE_BY_SIN30[zoom]) / HEX_SIDE_BY_COS30[zoom]) * -1)) {
-                    gridX--;
-                }
-            }
-        }
-        if (gridX < 0) {
-            gridX = 0;
-        }
-        if (gridY < 0) {
-            gridY = 0;
-        }
-
-        return new Coords(gridX, gridY);
-    }
-
     /** Zooms out (smaller hexes), if possible. */
     private void zoomOut() {
         if (zoom > MIM_ZOOM) {
@@ -1681,46 +1343,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         zoom = MIM_ZOOM;
         initializeMap();
         GUIP.setMinimapZoom(zoom);
-    }
-
-    private void processMouseRelease(int x, int y, int modifiers) {
-        if (!new Rectangle(getSize()).contains(x, y)) {
-            return;
-        }
-        if (bv != null && (modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
-            bv.checkLOS(translateCoords(x - leftMargin, y - topMargin));
-        }
-        if (dragging) {
-            return;
-        }
-        if (y <= getSize().height - BUTTON_HEIGHT) {
-            // This is a click on the map itself
-            centerOnPos(x, y);
-        } else {
-            // This is a click on the green control button bar
-            if (minimized) {
-                setSize(getSize().width, heightBuffer);
-                mapImage = ImageUtil.createAcceleratedImage(getSize().width, heightBuffer);
-                minimized = false;
-                initializeMap();
-            } else {
-                if (x < BUTTON_HEIGHT) {
-                    zoomOut();
-                } else if ((x < 2 * BUTTON_HEIGHT) && (zoom >= MIM_ZOOM_FOR_HEIGHT)) {
-                    setHeightDisplay(((++heightDisplayMode) > NBR_HEIGHT_MODES) ? 0 : heightDisplayMode);
-                } else if ((x < 3 * BUTTON_HEIGHT) && (zoom >= MIM_ZOOM_FOR_HEIGHT)) {
-                    setSymbolsDisplay(((++symbolsDisplayMode) > NBR_SYMBOLS_MODES) ? 0 : symbolsDisplayMode);
-                } else if (x > (getSize().width - BUTTON_HEIGHT)) {
-                    zoomIn();
-                } else {
-                    heightBuffer = getSize().height;
-                    setSize(getSize().width, BUTTON_HEIGHT);
-                    mapImage = ImageUtil.createAcceleratedImage(Math.max(1, getSize().width), BUTTON_HEIGHT);
-                    minimized = true;
-                    initializeMap();
-                }
-            }
-        }
     }
 
     private void setSensorRangeDisplay(boolean state) {
@@ -1752,157 +1374,6 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         GUIP.setMinimapHeightDisplayMode(i);
         initializeMap();
     }
-
-    /**
-     * Changes the currently shown {@link BoardClientState} to this minimap's own board.
-     */
-    private void ShowThisBoardView() {
-        if (clientGui instanceof AbstractClientGUI abstractClientGUI) {
-            abstractClientGUI.showBoardView(boardId);
-        }
-    }
-
-    /**
-     * Centers the BoardClientState connected to the Minimap on x, y in the Minimap's pixel coordinates.
-     */
-    private void centerOnPos(double x, double y) {
-        if (hexClickHandler != null) {
-            hexClickHandler.accept(translateCoords((int) x - leftMargin, (int) y - topMargin));
-            return;
-        }
-        if (bv == null) { return; }
-        ShowThisBoardView();
-        bv.centerOnHex(translateCoords((int) x - leftMargin, (int) y - topMargin));
-        repaint();
-    }
-
-    private final BoardListener boardListener = new BoardListenerAdapter() {
-        @Override
-        public void boardNewBoard(BoardEvent b) {
-            initializeMap();
-        }
-
-        @Override
-        public void boardChangedHex(BoardEvent b) {
-            // This must be tolerant since it might be called without notifying us of the board size first
-            int x = b.getCoords().getX();
-            int y = b.getCoords().getY();
-            if ((x >= dirty.length) || (y >= dirty[x].length)) {
-                dirtyMap = true;
-            } else {
-                dirty[x / 10][y / 10] = true;
-            }
-            refreshMap();
-        }
-    };
-
-    BoardViewListener boardViewListener = new BoardViewListenerAdapter() {
-        @Override
-        public void hexCursor(BoardViewEvent b) {
-            update();
-        }
-
-        @Override
-        public void hexMoused(BoardViewEvent b) {
-            repaint();
-        }
-
-        @Override
-        public void boardHexHighlighted(BoardViewEvent b) {
-            update();
-        }
-
-        @Override
-        public void hexSelected(BoardViewEvent b) {
-            update();
-        }
-
-        @Override
-        public void firstLOSHex(BoardViewEvent b) {
-            secondLOS = null;
-            firstLOS = b.getCoords();
-            refreshMap();
-        }
-
-        @Override
-        public void secondLOSHex(BoardViewEvent b) {
-            secondLOS = b.getCoords();
-            refreshMap();
-        }
-
-        private void update() {
-            firstLOS = null;
-            secondLOS = null;
-            refreshMap();
-        }
-    };
-
-    MouseListener minimapMouseListener = new MouseAdapter() {
-        @Override
-        public void mouseClicked(MouseEvent me) {
-            if (me.getButton() == MouseEvent.BUTTON1) {
-                Point mapPoint = SwingUtilities.convertPoint(dialog, me.getX(), me.getY(), MinimapPanel.this);
-                processMouseRelease(mapPoint.x, mapPoint.y, me.getModifiersEx());
-                dragging = false;
-                setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
-            }
-        }
-
-        @Override
-        public void mouseReleased(MouseEvent me) {
-            if (me.isPopupTrigger()) {
-                showPopup(me);
-            } else {
-                ShowThisBoardView();
-            }
-        }
-
-        @Override
-        public void mousePressed(MouseEvent me) {
-            if (me.isPopupTrigger()) {
-                showPopup(me);
-            } else {
-                ShowThisBoardView();
-            }
-        }
-
-    };
-
-    MouseMotionListener minimapMouseMotionListener = new MouseMotionAdapter() {
-
-        @Override
-        public void mouseDragged(MouseEvent me) {
-            Point mapPoint = SwingUtilities.convertPoint(dialog, me.getX(), me.getY(), MinimapPanel.this);
-            if (new Rectangle(getSize()).contains(mapPoint.x, mapPoint.y)) {
-                if (!dragging) {
-                    dragging = true;
-                    setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
-                }
-                centerOnPos(mapPoint.x, mapPoint.y);
-            }
-        }
-    };
-
-    MouseWheelListener minimapMouseWheelListener = new MouseWheelListener() {
-        @Override
-        public void mouseWheelMoved(MouseWheelEvent we) {
-            Point mapPoint = SwingUtilities.convertPoint(dialog, we.getX(), we.getY(), MinimapPanel.this);
-            if (new Rectangle(getSize()).contains(mapPoint.x, mapPoint.y)) {
-                if (we.getWheelRotation() > 0 ^ GUIP.getMouseWheelZoomFlip()) {
-                    zoomIn();
-                } else {
-                    zoomOut();
-                }
-            }
-        }
-    };
-
-    ComponentListener minimapComponentListener = new ComponentAdapter() {
-        @Override
-        public void componentShown(ComponentEvent ce) {
-            refreshMap();
-        }
-    };
 
 
     private void showPopup(MouseEvent me) {
