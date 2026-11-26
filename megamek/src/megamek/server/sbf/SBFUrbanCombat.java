@@ -79,8 +79,21 @@ final class SBFUrbanCombat {
     static void damageByPassage(SBFGame game, SBFFormation formation, BoardLocation site) {
         int elements = formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA) ? 0 : formation.getUnits().isEmpty() ? 1
               : formation.getUnits().stream().mapToInt(SBFUrbanCombat::nonInfantryElements).sum();
-        if (elements > 0) {
-            game.artillery().damageTerrain(site, elements);
+        damageHex(game, site, elements);
+    }
+
+    /**
+     * p. 216: "Urban hexes may be attacked in the same manner as any other Formation. Attacks against urban hexes are
+     * resolved as against an immobile target. Damage to an urban hex is applied to the hex's CF value."
+     */
+    static boolean canAttackHex(SBFGame game, Hex hex) {
+        return game.usesUrbanCombat() && (hex != null) && hex.containsTerrain(Terrains.BUILDING);
+    }
+
+    /** The urban hex's CF is its table CF less the damage recorded here. */
+    static void damageHex(SBFGame game, BoardLocation site, int damage) {
+        if (damage > 0) {
+            game.artillery().damageTerrain(site, damage);
         }
     }
 

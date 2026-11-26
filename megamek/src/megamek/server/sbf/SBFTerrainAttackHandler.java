@@ -71,7 +71,8 @@ public final class SBFTerrainAttackHandler extends AbstractSBFActionHandler {
                   || !SBFTerrainConversion.canClear(game.getHex(shot.terrain()), shot.clearingPassage())) {
                 return false;
             }
-        } else if (!SBFTerrainConversion.canDamage(game.getHex(shot.terrain()))
+        } else if (!(SBFTerrainConversion.canDamage(game.getHex(shot.terrain()))
+              || SBFUrbanCombat.canAttackHex(game, game.getHex(shot.terrain())))
               || !game.combatOrders().hasTerrainSight(game, f.getPosition(), shot.terrain(), true)
               || f.getPosition().coords().distance(shot.terrain().coords()) > 2
               || f.getUnits().stream().noneMatch(u -> u.canFire() && SBFStandardUnitAttack.standardWeaponDamage(game, f, u, range(f, shot.terrain())) > 0)) {
@@ -156,7 +157,9 @@ public final class SBFTerrainAttackHandler extends AbstractSBFActionHandler {
             gameManager().addReportFor(new SBFReportEntry(3136).add(unit.getName()).add(site.coords().getBoardNum())
                   .add(tn.getValue()).add(roll).add(roll >= tn.getValue() ? weapon : 0), attacker);
         }
-        if (SBFTerrainConversion.damage(game(), site, damage)) {
+        if (SBFUrbanCombat.canAttackHex(game(), game().getHex(site))) {
+            SBFUrbanCombat.damageHex(game(), site, damage);
+        } else if (SBFTerrainConversion.damage(game(), site, damage)) {
             gameManager().send(gameManager().getPacketHelper().createBoardsPacket());
         }
         setFinished();

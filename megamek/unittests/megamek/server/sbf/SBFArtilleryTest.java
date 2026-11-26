@@ -528,6 +528,25 @@ class SBFArtilleryTest {
     }
 
     @Test
+    void urbanCombatLetsAFormationFireAtAnUrbanHexAndCountsTheDamageAgainstItsConstructionFactor() {
+        // Urban Hexes, IO:BF p. 216: "Urban hexes may be attacked in the same manner as any other Formation ... Damage to
+        // an urban hex is applied to the hex's CF value."
+        var location = BoardLocation.of(new Coords(2, 2), 0);
+        game.getHex(location).addTerrain(new Terrain(Terrains.BUILDING, 2));
+        battery.getUnits().getFirst().setDamage(megamek.common.alphaStrike.ASDamageVector.createNormRndDmg(2, 2, 2));
+        var shot = new megamek.common.actions.sbf.SBFTerrainAttack(battery.getId(), location);
+        assertFalse(SBFTerrainAttackHandler.declare(manager, 1, shot));
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        assertTrue(SBFTerrainAttackHandler.declare(manager, 1, shot));
+        try (var dice = mockStatic(Compute.class)) {
+            dice.when(() -> Compute.d6(2)).thenReturn(12);
+            new SBFActionsProcessor(manager).handleActions();
+        }
+        assertEquals(2, game.artillery().terrainDamage(location));
+        assertTrue(game.getHex(location).containsTerrain(Terrains.BUILDING));
+    }
+
+    @Test
     void destroyedFiringUnitCannotTransferItsDeclarationToTheNextSurvivor() {
         var second = new SBFUnit();
         second.setArmor(15);
