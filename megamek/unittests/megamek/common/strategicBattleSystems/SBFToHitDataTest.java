@@ -90,6 +90,16 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void sharpShootersReplaceTheRangeModifiers() {
+        // Sharp Shooters, IO:BF p. 225: "Short Range +2; Medium Range +1; Long Range +1; Extreme Range +2."
+        attacker.setSharpShooters(true);
+        assertEquals(List.of(1), modifiers("sharp shooters range"));
+        assertEquals(List.of(), modifiers("long range"));
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertEquals(List.of(2), modifiers("sharp shooters range"));
+    }
+
+    @Test
     void attackTwoHexesAwayIsAtExtremeRange() {
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
 

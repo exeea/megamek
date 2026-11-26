@@ -59,6 +59,7 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                           .add(game().getPlayer(side).getName()).add(info.rating())));
                 }
                 SBFHiddenCommand.validateSetup(gameManager);
+                SBFCommandAbilities.validateSetup(gameManager);
                 gameManager.send(SBFScenarioResolution.markerPacket(game()));
                 gameManager.addPendingReportsToGame();
                 if (game().getCurrentRound() < 0) {

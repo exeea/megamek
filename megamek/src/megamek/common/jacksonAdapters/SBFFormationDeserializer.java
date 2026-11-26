@@ -106,6 +106,7 @@ public class SBFFormationDeserializer extends StdDeserializer<SBFFormation> {
             formation.setDeployed(true);
         }
         formation.setHidden(node.path(SBFFormationSerializer.HIDDEN).asBoolean(false));
+        formation.setSharpShooters(node.path(SBFFormationSerializer.SHARP_SHOOTERS).asBoolean(false));
         formation.setReconFacing(node.path(SBFFormationSerializer.RECON_FACING).asInt(0));
         assignDeploymentRound(formation, node);
         return formation;

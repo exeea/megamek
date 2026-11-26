@@ -136,12 +136,21 @@ public class SBFToHitData extends TargetRoll {
             return new SBFToHitData(TargetRoll.IMPOSSIBLE, "target is in an urban hex");
         }
         toHit.range = range.get();
-        switch (toHit.range) {
-            case SHORT -> { }
-            case MEDIUM -> toHit.addModifier(1, "medium range");
-            case LONG -> toHit.addModifier(2, "long range");
-            case EXTREME -> toHit.addModifier(3, "extreme range");
-            default -> { }
+        if (attackingFormation.isSharpShooters()) {
+            // Sharp Shooters, IO:BF p. 225: "Short Range +2; Medium Range +1; Long Range +1; Extreme Range +2"
+            switch (toHit.range) {
+                case SHORT, EXTREME -> toHit.addModifier(2, "sharp shooters range");
+                case MEDIUM, LONG -> toHit.addModifier(1, "sharp shooters range");
+                default -> { }
+            }
+        } else {
+            switch (toHit.range) {
+                case SHORT -> { }
+                case MEDIUM -> toHit.addModifier(1, "medium range");
+                case LONG -> toHit.addModifier(2, "long range");
+                case EXTREME -> toHit.addModifier(3, "extreme range");
+                default -> { }
+            }
         }
         int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
               .filter(a -> a.getEntityId() == attackingFormation.getId()).count();

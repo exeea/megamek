@@ -880,6 +880,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     /** Urban Hexes, IO:BF p. 217: inside the buildings of the urban hex it occupies rather than in its streets. */
     private BoardLocation insideBuildingsPosition;
 
+    /** Sharp Shooters special command ability, IO:BF p. 225; at most one-third of a Force's Formations have it. */
+    private boolean sharpShooters;
+
+    public boolean isSharpShooters() {
+        return sharpShooters;
+    }
+
+    public void setSharpShooters(boolean sharpShooters) {
+        this.sharpShooters = sharpShooters;
+    }
+
     /** Made up exclusively of wheeled Elements, which pay 1 MP less in urban hexes (IO:BF p. 216, urban table note *). */
     public boolean isExclusivelyWheeled() {
         return SBFTerrainMovement.Bonuses.of(SBFTerrainMovement.of(this).toList()).wheeled();
