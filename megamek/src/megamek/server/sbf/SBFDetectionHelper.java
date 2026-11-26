@@ -109,7 +109,8 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                     visibilityStatus = visibilityStatus.bestOf(identifyVisually(game(), viewingFormation,
                           hostileFormation, () -> Compute.d6(2)));
                 }
-                var detectionModifiers = new SBFDetectionModifiers(viewingFormation, hostileFormation, hostileFormation.getPosition(),
+                var detectionModifiers = new SBFDetectionModifiers(game(), viewingFormation, hostileFormation,
+                      hostileFormation.getPosition(),
                       game().minefields().inEmp(hostileFormation.getPosition(), game().getCurrentRound()));
                 if (detectionModifiers.getValue() != TargetRoll.CHECK_FALSE) {
                     Roll diceRoll = Compute.rollD6(2);
@@ -178,9 +179,9 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
                     continue;
                 }
                 boolean inRange = observers.stream().filter(viewer -> game().onSameBoard(viewer, target))
-                      .anyMatch(viewer -> SBFDetectionModifiers.sensorRange(viewer) > 0
+                      .anyMatch(viewer -> SBFDetectionModifiers.sensorRange(game(), viewer) > 0
                             && viewer.getPosition().coords().distance(target.getPosition().coords())
-                            <= SBFDetectionModifiers.sensorRange(viewer));
+                            <= SBFDetectionModifiers.sensorRange(game(), viewer));
                 if (!inRange) {
                     side.forEach(player -> game().visibilityHelper().setInvisible(player.getId(), target.getId()));
                 }
@@ -273,10 +274,11 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
     private boolean retainsUrbanContact(SBFFormation viewer, SBFFormation target, BoardLocation entered,
           SBFVisibilityStatus known, IntSupplier dice) {
         int distance = entered.coords().distance(viewer.getPosition().coords());
-        int sensor = SBFDetectionModifiers.sensorRange(viewer);
+        int sensor = SBFDetectionModifiers.sensorRange(game(), viewer);
         boolean sensorReach = sensor > 0 && distance <= sensor;
         if (known == SBFVisibilityStatus.BLIP) {
-            return sensorReach && dice.getAsInt() + new SBFDetectionModifiers(viewer, target, entered, game().minefields().inEmp(entered, game().getCurrentRound())).getValue() > 6;
+            return sensorReach && dice.getAsInt() + new SBFDetectionModifiers(game(), viewer, target, entered,
+                  game().minefields().inEmp(entered, game().getCurrentRound())).getValue() > 6;
         }
         if (concealedInHardenedUrban(game(), target, entered)) {
             return false;
@@ -342,7 +344,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
             return false;
         }
         SBFVisibilityStatus previous = game.getVisibility(game.getPlayer(player), target.getId());
-        int range = SBFDetectionModifiers.sensorRange(viewer);
+        int range = SBFDetectionModifiers.sensorRange(game, viewer);
         int distance = viewer.getPosition().coords().distance(target.getPosition().coords());
         if (!previous.isLocated() || previous == SBFVisibilityStatus.VISIBLE || range == 0 || distance > range) {
             return false;
@@ -381,7 +383,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
             return false;
         }
         SBFVisibilityStatus known = game.getVisibility(game.getPlayer(player), target.getId());
-        int sensor = SBFDetectionModifiers.sensorRange(squadron);
+        int sensor = SBFDetectionModifiers.sensorRange(game, squadron);
         var path = game.visibilityHelper().aerialReconPath(squadron.getId());
         if (!known.isLocated() || known == SBFVisibilityStatus.VISIBLE || sensor <= 0
               || distanceFromFlightPath(path, target) > sensor) {
@@ -455,7 +457,7 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
         if (target.hasAnySUAOf(BattleForceSUA.ECM, BattleForceSUA.AECM) || game.minefields().inEmp(location, game.getCurrentRound())) {
             probe--;
         }
-        return SBFDetectionModifiers.sensorRange(viewer) - distance
+        return SBFDetectionModifiers.sensorRange(game, viewer) - distance
               + reconModifier(game, viewer, location) + probe + (viewer.hasSUA(BattleForceSUA.RCN) ? 1 : 0);
     }
 

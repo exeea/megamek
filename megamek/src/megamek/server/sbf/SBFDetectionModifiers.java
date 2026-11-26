@@ -41,33 +41,38 @@ import megamek.common.alphaStrike.ASSpecialAbilityCollector;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 
 import megamek.common.board.BoardLocation;
+import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.TargetRollModifier;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFUnit;
 
 public class SBFDetectionModifiers extends TargetRoll {
 
-    public SBFDetectionModifiers(SBFFormation viewer, SBFFormation target) {
-        this(viewer, target, target.getPosition());
+    public SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target) {
+        this(game, viewer, target, target.getPosition());
     }
 
-    SBFDetectionModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position) {
-        this(viewer, target, position, false);
+    SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation position) {
+        this(game, viewer, target, position, false);
     }
 
-    SBFDetectionModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position, boolean empField) {
-        sensorTargetRollModifiers(viewer, target, position, empField).forEach(this::addModifier);
+    SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation position,
+          boolean empField) {
+        sensorTargetRollModifiers(game, viewer, target, position, empField).forEach(this::addModifier);
     }
 
     /**
      * Returns the sensor range for sensor detection, IO:BF p.197
      *
+     * @param game      The game, for the optional Design Quirks rules
      * @param formation The detecting formation
      *
      * @return the sensor range
      */
-    static int sensorRange(SBFFormation formation) {
+    static int sensorRange(SBFGame game, SBFFormation formation) {
         // Summary-only and scenario-authored counters may have only a Formation-level sensor rating.
         boolean allEquipmentKnown = !formation.getUnits().isEmpty()
               && formation.getUnits().stream().allMatch(unit -> !unit.getElements().isEmpty());
@@ -76,13 +81,27 @@ public class SBFDetectionModifiers extends TargetRoll {
             if (unit.getArmor() > 0 && unit.getCurrentArmor() <= 0) {
                 continue;
             }
-            best = Math.max(best, range(unit, unit.getType(), formation.hasSUA(RCN)));
+            int unitRange = range(unit, unit.getType(), formation.hasSUA(RCN));
             for (var element : unit.getElements()) {
                 var type = element.getASUnitType() == null ? unit.getType() : SBFElementType.getUnitType(element);
-                best = Math.max(best, range(element, type, formation.hasSUA(RCN)));
+                unitRange = Math.max(unitRange, range(element, type, formation.hasSUA(RCN)));
             }
+            best = Math.max(best, (unitRange > 0) && hasImprovedSensors(game, unit) ? unitRange + 2 : unitRange);
         }
         return best;
+    }
+
+    /**
+     * Design Quirks Table, IO:BF p. 228: Improved Sensors "If 50% of Elements in Unit have PQIS, then increase
+     * detection range by 2 hexes". Mobile Structures cannot have it (footnote **).
+     */
+    private static boolean hasImprovedSensors(SBFGame game, SBFUnit unit) {
+        if (!game.usesDesignQuirks()) {
+            return false;
+        }
+        long count = unit.getElements().stream().filter(e -> e.hasQuirk(OptionsConstants.QUIRK_POS_IMPROVED_SENSORS)
+              && (SBFElementType.getUnitType(e) != SBFElementType.MS)).count();
+        return (count > 0) && (count * 2 >= unit.getElements().size());
     }
 
     private static int range(ASSpecialAbilityCollector sensors, SBFElementType type, boolean recon) {
@@ -101,9 +120,10 @@ public class SBFDetectionModifiers extends TargetRoll {
         };
     }
 
-    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target, BoardLocation position, boolean empField) {
+    private List<TargetRollModifier> sensorTargetRollModifiers(SBFGame game, SBFFormation viewer, SBFFormation target,
+          BoardLocation position, boolean empField) {
         List<TargetRollModifier> result = new ArrayList<>();
-        int range = sensorRange(viewer);
+        int range = sensorRange(game, viewer);
         int distance = viewer.getPosition().coords()
               .distance(position.coords());
         if (distance < range) {

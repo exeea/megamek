@@ -50,6 +50,8 @@ import megamek.common.Player;
 import megamek.common.actions.sbf.SBFAirGroundAttack;
 import megamek.common.actions.sbf.SBFStandardUnitAttack;
 import megamek.common.alphaStrike.ASRange;
+import megamek.common.alphaStrike.ASUnitType;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -57,6 +59,7 @@ import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
+import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.Weather;
@@ -136,29 +139,53 @@ class SBFDetectionHelperTest {
 
     @Test
     void bestProbeOrBasicSensorsWinAndReconOnlyExtendsBasicSensors() {
+        var game = new SBFGame();
         SBFFormation infantry = new SBFFormation();
         infantry.setType(SBFElementType.BA);
-        assertEquals(5, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(5, SBFDetectionModifiers.sensorRange(game, infantry));
         infantry.setType(SBFElementType.MX);
         SBFUnit mek = new SBFUnit();
         mek.setType(SBFElementType.BM);
         infantry.addUnit(mek);
-        assertEquals(6, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(6, SBFDetectionModifiers.sensorRange(game, infantry));
         infantry.getSpecialAbilities().setSUA(LPRB);
-        assertEquals(7, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(7, SBFDetectionModifiers.sensorRange(game, infantry));
         var element = new megamek.common.alphaStrike.AlphaStrikeElement();
         element.getSpecialAbilities().setSUA(PRB);
         mek.setElements(List.of(element));
-        assertEquals(8, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(8, SBFDetectionModifiers.sensorRange(game, infantry));
         element.setClanActiveProbe(true);
-        assertEquals(9, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(9, SBFDetectionModifiers.sensorRange(game, infantry));
         mek.setElements(List.of());
         infantry.setType(SBFElementType.BM);
         infantry.getSpecialAbilities().setSUA(RCN);
-        assertEquals(8, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(8, SBFDetectionModifiers.sensorRange(game, infantry));
         infantry.getSpecialAbilities().setSUA(PRB);
         infantry.getSpecialAbilities().setSUA(BH);
-        assertEquals(10, SBFDetectionModifiers.sensorRange(infantry));
+        assertEquals(10, SBFDetectionModifiers.sensorRange(game, infantry));
+    }
+
+    @Test
+    void improvedSensorsAddTwoHexesWhenHalfTheUnitsElementsHaveThem() {
+        // Design Quirks Table, IO:BF p. 228: Improved Sensors "If 50% of Elements in Unit have PQIS, then increase
+        // detection range by 2 hexes"; only with the optional Design Quirks rules (p. 226)
+        var game = new SBFGame();
+        var formation = new SBFFormation();
+        formation.setType(SBFElementType.BM);
+        var unit = new SBFUnit();
+        unit.setType(SBFElementType.BM);
+        var sensors = new AlphaStrikeElement();
+        sensors.setType(ASUnitType.BM);
+        sensors.getQuirks().getOption(OptionsConstants.QUIRK_POS_IMPROVED_SENSORS).setValue(true);
+        var plain = new AlphaStrikeElement();
+        plain.setType(ASUnitType.BM);
+        unit.setElements(List.of(sensors, plain));
+        formation.addUnit(unit);
+        assertEquals(6, SBFDetectionModifiers.sensorRange(game, formation));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertEquals(8, SBFDetectionModifiers.sensorRange(game, formation));
+        unit.setElements(List.of(sensors, plain, plain));
+        assertEquals(6, SBFDetectionModifiers.sensorRange(game, formation));
     }
 
     @Test
@@ -388,6 +415,7 @@ class SBFDetectionHelperTest {
 
     @Test
     void destroyedSoleBloodhoundNoLongerExtendsTheSurvivorsRange() {
+        var game = new SBFGame();
         var f = new SBFFormation();
         f.setType(SBFElementType.BM);
         f.getSpecialAbilities().setSUA(BH);
@@ -406,9 +434,9 @@ class SBFDetectionHelperTest {
         probe.getSpecialAbilities().setSUA(BH);
         scout.setElements(List.of(probe));
         f.addUnit(scout);
-        assertEquals(10, SBFDetectionModifiers.sensorRange(f));
+        assertEquals(10, SBFDetectionModifiers.sensorRange(game, f));
         f.removeUnit(scout);
-        assertEquals(6, SBFDetectionModifiers.sensorRange(f));
+        assertEquals(6, SBFDetectionModifiers.sensorRange(game, f));
     }
 
     @Test
