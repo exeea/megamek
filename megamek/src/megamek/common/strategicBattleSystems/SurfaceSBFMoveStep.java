@@ -33,6 +33,7 @@
 
 package megamek.common.strategicBattleSystems;
 
+import java.util.Arrays;
 import java.util.List;
 
 import megamek.client.commands.ClientCommand;
@@ -115,25 +116,35 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
         Hex departureTerrain = leavesPassage ? terrainAlongPassage(from) : from;
         int levels = Math.abs(to.getLevel() - from.getLevel());
         int elevationCost = 0;
+        // Terrain Modifiers on Movement, p. 166. Each modifier uses the most restrictive mover; a bonus needs them all.
+        var bonuses = SBFTerrainMovement.Bonuses.of(movers);
+        int[] terrain = new int[SBFTerrainMovement.PARTS];
         for (SBFTerrainMovement mover : movers) {
             int elevation = mover.elevationCost(levels, game);
-            int cost = mover.terrainCost(from, entryTerrain, direction, game);
-            if (leavesPassage && cost != SBFTerrainMovement.PROHIBITED) {
+            int[] cost = mover.terrainCost(from, entryTerrain, direction, game, bonuses);
+            if (leavesPassage && cost != null) {
                 // Entering by a cleared side waived the vegetation cost. Pay it once if turning into the woods.
-                int wooded = mover.terrainCost(from, from, direction, game);
-                int clear = mover.terrainCost(from, departureTerrain, direction, game);
-                cost = wooded == SBFTerrainMovement.PROHIBITED ? wooded : cost + wooded - clear;
+                int[] wooded = mover.terrainCost(from, from, direction, game, bonuses);
+                int[] clear = mover.terrainCost(from, departureTerrain, direction, game, bonuses);
+                if (wooded == null) {
+                    cost = null;
+                } else if (clear != null) {
+                    for (int part = 0; part < cost.length; part++) {
+                        cost[part] += wooded[part] - clear[part];
+                    }
+                }
             }
-            if (cost == SBFTerrainMovement.PROHIBITED || elevation == SBFTerrainMovement.PROHIBITED) {
+            if (cost == null || elevation == SBFTerrainMovement.PROHIBITED) {
                 isIllegal = true;
                 return;
             }
             elevationCost = Math.max(elevationCost, elevation);
-            mpUsed = Math.max(mpUsed, cost);
+            for (int part = 0; part < cost.length; part++) {
+                terrain[part] = Math.max(terrain[part], cost[part]);
+            }
             roadBonusEligible &= mover.earnsRoadBonus();
         }
-        // Terrain Modifiers on Movement, p. 166. Each modifier uses the most restrictive mover.
-        mpUsed += elevationCost;
+        mpUsed = Math.max(mpUsed, Arrays.stream(terrain).sum()) + elevationCost;
         if (to.hasStrategicInferno() && !formation.isAirVehicle()) {
             mpUsed++;
         }

@@ -60,6 +60,7 @@ import megamek.common.strategicBattleSystems.SBFReportEntry;
 import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFRuleOptionsUser;
 import megamek.common.strategicBattleSystems.SBFTurn;
+import megamek.common.strategicBattleSystems.SBFWaterWidths;
 import megamek.logging.MMLogger;
 import megamek.server.AbstractGameManager;
 import megamek.server.Server;
@@ -339,6 +340,7 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
                 game.setupTeams();
                 game.getPlanetaryConditions().determineWind();
                 send(packetHelper.createPlanetaryConditionsPacket());
+                SBFWaterWidths.roll(game);
                 send(packetHelper.createBoardsPacket());
                 game.setupDeployment();
                 break;

@@ -35,6 +35,7 @@ package megamek.common.strategicBattleSystems;
 
 import static megamek.common.alphaStrike.BattleForceSUA.AMP;
 import static megamek.common.alphaStrike.BattleForceSUA.SEAL;
+import static megamek.common.alphaStrike.BattleForceSUA.LG;
 import static megamek.common.alphaStrike.BattleForceSUA.UMU;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -184,6 +185,59 @@ class SurfaceSBFMoveStepTest {
         assertEquals(4, step().getMpUsed());
         to.setLevel(0);
         from.setLevel(1);
+        assertEquals(4, step().getMpUsed());
+    }
+
+    @Test
+    void waterWithGroundTerrainCostsItsRolledWidth() {
+        // Water, IO:BF p. 166: "For 2-6 TW Hexes, add +1 MP, and for 7-12 TW hexes add +2 MP"; water only adds +2
+        setMover(SBFElementType.BM, SBFMovementMode.MEK_WALK);
+        to.addTerrain(new Terrain(Terrains.WATER, 1));
+        to.setStrategicWaterWidth(4);
+        assertEquals(4, step().getMpUsed());
+        to.addTerrain(new Terrain(Terrains.ROUGH, 1));
+        assertEquals(3, step().getMpUsed());
+        to.setStrategicWaterWidth(7);
+        assertEquals(4, step().getMpUsed());
+        to.setStrategicWaterWidth(0);
+        assertEquals(4, step().getMpUsed());
+    }
+
+    @Test
+    void aMixedFormationGainsNoBonusThatOnlySomeOfItsMoversHave() {
+        // Terrain Modifiers on Movement, p. 166: "all Elements in the Formation must have this mode or type ... to gain
+        // the bonus". Infantry and an LG 'Mech each reduce woods by 1 under advanced terrain; together neither does.
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        var infantry = new SBFUnit();
+        infantry.setType(SBFElementType.CI);
+        infantry.setMovementMode(SBFMovementMode.INFANTRY_FOOT);
+        var largeMek = new SBFUnit();
+        largeMek.setType(SBFElementType.BM);
+        largeMek.setMovementMode(SBFMovementMode.MEK_WALK);
+        largeMek.getSpecialAbilities().setSUA(LG);
+        formation.setType(SBFElementType.MX);
+        formation.setUnits(List.of(infantry, largeMek));
+        to.addTerrain(new Terrain(Terrains.WOODS, 1));
+        assertEquals(2, step().getMpUsed());
+        formation.setUnits(List.of(largeMek));
+        assertEquals(1, step().getMpUsed());
+    }
+
+    @Test
+    void eachTerrainModifierIsPaidAtItsMostRestrictiveMover() {
+        // p. 166: "If any Element in a Formation must pay additional MP to cross a given terrain, then treat the entire
+        // Formation as having to pay that cost": infantry pays for the sand, the hovercraft for the rough
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        var infantry = new SBFUnit();
+        infantry.setType(SBFElementType.CI);
+        infantry.setMovementMode(SBFMovementMode.INFANTRY_FOOT);
+        var hover = new SBFUnit();
+        hover.setType(SBFElementType.V);
+        hover.setMovementMode(SBFMovementMode.HOVER);
+        formation.setType(SBFElementType.MX);
+        formation.setUnits(List.of(infantry, hover));
+        to.addTerrain(new Terrain(Terrains.SAND, 1));
+        to.addTerrain(new Terrain(Terrains.ROUGH, 1));
         assertEquals(4, step().getMpUsed());
     }
 

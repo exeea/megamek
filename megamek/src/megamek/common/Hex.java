@@ -82,6 +82,8 @@ public class Hex implements Serializable {
     private boolean strategicRoadDamaged;
     // Each bit pair denotes one route through a wooded hex; intersecting passages retain their own endpoints.
     private Set<Integer> strategicPassages;
+    // Strategic BattleForce: width in TW hexes of the water in a hex that also has ground terrain; 0 = not rolled
+    private int strategicWaterWidth;
 
     public static int strategicPassage(int firstSide, int secondSide) {
         if (firstSide < 0 || firstSide > 5 || secondSide < 0 || secondSide > 5 || firstSide == secondSide) {
@@ -121,6 +123,14 @@ public class Hex implements Serializable {
 
     public void damageStrategicRoad() {
         strategicRoadDamaged = true;
+    }
+
+    public int getStrategicWaterWidth() {
+        return strategicWaterWidth;
+    }
+
+    public void setStrategicWaterWidth(int width) {
+        strategicWaterWidth = width;
     }
 
     private Integer strategicIlluminationEnd;
@@ -972,6 +982,7 @@ public class Hex implements Serializable {
         Hex copy = new Hex(level, terrainCopy, theme, coords);
         copy.strategicInferno = strategicInferno;
         copy.strategicRoadDamaged = strategicRoadDamaged;
+        copy.strategicWaterWidth = strategicWaterWidth;
         if (strategicPassages != null) {
             copy.strategicPassages = new HashSet<>(strategicPassages);
         }
