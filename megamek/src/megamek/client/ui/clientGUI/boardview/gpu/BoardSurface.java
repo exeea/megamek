@@ -3831,16 +3831,17 @@ final class BoardSurface {
     }
 
     /**
-     * Closes the T junctions the bank's grid cuts ({@code cuts}, BoardRoadBank#cut) leave among these lists' faces: a face
-     * the bank split meets one it left whole along a straight edge (a wall split on the grid under a whole top), and a cut
-     * point lying inside the whole face's edge rasterizes as pinholes. Every edge only one face uses takes a copy of each
-     * such point lying strictly inside it, shaded along that edge, and its face is cut ear by ear in its own plane, which
-     * points on its own edges leave flat. A point a hair from an end is that end at another height, no junction. Dressing
-     * stays apart; the lists change in place, and a road face's pieces stay the road's.
+     * Closes the T junctions the bank's grid cuts ({@code cuts}, BoardRoadBank#cut) leave among these lists' faces: a
+     * face the bank split meets one it left whole along a straight edge (a wall split on the grid under a whole top),
+     * and a cut point lying inside the whole face's edge rasterizes as pinholes. Every edge only one face uses takes a
+     * copy of each such point lying strictly inside it, shaded along that edge, and its face is cut ear by ear in its
+     * own plane, which points on its own edges leave flat. A point a hair from an end is that end at another height, no
+     * junction. Dressing stays apart; the lists change in place, and a road face's pieces stay the road's.
      */
     private void closeTJunctions(List<List<Face>> lists, Set<Vector3> cuts) {
         List<Face> all = new ArrayList<>();
-        lists.forEach(list -> list.stream().filter(f -> f.finish() != Finish.DRESSING && f.finish() != Finish.OUTCROP).forEach(all::add));
+        lists.forEach(list -> list.stream().filter(f -> f.finish() != Finish.DRESSING && f.finish() != Finish.OUTCROP)
+              .forEach(all::add));
         Set<Vector3> used = Collections.newSetFromMap(new IdentityHashMap<>());
         Map<Set<Spot>, Integer> uses = new HashMap<>();
         for (var f : all) {
@@ -3854,7 +3855,8 @@ final class BoardSurface {
         Map<List<Integer>, List<Vector3>> points = new HashMap<>();
         for (Vector3 v : cuts) {
             if (used.contains(v)) {
-                points.computeIfAbsent(List.of((int) Math.floor(v.x / cell), (int) Math.floor(v.y / cell)), k -> new ArrayList<>()).add(v);
+                points.computeIfAbsent(List.of((int) Math.floor(v.x / cell), (int) Math.floor(v.y / cell)),
+                      k -> new ArrayList<>()).add(v);
             }
         }
         if (points.isEmpty()) { return; }
@@ -3866,12 +3868,15 @@ final class BoardSurface {
                 ring.add(p);
                 TreeMap<Float, Vector3> inside = new TreeMap<>();
                 Set<Spot> taken = new HashSet<>(List.of(new Spot(p), new Spot(q)));
-                for (int x = (int) Math.floor(Math.min(p.x, q.x) / cell); uses.get(side(f, i)) == 1 && x <= Math.floor(Math.max(p.x, q.x) / cell); x++) {
-                    for (int y = (int) Math.floor(Math.min(p.y, q.y) / cell); y <= Math.floor(Math.max(p.y, q.y) / cell); y++) {
+                for (int x = (int) Math.floor(Math.min(p.x, q.x) / cell);
+                      uses.get(side(f, i)) == 1 && x <= Math.floor(Math.max(p.x, q.x) / cell); x++) {
+                    for (int y = (int) Math.floor(Math.min(p.y, q.y) / cell);
+                          y <= Math.floor(Math.max(p.y, q.y) / cell); y++) {
                         for (Vector3 v : points.getOrDefault(List.of(x, y), List.of())) {
                             float u = new Vector3(v).sub(p).dot(d) / d.len2();
-                            if (u > 0 && u < 1 && new Vector3(p).mulAdd(d, u).dst(v) <= tolerance && v.dst(p) > 10 * tolerance
-                                  && v.dst(q) > 10 * tolerance && taken.add(new Spot(v))) { inside.put(u, v); }
+                            if (u > 0 && u < 1 && new Vector3(p).mulAdd(d, u).dst(v) <= tolerance
+                                  && v.dst(p) > 10 * tolerance && v.dst(q) > 10 * tolerance
+                                  && taken.add(new Spot(v))) { inside.put(u, v); }
                         }
                     }
                 }
@@ -3911,12 +3916,13 @@ final class BoardSurface {
     }
 
     /**
-     * A face's convex outline (its corners and points on its edges) cut ear by ear in the plane its normal sees most of,
-     * with its winding; an ear holds no other point, not even on its cut. Null if it cannot be cut.
+     * A face's convex outline (its corners and points on its edges) cut ear by ear in the plane its normal sees most
+     * of, with its winding; an ear holds no other point, not even on its cut. Null if it cannot be cut.
      */
     private static List<Face> fan(List<Vector3> ring, Face like) {
         Vector3 n = new Vector3(like.b()).sub(like.a()).crs(new Vector3(like.c()).sub(like.a()));
-        int drop = Math.abs(n.x) >= Math.abs(n.y) && Math.abs(n.x) >= Math.abs(n.z) ? 0 : Math.abs(n.y) >= Math.abs(n.z) ? 1 : 2;
+        int drop = Math.abs(n.x) >= Math.abs(n.y) && Math.abs(n.x) >= Math.abs(n.z) ? 0
+              : Math.abs(n.y) >= Math.abs(n.z) ? 1 : 2;
         // Seen along y the plane's axes are x and z, which turn against the normal's y.
         float turn = Math.signum(drop == 0 ? n.x : drop == 1 ? -n.y : n.z);
         List<Vector3> left = new ArrayList<>(ring);
@@ -3928,14 +3934,14 @@ final class BoardSurface {
                 if (turn * planeCross(a, b, c, drop) <= 1e-9f * a.dst2(c)) { continue; }
                 boolean empty = true;
                 for (Vector3 o : left) {
-                    empty &= o == a || o == b || o == c || turn * planeCross(a, b, o, drop) < 0 || turn * planeCross(b, c, o, drop) < 0
-                          || turn * planeCross(c, a, o, drop) < 0;
+                    empty &= o == a || o == b || o == c || turn * planeCross(a, b, o, drop) < 0
+                          || turn * planeCross(b, c, o, drop) < 0 || turn * planeCross(c, a, o, drop) < 0;
                 }
                 if (empty) { ear = i; }
             }
             if (ear < 0) { return null; }
-            pieces.add(new Face(left.get((ear + size - 1) % size), left.get(ear), left.get((ear + 1) % size), like.finish(),
-                  like.landEdge(), like.scatter()));
+            pieces.add(new Face(left.get((ear + size - 1) % size), left.get(ear), left.get((ear + 1) % size),
+                  like.finish(), like.landEdge(), like.scatter()));
             left.remove(ear);
         }
         return pieces;
@@ -3943,7 +3949,8 @@ final class BoardSurface {
 
     /** Twice the signed area of a triangle in the plane seen along the given axis. */
     private static float planeCross(Vector3 a, Vector3 b, Vector3 c, int drop) {
-        float ax = drop == 0 ? a.y : a.x, ay = drop == 2 ? a.y : a.z, bx = drop == 0 ? b.y : b.x, by = drop == 2 ? b.y : b.z;
+        float ax = drop == 0 ? a.y : a.x, ay = drop == 2 ? a.y : a.z,
+              bx = drop == 0 ? b.y : b.x, by = drop == 2 ? b.y : b.z;
         return (bx - ax) * ((drop == 2 ? c.y : c.z) - ay) - (by - ay) * ((drop == 0 ? c.y : c.x) - ax);
     }
 
