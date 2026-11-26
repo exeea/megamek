@@ -79,6 +79,10 @@ final class GroundFamilies {
         Rules ripples(float amount) { values[8 * 4 + 3] = amount; return this; }
         /** Crust colonies: lowland skin, crust above level zero and along raised rims. */
         Rules colonies() { values[12 * 4 + 2] = 1; return this; }
+        /**
+         * Walls that read four offset cells (ground-material.glsl groundWallOffsets) instead of offsets moving up them.
+         */
+        Rules cellWalls() { values[12 * 4 + 3] = 1; return this; }
         /** The root mat a two-level lip's sod leaves below it. */
         Rules rootMat(float r, float g, float b) { return put(13, r, g, b, 0); }
         /** A rim's abraded rock below its crest and at it. */
@@ -137,7 +141,8 @@ final class GroundFamilies {
         rules.put(BoardScene.Surface.LUNAR, plain().deposit(1, 1, .12f, 0).shore(1, false, 0, 0));
         rules.put(BoardScene.Surface.CONCRETE, plain());
         rules.put(BoardScene.Surface.FUNGUS, new Rules().cover(.76f, .97f, 0, 0).trim(0, .9f, false, 0).mantle(1, 1, 0, 0)
-              .deposit(.3f, 1, 0, 0).edges(false, false, .9f, false).shore(1, false, 0, 0).colonies().reads(15, false));
+              .deposit(.3f, 1, 0, 0).edges(false, false, .9f, false).shore(1, false, 0, 0).colonies().cellWalls()
+              .reads(15, false));
         rules.put(BoardScene.Surface.DESERT, arid().shore(1, true, 0, 1)
               .tone(0, 1.03f, .91f, .85f, .45f, .6f, .4f, 0, .4f, .75f, 0, 0)
               .abrasion(.98f, .91f, .85f, 1.14f, 1.15f, 1.13f).reads(2, true));
@@ -174,6 +179,7 @@ final class GroundFamilies {
         TWO_SCALES("groundTwoScaleRule", BoardSwitch.GROUND_TWO_SCALE_PATCHES, (rules, floor) -> true),
         /** A family whose own materials declare a finish (emission, metallic, scattering): set by the materials, not
          *  the row ({@link #kinds(int, String[], int)}). */
+        WALL_READS("groundWallReadsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> true),
         FINISH("groundFinishRule", null, (rules, floor) -> false);
 
         final String define;

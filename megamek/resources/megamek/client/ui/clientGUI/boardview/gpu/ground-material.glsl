@@ -35,7 +35,8 @@ struct GroundFamily {
     vec4 toneTintB;    // a second tone patch, as A
     vec4 toneFieldB;
     vec4 toneEdgeB;
-    vec4 floor;        // a sunken floor from level -1 down: colour layer (< 0 none), repeat; z crust colonies (0/1)
+    vec4 floor;        // a sunken floor from level -1 down: colour layer (< 0 none), repeat; z crust colonies (0/1);
+                       // w walls read in four offset cells (0/1, groundWallOffsets)
     vec4 rootMat;      // rgb the tint a two-level lip's sod leaves on the bank below it
     vec4 abrasionLow;  // rgb a rim's abraded rock below its crest; a the roles whose tops take translated reads
                        // (bits: cover 1, mantle 2, deposit 4, rock 8)
@@ -68,6 +69,7 @@ struct GroundPixel {
     float levelMetres;       // metres a level
     float pixelMetres;       // metres a screen pixel
     bool normalMaps;
+    bool cellWalls;          // its walls read in four offset cells (the family's floor.w; groundSurface sets it)
 };
 
 struct GroundSurface {
@@ -114,11 +116,91 @@ float groundBareLedge = 0.0;
 // times at 67 degrees).
 float groundLying(GroundPixel px) { return smoothstep(.6, .8, min(px.face.z, groundFaceSlope + .15)); }
 
+// A side projection's reads on a wall (uv in repeats, y up the face): where in the map they come from. The ground's
+// variation field is constant down a vertical face, so the source moves with height too, or a tall face repeats its
+// patches at every map period: two offsets of one repeat mixed, a fresh pair about every .7 repeats up (the old path's
+// cliffTexel); a family whose walls read in cells (its row's floor.w: fungus) blends four offset cells instead
+// (fungusTexel). Colour/height, normal/AO and the parallax's height take the same offsets. A quality switch
+// (BoardSwitch.GROUND_WALL_READS, groundWallReadsRule: High's); without it a wall reads the map as it is, once.
+#ifdef groundWallReadsRule
+void groundWallPair(vec2 uv, float variation, out vec2 a, out vec2 b, out float t) {
+    float choice = (variation + uv.y * .173) * 8.0, index = floor(choice);
+    a = uv + materialOffset(vec2(index, 0.0));
+    b = uv + materialOffset(vec2(index + 1.0, 0.0));
+    t = smoothstep(.2, .8, fract(choice));
+}
+
+// The four offset cells of a wall that reads in cells, and their weights.
+void groundWallCells(vec2 uv, out vec2 a, out vec2 b, out vec2 c, out vec2 d, out vec4 weights) {
+    vec2 cell = floor(uv), blend = smoothstep(.15, .85, fract(uv)), keep = 1.0 - blend;
+    a = uv + materialOffset(cell);
+    b = uv + materialOffset(cell + vec2(1.0, 0.0));
+    c = uv + materialOffset(cell + vec2(0.0, 1.0));
+    d = uv + materialOffset(cell + vec2(1.0, 1.0));
+    weights = vec4(keep.x * keep.y, blend.x * keep.y, keep.x * blend.y, blend.x * blend.y);
+}
+#endif
+
+// One side projection's colour/height and normal/AO on a wall, and its normals' spread: the pair through mixedTexel
+// (its read of weight zero skipped), the cells (a draw's whole family) four reads each.
+void groundWallRead(vec2 uv, mat2 gradient, float layer, float variation, bool cells, bool normalMaps, out vec4 colour,
+      out vec4 data, out float spread) {
+    data = vec4(.5, .5, 1.0, 1.0);
+    spread = 0.0;
+#ifdef groundWallReadsRule
+    if (cells) {
+        vec2 a, b, c, d;
+        vec4 w;
+        groundWallCells(uv, a, b, c, d, w);
+        colour = w.x * materialTexel(GROUND_COLOUR, layer, a, gradient) + w.y * materialTexel(GROUND_COLOUR, layer, b, gradient)
+              + w.z * materialTexel(GROUND_COLOUR, layer, c, gradient) + w.w * materialTexel(GROUND_COLOUR, layer, d, gradient);
+        if (normalMaps) {
+            vec4 da = materialTexel(GROUND_DATA, layer, a, gradient), db = materialTexel(GROUND_DATA, layer, b, gradient);
+            vec4 dc = materialTexel(GROUND_DATA, layer, c, gradient), dd = materialTexel(GROUND_DATA, layer, d, gradient);
+            data = w.x * da + w.y * db + w.z * dc + w.w * dd;
+            spread = dot(w * w, vec4(groundSpread(da), groundSpread(db), groundSpread(dc), groundSpread(dd)));
+        }
+        return;
+    }
+    vec2 a, b;
+    float t;
+    groundWallPair(uv, variation, a, b, t);
+    colour = mixedTexel(GROUND_COLOUR, layer, a, gradient, b, gradient, t);
+    if (normalMaps) data = mixedTexel(GROUND_DATA, layer, a, gradient, b, gradient, t, spread);
+#else
+    colour = materialTexel(GROUND_COLOUR, layer, uv, gradient);
+    if (normalMaps) {
+        data = materialTexel(GROUND_DATA, layer, uv, gradient);
+        spread = groundSpread(data);
+    }
+#endif
+}
+
+// The wall's height at its reads (groundWallRead), for the parallax.
+float groundWallHeight(vec2 uv, mat2 gradient, float layer, float variation, bool cells) {
+#ifdef groundWallReadsRule
+    if (cells) {
+        vec2 a, b, c, d;
+        vec4 w;
+        groundWallCells(uv, a, b, c, d, w);
+        return w.x * heightTexel(layer, a, gradient) + w.y * heightTexel(layer, b, gradient)
+              + w.z * heightTexel(layer, c, gradient) + w.w * heightTexel(layer, d, gradient);
+    }
+    vec2 a, b;
+    float t;
+    groundWallPair(uv, variation, a, b, t);
+    return mixedHeight(layer, a, gradient, b, gradient, t);
+#else
+    return heightTexel(layer, uv, gradient);
+#endif
+}
+
 // One role's colour/height and normal/AO, cavity in data.a. Tops read the plane. Step faces read the side they face,
 // both sides only where the face turns between them, and the plane too where they lie back; between a top and a face
 // (role between 0 and 1) both. A top takes the old path's second read (topCoordinates): a second, enlarged and turned
 // repeat mixed in by the world field variation where the first repeat's texels pass a pixel, or for a translated role
-// two offsets of one repeat; under Cheaper shading the first repeat alone.
+// two offsets of one repeat; under Cheaper shading the first repeat alone. A wall's reads move with height
+// (groundWallRead).
 void groundRead(GroundPixel px, float layer, float tile, float variation, bool translated, out vec4 colour,
       out vec3 normal, out float cavity, out float spread) {
     tile = max(tile, 1e-4);
@@ -159,28 +241,27 @@ void groundRead(GroundPixel px, float layer, float tile, float variation, bool t
     if (lying < 1.0) {
         float weight = 1.0 - lying;
         if (side > 0.0) {
-            vec3 uv = vec3(px.x / tile, layer);
-            vec4 c = textureGrad(GROUND_COLOUR, uv, px.xGradient[0] / tile, px.xGradient[1] / tile);
-            vec4 d = px.normalMaps ? textureGrad(GROUND_DATA, uv, px.xGradient[0] / tile, px.xGradient[1] / tile)
-                  : vec4(.5, .5, 1.0, 1.0);
+            vec4 c, d;
+            float s;
+            groundWallRead(px.x / tile, px.xGradient / tile, layer, variation, px.cellWalls, px.normalMaps, c, d, s);
             vec3 detail = d.rgb * 2.0 - 1.0;
             float w = weight * side;
             colour += c * w;
             n += normalize(vec3(detail.z * px.face.x, detail.x * px.facing.x + px.face.y, px.face.z - detail.y)) * w;
             cavity += d.a * w;
-            spread += groundSpread(d) * w * w;
+            spread += s * w * w;
         }
         if (side < 1.0) {
-            vec3 uv = vec3(px.y / tile + .37, layer);
-            vec4 c = textureGrad(GROUND_COLOUR, uv, px.yGradient[0] / tile, px.yGradient[1] / tile);
-            vec4 d = px.normalMaps ? textureGrad(GROUND_DATA, uv, px.yGradient[0] / tile, px.yGradient[1] / tile)
-                  : vec4(.5, .5, 1.0, 1.0);
+            vec4 c, d;
+            float s;
+            groundWallRead(px.y / tile + .37, px.yGradient / tile, layer, variation, px.cellWalls, px.normalMaps, c, d,
+                  s);
             vec3 detail = d.rgb * 2.0 - 1.0;
             float w = weight * (1.0 - side);
             colour += c * w;
             n += normalize(vec3(-detail.x * px.facing.y + px.face.x, detail.z * px.face.y, px.face.z - detail.y)) * w;
             cavity += d.a * w;
-            spread += groundSpread(d) * w * w;
+            spread += s * w * w;
         }
     }
     normal = px.normalMaps && !px.covered ? normalize(n) : px.face;
@@ -216,8 +297,8 @@ GroundPixel groundRelieved(GroundPixel px, float layer, float tile, float variat
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
         height += lying * mixedHeight(layer, a, px.topGradient / tile, b, gradientB, t);
     }
-    if (wx > 0.0) height += wx * heightTexel(layer, px.x / tile, px.xGradient / tile);
-    if (wy > 0.0) height += wy * heightTexel(layer, px.y / tile + .37, px.yGradient / tile);
+    if (wx > 0.0) height += wx * groundWallHeight(px.x / tile, px.xGradient / tile, layer, variation, px.cellWalls);
+    if (wy > 0.0) height += wy * groundWallHeight(px.y / tile + .37, px.yGradient / tile, layer, variation, px.cellWalls);
     float sink = 1.0 - height;
     px.top -= top * sink;
     px.x -= x * sink;
@@ -262,6 +343,7 @@ GroundSurface groundSurface(GroundPixel px, int family, vec3 fields) {
     // Within the table: a family program's palette is constant, and a volcanic one's crust and bank (12, 13) reach this
     // call's text though never the call (compactSlot), which a constant index past the table fails to compile.
     GroundFamily f = groundFamilies[min(family, GROUND_FAMILIES - 1)];
+    px.cellWalls = f.floor.w > .5;
     float broad = fields.x, fine = fields.y, region = fields.z;
     // The cover holds by the slope the read sees (groundLying): a face near vertical carries none, whatever its
     // shading normal says at a rim or foot.
@@ -551,6 +633,7 @@ GroundPixel groundPixel(MaterialProjection projection, vec3 world, vec3 face, fl
     px.rock = rock; px.hardness = bed; px.sediment = sediment; px.shallowSediment = shallowSediment;
     px.riverBank = riverBank; px.role = rocky ? 1.0 : 0.0; px.covered = terrainCovered;
     px.levelMetres = u_levelHeight / u_metre; px.pixelMetres = pixelMetres; px.normalMaps = u_normalMaps > .5;
+    px.cellWalls = false;
     return px;
 }
 

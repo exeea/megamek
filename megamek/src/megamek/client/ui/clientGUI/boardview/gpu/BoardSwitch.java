@@ -73,7 +73,11 @@ enum BoardSwitch {
     GROUND_TWO_SCALE_PATCHES("Two-scale patches", 0, 1, 1, 0, 0, 1, Applies.PROGRAMS, null,
           "The ground's broad patches from two noise scales, the finer one breaking bare soil and turf into smaller "
                 + "patches on banks and level tops. Off, one scale: one texture read less a pixel. Switching it rebuilds "
-                + "the board's shaders.");
+                + "the board's shaders."),
+    GROUND_WALL_READS("Varied cliff faces", 0, 1, 1, 0, 0, 1, Applies.PROGRAMS, null,
+          "Tall cliffs and banks take their rock from a source that moves with height, so a face does not repeat its "
+                + "pattern at every map period; fungal walls blend four offset patches. Off, a face shows the map "
+                + "as it is, which is faster. Switching it rebuilds the board's shaders.");
 
     /** How a change reaches the GPU. */
     enum Applies {
