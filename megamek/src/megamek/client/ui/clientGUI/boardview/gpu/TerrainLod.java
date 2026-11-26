@@ -61,7 +61,8 @@ enum TerrainLod {
      * medium shows. The build in this thread's scope (TerrainSettings).
      */
     static boolean lateDetail() {
-        return TerrainSettings.switchesInScope().get(BoardSwitch.DETAIL_SCALE) > 1;
+        // As the detail is chosen (#detailPixels): the height field takes it at the hex's own size at every scale.
+        return detailPixels(1, TerrainSettings.switchesInScope().get(BoardSwitch.DETAIL_SCALE)) < 1;
     }
 
     /**
