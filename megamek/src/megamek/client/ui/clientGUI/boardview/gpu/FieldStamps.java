@@ -296,7 +296,10 @@ final class FieldStamps {
      * builds down to the road hex: ChunkField#walls), and a sample the road hex shares with a neighbour at its level takes
      * the neighbour's height (ChunkField's lattice).
      */
-    /** How far past the wings' ends the approach's floor runs on, in tile pixels. */
+    /**
+     * How far past the wings' ends the approach's floor runs on, and past their outer faces the scree they retain
+     * keeps their tops (#rise), in tile pixels.
+     */
     private static final float RUNOUT = 6;
 
     static float approach(float[][] frames, int owner, float x, float y) {
@@ -452,9 +455,11 @@ final class FieldStamps {
      * block asks it before it merges level ground (ChunkField): the panels of the hex the point lies in and its
      * neighbours decide, so the hexes sharing a sample give it one height. On the road's side of every wall round it,
      * reserved ground is its road's surface (the bank leaves it as high as a step's land where that stands higher than
-     * it cuts; it is painted as road). Behind a wall the land steps back from its top at the bank's slope, as today's
-     * bank retains it (BoardRoadBank#height), fully where it stands up to half a level above the top, fading out by a
-     * level; the soil it leaves is earth, a bank's face. A cliff keeps its face.
+     * it cuts; it is painted as road), but ground standing higher over it than a step a wall retains keeps its height:
+     * the road runs under a cliff there (a ground tunnel's portal), whose wall closes down to it. Behind a wall the
+     * land steps back from its top at the bank's slope, as today's bank retains it (BoardRoadBank#height), fully where
+     * it stands up to half a level above the top, fading out by a level; the soil it leaves is earth, a bank's face. A
+     * cliff keeps its face.
      */
     static void stepBack(FieldBoard board, Function<Coords, FieldBoard.Shares> shares, Coords h, float x, float y,
           float[] out) {
@@ -481,6 +486,8 @@ final class FieldStamps {
         }
         if (!any) { return; }
         float road = behind ? Float.NaN : board.roadSurface(here, x, y);
+        // A step taller than BoardRoadBank#WALLED_SLOPE recedes as rock, not cut down to the road.
+        if (z - road > BoardRoadBank.WALLED_SLOPE * level) { return; }
         if (Float.isFinite(road) && Math.abs(z - road) > earth) {
             out[0] = road;
             out[1] = 0;
@@ -568,7 +575,9 @@ final class FieldStamps {
     /**
      * The scree's height over the opening at a point of a mouth's frame (tile pixels), NaN where none lies: rising at
      * the angle of repose behind the headwall's back and falling at it beside the cap; in front of the face only
-     * outside the wing walls, which retain it at their tops, rising from them at repose.
+     * outside the wing walls, which retain it at their tops, rising from them at repose, and keep it at least that
+     * high for a short run-out (#RUNOUT) before it falls at repose: the rock closes onto the wings, as today's
+     * relief onto its short ones, and no wing stands clear of it.
      */
     private static float rise(float[] f, float lx, float ly) {
         float ax = Math.abs(lx), side = Math.max(0, ax - CAP_HALF);
@@ -582,6 +591,9 @@ final class FieldStamps {
             // Between the face and the headwall's back the retained scree climbs to the slope behind.
             float w = Math.clamp(ly / BoardTunnel.HEADWALL_BACK, 0, 1);
             h = Math.min(h, retained + w * Math.max(0, h - retained));
+            // The wing's top held for the run-out outside it; over the approach it drops off as before.
+            float held = top + Math.min(0, out) * DROP - (Math.max(0, out - RUNOUT) + ahead) / REPOSE;
+            h = Math.max(h, held);
         }
         // Inside the shell's sides and behind the cliff's face it falls away at once too: continuous everywhere, so
         // a wall whose foot it lifts keeps a foot each detail can follow.
