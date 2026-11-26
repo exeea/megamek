@@ -61,11 +61,15 @@ final class FieldShore {
     /**
      * Today's waterline of a water hex (BoardSurface#waterGeometry), x and y a point; none for a dry hex. Its
      * {@code banks}: the stretches that face land (x0, y0, x1, y1 a segment); its {@code mouths}: those that face
-     * the water of the hex beside it, inside the water on both sides.
+     * the water of the hex beside it, inside the water on both sides; its {@code shores}: the banks but its quays, the
+     * stretches along a paved neighbour's pavement (within QUAY of it), which are today's quay walls.
      */
-    private record Line(float[] ring, float[] banks, float[] mouths) { }
+    private record Line(float[] ring, float[] banks, float[] mouths, float[] shores) { }
 
-    private static final Line DRY_HEX = new Line(new float[0], new float[0], new float[0]);
+    private static final Line DRY_HEX = new Line(new float[0], new float[0], new float[0], new float[0]);
+
+    /** How near a paved neighbour's pavement (BoardConcrete#pavedEdge), in tile pixels, a bank is a quay wall. */
+    private static final float QUAY = 1;
 
     /** A water hex's sampled bed (today's BED faces, indexed), or none (null). */
     private record Bed(GpuBiomeVegetation.Support index) { }
@@ -78,8 +82,11 @@ final class FieldShore {
     /** Today's rule for a natural cliff beside water (BoardRelief#wetCliff): only this tuning stands it in the water. */
     private final boolean cliffsIntoWater;
     private final AtomicReferenceArray<Column> columns;
-    /** The waterline distance's nodes on one board-wide grid from the world's origin, by page. */
-    private final Map<Long, float[]> pages = new ConcurrentHashMap<>();
+    /**
+     * The waterline distance's nodes on one board-wide grid from the world's origin, by page; and the distance to the
+     * shores alone (#shoreDistance).
+     */
+    private final Map<Long, float[]> pages = new ConcurrentHashMap<>(), shorePages = new ConcurrentHashMap<>();
     /** Today's waterline of each hex asked for, as a ring; its banks and mouths, which need its neighbours' rings. */
     private final Map<Coords, float[]> rings = new ConcurrentHashMap<>();
     /**
@@ -742,32 +749,42 @@ final class FieldShore {
      * How far (x, y) lies inside today's waterline, in tile pixels (negative on land, clamped at REACH): the signed
      * distance to the waterlines of the water hexes round it, on the board-wide grid, bilinear.
      */
-    float distance(float x, float y) {
+    float distance(float x, float y) { return grid(pages, true, x, y); }
+
+    /**
+     * #distance to the shores alone (Line#shores): a quay wall raises no bed, as today's bed keeps its depth up to the
+     * quay (#bed). The water's texels and the ground's cap above the water keep #distance.
+     */
+    float shoreDistance(float x, float y) { return grid(shorePages, false, x, y); }
+
+    private float grid(Map<Long, float[]> grid, boolean quays, float x, float y) {
         float fx = x / step, fy = y / step;
         int i = (int) Math.floor(fx), j = (int) Math.floor(fy);
         float u = fx - i, v = fy - j;
-        return (1 - v) * ((1 - u) * node(i, j) + u * node(i + 1, j)) + v * ((1 - u) * node(i, j + 1) + u * node(i + 1, j + 1));
+        return (1 - v) * ((1 - u) * node(grid, quays, i, j) + u * node(grid, quays, i + 1, j))
+              + v * ((1 - u) * node(grid, quays, i, j + 1) + u * node(grid, quays, i + 1, j + 1));
     }
 
-    private float node(int i, int j) {
+    private float node(Map<Long, float[]> grid, boolean quays, int i, int j) {
         long key = (long) Math.floorDiv(i, PAGE) << 32 | Math.floorDiv(j, PAGE) & 0xffffffffL;
-        return pages.computeIfAbsent(key, this::page)[Math.floorMod(j, PAGE) * PAGE + Math.floorMod(i, PAGE)];
+        return grid.computeIfAbsent(key, k -> page(k, quays))[Math.floorMod(j, PAGE) * PAGE + Math.floorMod(i, PAGE)];
     }
 
-    private float[] page(long key) {
+    private float[] page(long key, boolean quays) {
         int i0 = (int) (key >> 32) * PAGE, j0 = (int) key * PAGE;
         float[] values = new float[PAGE * PAGE];
         for (int j = 0; j < PAGE; j++) {
-            for (int i = 0; i < PAGE; i++) { values[j * PAGE + i] = signed((i0 + i) * step, (j0 + j) * step); }
+            for (int i = 0; i < PAGE; i++) { values[j * PAGE + i] = signed((i0 + i) * step, (j0 + j) * step, quays); }
         }
         return values;
     }
 
     /**
      * The signed distance from (x, y) to today's waterline, in tile pixels, clamped at REACH: positive inside a water
-     * hex's line or on the mouth between two, the distance to the nearest bank of the water hexes within two hexes.
+     * hex's line or on the mouth between two, the distance to the nearest bank of the water hexes within two hexes
+     * ({@code quays} false: to the nearest shore, its quays left out).
      */
-    private float signed(float x, float y) {
+    private float signed(float x, float y, boolean quays) {
         float across = width * .75f, best = REACH * scale, mouth = Float.POSITIVE_INFINITY;
         boolean inside = false;
         int near = Math.round((x - width / 2) / across);
@@ -778,7 +795,7 @@ final class FieldShore {
                 Line line = line(new Coords(c, r));
                 if (line.ring().length == 0) { continue; }
                 inside |= contains(line.ring(), x, y);
-                best = Math.min(best, nearest(line.banks(), x, y));
+                best = Math.min(best, nearest(quays ? line.banks() : line.shores(), x, y));
                 mouth = Math.min(mouth, nearest(line.mouths(), x, y));
             }
         }
@@ -798,8 +815,9 @@ final class FieldShore {
         if (ring.length > 0) {
             float cx = h.getX() * width * .75f + width / 2, cy = -(h.getY() * height + (h.getX() & 1) * height / 2 + height / 2);
             int n = ring.length / 2, segments = n / 6, mouths = mouths(h);
-            float[] banks = new float[4 * n], open = new float[4 * n];
-            int b = 0, o = 0;
+            float[] banks = new float[4 * n], open = new float[4 * n], shores = new float[4 * n];
+            int b = 0, o = 0, s = 0;
+            BoardConcrete concrete = BoardConcrete.of(scene);
             for (int k = 0; k < n; k++) {
                 float x0 = ring[2 * k], y0 = ring[2 * k + 1], x1 = ring[2 * ((k + 1) % n)], y1 = ring[2 * ((k + 1) % n) + 1];
                 int edge = k / segments;
@@ -817,8 +835,12 @@ final class FieldShore {
                 to[at + 2] = x1;
                 to[at + 3] = y1;
                 if (bank) { b += 4; } else { o += 4; }
+                if (bank && concrete.pavedEdge(scene, h, (x0 + x1) / 2, (y0 + y1) / 2) > QUAY * scale) {
+                    System.arraycopy(new float[] { x0, y0, x1, y1 }, 0, shores, s, 4);
+                    s += 4;
+                }
             }
-            line = new Line(ring, Arrays.copyOf(banks, b), Arrays.copyOf(open, o));
+            line = new Line(ring, Arrays.copyOf(banks, b), Arrays.copyOf(open, o), Arrays.copyOf(shores, s));
         }
         Line raced = lines.putIfAbsent(h, line);
         return raced == null ? line : raced;
@@ -929,7 +951,7 @@ final class FieldShore {
         float m = BoardRelief.metres(MARGIN) / scale * (1 - wall)
               * BoardRelief.lerp(1, BoardRelief.lerp(.4f, 1, Math.clamp(steep + .5f, 0, 1)), full);
         float drop = margin * (1 - wall);
-        float inside = distance(x, y), shifted = inside - m, t = Math.clamp(shifted / RUN + line, 0, 1);
+        float inside = shoreDistance(x, y), shifted = inside - m, t = Math.clamp(shifted / RUN + line, 0, 1);
         // Narrow water reaches its full depth toward the hex's centre too, as today's basin falls from its rim to its
         // plateau along rays, once a bank's width inside the waterline.
         t = Math.max(t, centre * BoardRelief.smooth(shifted / RUN));
