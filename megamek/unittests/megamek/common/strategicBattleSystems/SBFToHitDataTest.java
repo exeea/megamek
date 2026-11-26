@@ -136,6 +136,34 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void variableRangeTargetingAppliesAtEveryRangeButNeverWithImprovedTargeting() {
+        // Design Quirks Table, IO:BF p. 228: Variable Range Targeting (BM, PM) "Unit receives a -1 to-hit modifier on
+        // all attacks"; Improved Targeting "May not be combined with Variable Targeting".
+        var unit = attacker.getUnits().getFirst();
+        unit.setType(SBFElementType.BM);
+        List<AlphaStrikeElement> elements = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            var element = new AlphaStrikeElement();
+            element.setType(ASUnitType.BM);
+            element.getQuirks().getOption(OptionsConstants.QUIRK_POS_VAR_RNG_TARG).setValue(true);
+            elements.add(element);
+        }
+        unit.setElements(elements);
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertEquals(List.of(-1), modifiers("variable range targeting"));
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertEquals(List.of(-1), modifiers("variable range targeting"));
+        target.setPosition(BoardLocation.of(new Coords(2, 1), 0));
+        String improved = OptionsConstants.QUIRK_POS_IMP_TARG_L;
+        elements.forEach(element -> element.getQuirks().getOption(improved).setValue(true));
+        assertEquals(List.of(), modifiers("variable range targeting"));
+        assertEquals(List.of(-1), modifiers("improved targeting"));
+        elements.forEach(element -> element.getQuirks().getOption(improved).setValue(false));
+        unit.setType(SBFElementType.V);
+        assertEquals(List.of(), modifiers("variable range targeting"));
+    }
+
+    @Test
     void attackTwoHexesAwayIsAtExtremeRange() {
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
 

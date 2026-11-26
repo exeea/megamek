@@ -174,6 +174,11 @@ public class SBFToHitData extends TargetRoll {
               && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
               && firingUnit.hasUnitQuirk(improvedTargeting)) {
             toHit.addModifier(-1, "improved targeting");
+        } else if (game.usesDesignQuirks() && firingUnit.isAnyTypeOf(SBFElementType.BM, SBFElementType.PM)
+              && firingUnit.hasUnitQuirk(OptionsConstants.QUIRK_POS_VAR_RNG_TARG)) {
+            // Variable Range Targeting (BM, PM): "Unit receives a -1 to-hit modifier on all attacks"; Improved
+            // Targeting "May not be combined with Variable Targeting", so the two never stack
+            toHit.addModifier(-1, "variable range targeting");
         }
         int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
               .filter(a -> a.getEntityId() == attackingFormation.getId()).count();
