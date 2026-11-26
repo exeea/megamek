@@ -42,7 +42,10 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import megamek.common.Player;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFMovePath;
+import megamek.common.strategicBattleSystems.SBFUnit;
 import org.junit.jupiter.api.Test;
 
 class SBFCommandAbilitiesTest {
@@ -94,6 +97,48 @@ class SBFCommandAbilitiesTest {
         assertTrue(game.getFormation(13).orElseThrow().isBrawlers());
         assertTrue(game.getFormation(14).orElseThrow().isBrawlers());
         assertFalse(game.getFormation(15).orElseThrow().isBrawlers());
+    }
+
+    @Test
+    void communicationsDisruptionCostsOneRandomEnemyFourMoveOnASix() {
+        // Communications Disruption, IO:BF p. 226: "rolls 1D6. If the result of this roll is 6, one random Formation of
+        // the opposing force ... reduces its available Move by 4 MP (to a minimum of 1 MP)."
+        var game = new SBFGame();
+        game.setCurrentRound(1);
+        for (int id = 1; id <= 2; id++) {
+            var player = new Player(id, "Player " + id);
+            player.setTeam(id);
+            game.addPlayer(id, player);
+        }
+        var commander = new SBFUnit();
+        commander.setArmor(4);
+        commander.setCurrentArmor(4);
+        commander.getSpecialAbilities().setSUA(BattleForceSUA.COM);
+        commander.getInitiativeAbilities().add(SBFUnit.InitiativeAbility.COMMUNICATIONS_DISRUPTION);
+        formation(game, 10, 1, 6).addUnit(commander);
+        var first = formation(game, 20, 2, 6);
+        var second = formation(game, 21, 2, 3);
+        var manager = mock(SBFGameManager.class);
+        when(manager.getGame()).thenReturn(game);
+
+        SBFCommandAbilities.disruptCommunications(manager, () -> 5, size -> 1);
+        assertFalse(second.isCommunicationsDisrupted());
+        SBFCommandAbilities.disruptCommunications(manager, () -> 6, size -> 1);
+        assertTrue(second.isCommunicationsDisrupted());
+        assertFalse(first.isCommunicationsDisrupted());
+        assertEquals(1, SBFMovePath.normalMovementPoints(second, game));
+        first.setCommunicationsDisrupted(true);
+        assertEquals(2, SBFMovePath.normalMovementPoints(first, game));
+    }
+
+    private static SBFFormation formation(SBFGame game, int id, int owner, int movement) {
+        var formation = new SBFFormation();
+        formation.setId(id);
+        formation.setOwnerId(owner);
+        formation.setMovement(movement);
+        formation.setDeployed(true);
+        game.addUnit(formation);
+        return formation;
     }
 
     @Test

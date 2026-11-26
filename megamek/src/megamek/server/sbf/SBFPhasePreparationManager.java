@@ -56,6 +56,7 @@ record SBFPhasePreparationManager(SBFGameManager gameManager) implements SBFGame
                 game().clearActions();
                 gameManager.clearPendingReports();
                 resetEntityPhase(game().getPhase());
+                SBFCommandAbilities.disruptCommunications(gameManager);
                 gameManager.transmitAllPlayerUpdates();
                 gameManager.resetActivePlayersDone();
 

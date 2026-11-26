@@ -270,9 +270,12 @@ public class SBFMovePath implements EntityAction, Serializable {
     public static int normalMovementPoints(SBFFormation formation, SBFGame game) {
         boolean carriesXmec = game.passengersOf(formation).stream()
               .anyMatch(rider -> rider.isExternallyMounted() && rider.hasSUA(BattleForceSUA.XMEC));
-        return Math.max(0, formation.getMovement() - formation.getReconMpSpent() - (formation.slowedByInferno(game.getCurrentRound()) ? 1 : 0)
+        int movement = Math.max(0, formation.getMovement() - formation.getReconMpSpent() - (formation.slowedByInferno(game.getCurrentRound()) ? 1 : 0)
                 - formation.dismountCost(game.getCurrentRound()) - formation.reformMovementPenalty(game.getCurrentRound())
               - (carriesXmec ? 1 : 0) - (formation.ambushedIn(game.getCurrentRound()) ? 2 : 0));
+        // Communications Disruption, IO:BF p. 226: "reduces its available Move by 4 MP (to a minimum of 1 MP)"
+        return formation.isCommunicationsDisrupted() && !formation.isAerospace()
+              ? Math.min(movement, Math.max(1, movement - 4)) : movement;
     }
 
     /** A newly revealed hostile Formation changes the next departure's MP, even on a route already submitted. */

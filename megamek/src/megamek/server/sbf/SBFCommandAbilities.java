@@ -37,10 +37,17 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
+import java.util.function.IntUnaryOperator;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import megamek.common.Player;
+import megamek.common.compute.Compute;
+import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFUnit.InitiativeAbility;
 
 /** Special Command Abilities, IO:BF pp. 223–226, checked when the game starts. */
 final class SBFCommandAbilities {
@@ -65,6 +72,52 @@ final class SBFCommandAbilities {
             limit(manager, force, SBFFormation::isSharpShooters, f -> f.setSharpShooters(false), "Sharp Shooters");
             limit(manager, force, SBFFormation::isBrawlers, f -> f.setBrawlers(false), "Brawlers");
         }
+    }
+
+    /**
+     * Communications Disruption, IO:BF p. 226: "At the beginning of each turn, the player controlling a Force with the
+     * Communications Disruption command ability rolls 1D6. If the result of this roll is 6, one random Formation of the
+     * opposing force is affected ... The disruptive effects pass by the end of the turn." With Battlefield Intelligence
+     * in play the Force needs "a BI ratio of 2:1 (or higher) over its opponent".
+     */
+    static void disruptCommunications(SBFGameManager manager) {
+        disruptCommunications(manager, Compute::d6, Compute::randomInt);
+    }
+
+    static void disruptCommunications(SBFGameManager manager, IntSupplier d6, IntUnaryOperator pick) {
+        SBFGame game = manager.getGame();
+        game.getActiveFormations().forEach(formation -> formation.setCommunicationsDisrupted(false));
+        if (game.getCurrentRound() < 1) {
+            return;
+        }
+        List<Player> sides = SBFScenarioResolution.sides(game);
+        for (Player side : sides) {
+            var force = new SBFInitiativeModifiers(game, side);
+            if (!force.hasAbility(InitiativeAbility.COMMUNICATIONS_DISRUPTION) || !intelligenceAllows(game, force, side, sides)
+                  || (d6.getAsInt() != 6)) {
+                continue;
+            }
+            List<SBFFormation> opponents = game.getActiveFormations().stream().filter(f -> game.areHostile(f, side))
+                  .sorted(Comparator.comparingInt(SBFFormation::getId)).toList();
+            if (!opponents.isEmpty()) {
+                SBFFormation affected = opponents.get(pick.applyAsInt(opponents.size()));
+                affected.setCommunicationsDisrupted(true);
+                manager.sendServerChat(side.getId(), "Communications Disruption: " + affected.generalName()
+                      + " has 4 MP less this turn.");
+                manager.sendServerChat(affected.getOwnerId(), "Enemy Communications Disruption: " + affected.generalName()
+                      + " has 4 MP less this turn.");
+            }
+        }
+        manager.entityAllUpdate();
+    }
+
+    private static boolean intelligenceAllows(SBFGame game, SBFInitiativeModifiers force, Player side, List<Player> sides) {
+        if (!game.getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT)) {
+            return true;
+        }
+        int own = force.intelligenceRating();
+        return (own > 0) && sides.stream().filter(side::isEnemyOf)
+              .allMatch(other -> own >= 2 * new SBFInitiativeModifiers(game, other).intelligenceRating());
     }
 
     private static void limit(SBFGameManager manager, List<SBFFormation> force, Predicate<SBFFormation> has,

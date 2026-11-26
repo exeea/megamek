@@ -902,6 +902,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         this.brawlers = brawlers;
     }
 
+    /** Communications Disruption, IO:BF p. 226: an enemy disrupted this Formation's communications for this turn. */
+    private boolean communicationsDisrupted;
+
+    public boolean isCommunicationsDisrupted() {
+        return communicationsDisrupted;
+    }
+
+    public void setCommunicationsDisrupted(boolean disrupted) {
+        communicationsDisrupted = disrupted;
+    }
+
     /** Made up exclusively of wheeled Elements, which pay 1 MP less in urban hexes (IO:BF p. 216, urban table note *). */
     public boolean isExclusivelyWheeled() {
         return SBFTerrainMovement.Bonuses.of(SBFTerrainMovement.of(this).toList()).wheeled();
@@ -1242,7 +1253,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public int capitalThrust() {
         return isDrifting() || getMovementMode() == SBFMovementMode.STATION_KEEPING ? 0
-              : Math.max(0, getMovement() - highExplosiveBombs - clusterBombs);
+              : Math.max(0, getMovement() - highExplosiveBombs - clusterBombs - (communicationsDisrupted ? 1 : 0));
     }
 
     public void markSpaceManeuver(int round) {
@@ -1357,7 +1368,9 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
               || getMovementMode() == SBFMovementMode.STATION_KEEPING)) {
             return 0;
         }
-        return getMovement() <= 0 ? 0 : Math.max(1, getMovement() - highExplosiveBombs - clusterBombs);
+        // Communications Disruption, IO:BF p. 226: "reduce its base Thrust by 1"
+        return getMovement() <= 0 ? 0
+              : Math.max(1, getMovement() - highExplosiveBombs - clusterBombs - (communicationsDisrupted ? 1 : 0));
     }
 
     public boolean isEligibleForPhase(GamePhase phase) {
