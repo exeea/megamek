@@ -352,6 +352,16 @@ final class BoardNaturalBridge {
             facing(facets, new Vector3(deep), top[rings][mouth], bottom[rings][mouth], Part.SIDE, outward);
             facing(facets, new Vector3(deep), bottom[rings][mouth], under, Part.SIDE, outward);
         }
+        // Past a ramp landing's hex edge the span's top stands just under the anchor's level (#underAnchor), so it
+        // meets the anchor's rim at its height instead of passing under it; the span stays its own piece, joined along
+        // that edge.
+        for (int d = 0; d < 6 && !fullHex; d++) {
+            var next = scene.tile(tile.coords().translated(d));
+            if ((exits & (1 << d)) != 0 && next != null && BoardBridge.bank(tile, next, d) && !cliff(next, d)
+                  && next.floor() > level) {
+                facets = underAnchor(facets, tile.coords(), d, BoardGeometry.groundZ(next));
+            }
+        }
         return BoardBridge.shape(fullHex ? deck.surface() : shell(deck.surface()), level,
               fullHex ? facets : outsideBanks(scene, tile, facets, new Area(bankTops), level * BoardGeometry.level()));
     }
@@ -362,6 +372,118 @@ final class BoardNaturalBridge {
      */
     static BoardScene.Surface shell(BoardScene.Surface banks) {
         return banks == BoardScene.Surface.GRASS ? BoardScene.Surface.ROCK : banks;
+    }
+
+    /**
+     * {@code facets} with the span's top raised past the hex edge toward d, a ramp landing on an anchor whose level
+     * is {@code top}: the facets that cross the edge are split along it, and inside the landing's mouth
+     * (between the edge's corners, up to 15 m past it) every point on or past the edge within 1.5 m under that level
+     * stands 8 cm under it. The top's fan otherwise runs from the deck to contact points inside the bank and passes
+     * under the anchor's rim, which then stands over it as a shadowed step. No TOP or RIM facet is left steeper than
+     * about 57 degrees: the lifts of such a facet's points halve, at most six times, then drop.
+     */
+    private static ArrayList<Facet> underAnchor(List<Facet> facets, Coords coords, int d, float top) {
+        float m = BoardRelief.metres(1), under = top - .08f * m, low = top - 1.5f * m;
+        Vector3 a = BoardGeometry.corner(coords, 0, Math.floorMod(2 - d, 6));
+        Vector3 b = BoardGeometry.corner(coords, 0, Math.floorMod(1 - d, 6));
+        var centre = BoardGeometry.center(coords, 0);
+        float apothem = (float) Math.hypot((a.x + b.x) / 2 - centre.x, (a.y + b.y) / 2 - centre.y);
+        float length = a.dst(b), ex = (b.x - a.x) / length, ey = (b.y - a.y) / length;
+        var split = new ArrayList<Facet>(facets.size() + 64);
+        for (var face : facets) {
+            Vector3[] p = { face.a(), face.b(), face.c() };
+            float[] past = new float[3];
+            for (int i = 0; i < 3; i++) { past[i] = BoardGeometry.share(coords, d, p[i].x, p[i].y) - 1; }
+            if (past[0] <= 0 && past[1] <= 0 && past[2] <= 0 || past[0] >= 0 && past[1] >= 0 && past[2] >= 0) {
+                split.add(face);
+                continue;
+            }
+            var inside = new ArrayList<Vector3>(4);
+            var outside = new ArrayList<Vector3>(4);
+            for (int i = 0; i < 3; i++) {
+                int j = (i + 1) % 3;
+                if (past[i] <= 0) { inside.add(p[i]); }
+                if (past[i] >= 0) { outside.add(p[i]); }
+                if (past[i] < 0 && past[j] > 0 || past[i] > 0 && past[j] < 0) {
+                    // From the edge's ordered ends, so both facets on it find the same point.
+                    boolean first = p[i].x < p[j].x || p[i].x == p[j].x && p[i].y < p[j].y;
+                    Vector3 u = first ? p[i] : p[j], w = first ? p[j] : p[i];
+                    float su = first ? past[i] : past[j], sw = first ? past[j] : past[i];
+                    var cross = new Vector3(u).lerp(w, su / (su - sw));
+                    inside.add(cross);
+                    outside.add(cross);
+                }
+            }
+            for (var polygon : List.of(inside, outside)) {
+                for (int i = 1; i + 1 < polygon.size(); i++) {
+                    split.add(new Facet(polygon.get(0), polygon.get(i), polygon.get(i + 1), face.normal(), face.part(),
+                          face.colour()));
+                }
+            }
+        }
+        // Each point's lift, kept per place so every facet sharing the point moves it alike.
+        var lifts = new java.util.HashMap<Vector3, Float>();
+        for (var face : split) {
+            for (var v : new Vector3[] { face.a(), face.b(), face.c() }) {
+                float past = (BoardGeometry.share(coords, d, v.x, v.y) - 1) * apothem;
+                float along = (v.x - a.x) * ex + (v.y - a.y) * ey;
+                boolean mouth = past >= -.001f * m && past <= 15 * m && along >= 0 && along <= length;
+                if (mouth && v.z < under && v.z >= low) {
+                    lifts.put(v, under - v.z);
+                }
+            }
+        }
+        // No top steeper than the cap: a TOP or RIM facet over it halves its points' lifts, at most six times, then
+        // drops them (each pass only lowers lifts, so this ends).
+        for (int pass = 0; !lifts.isEmpty(); pass++) {
+            boolean changed = false;
+            for (var face : split) {
+                if (face.part() != Part.TOP && face.part() != Part.RIM) { continue; }
+                Vector3[] q = raise(face, lifts);
+                if (q == null) { continue; }
+                var normal = new Vector3(q[1]).sub(q[0]).crs(new Vector3(q[2]).sub(q[0]));
+                if (normal.len2() < 1e-12f) { continue; }
+                normal.nor();
+                if (normal.dot(face.normal()) < 0) { normal.scl(-1); }
+                if (normal.z >= .55f) { continue; }
+                for (var v : new Vector3[] { face.a(), face.b(), face.c() }) {
+                    Float l = lifts.get(v);
+                    if (l != null && l > 0) {
+                        lifts.put(v, pass < 6 ? l / 2 : 0);
+                        changed = true;
+                    }
+                }
+            }
+            if (!changed) { break; }
+        }
+        var raised = new ArrayList<Facet>(split.size());
+        for (var face : split) {
+            Vector3[] q = raise(face, lifts);
+            if (q == null) {
+                raised.add(face);
+                continue;
+            }
+            var normal = new Vector3(q[1]).sub(q[0]).crs(new Vector3(q[2]).sub(q[0]));
+            if (normal.len2() < 1e-12f) { continue; }
+            normal.nor();
+            if (normal.dot(face.normal()) < 0) { normal.scl(-1); }
+            raised.add(new Facet(q[0], q[1], q[2], normal, face.part(), face.colour()));
+        }
+        return raised;
+    }
+
+    /** {@code face}'s points with their lifts ({@link #underAnchor}); null when none of them is lifted. */
+    private static Vector3[] raise(Facet face, Map<Vector3, Float> lifts) {
+        Vector3[] q = { new Vector3(face.a()), new Vector3(face.b()), new Vector3(face.c()) };
+        boolean moved = false;
+        for (var v : q) {
+            Float l = lifts.get(v);
+            if (l != null && l > 0) {
+                v.z += l;
+                moved = true;
+            }
+        }
+        return moved ? q : null;
     }
 
     /** A facet wound to face {@code toward}. */
