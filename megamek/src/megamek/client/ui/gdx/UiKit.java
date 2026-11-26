@@ -443,9 +443,28 @@ public final class UiKit {
      * quarter scale (S1), so the font's scale is multiplied in.
      */
     public static void size(Label label, String font, float size) {
+        com.badlogic.gdx.graphics.g2d.BitmapFont sized = UiTheme.sizedFor(label.getStyle().font, size);
+        if (sized != null) {
+            // Rasterised at that size (UiTheme#sizedFor): drawn at its own scale, which a new display scale keeps.
+            if (label.getStyle().font != sized) {
+                Label.LabelStyle style = new Label.LabelStyle(label.getStyle());
+                style.font = sized;
+                label.setStyle(style);
+            }
+            return;
+        }
         float tableSize = UiTheme.HUD_FONTS.stream().filter(entry -> entry.name().equals(font)).findFirst()
               .orElseThrow().size();
         label.setFontScale(label.getStyle().font.getScaleX() * size / tableSize);
+    }
+
+    /** Every widget under {@code root} lays itself out again: its fonts' glyphs changed (UiTheme#settle). */
+    public static void relayout(com.badlogic.gdx.scenes.scene2d.Group root) {
+        for (Actor child : root.getChildren()) {
+            if (child instanceof com.badlogic.gdx.scenes.scene2d.utils.Layout layout) { layout.invalidate(); }
+            if (child instanceof com.badlogic.gdx.scenes.scene2d.Group group) { relayout(group); }
+        }
+        if (root instanceof com.badlogic.gdx.scenes.scene2d.utils.Layout layout) { layout.invalidateHierarchy(); }
     }
 
     /** A label in a Token v0 type style ({@link UiTheme#TYPE_STYLES}) in the color of {@code role}. */

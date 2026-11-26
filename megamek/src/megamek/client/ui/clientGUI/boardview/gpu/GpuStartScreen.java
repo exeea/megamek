@@ -1138,6 +1138,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             return;
         }
         scale = DisplayScale.read(preferences.getGUIScale(), new GpuDisplayScale().contentScale());
+        boardSkin.uiTheme().wantScale(scale);
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         bw = Gdx.graphics.getBackBufferWidth();
@@ -1377,6 +1378,8 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     @Override
     public void render() {
+        // The HUD's glyphs follow a display scale that has held (UiTheme#settle): the stage lays its text out again.
+        if (boardSkin.uiTheme().settle()) { UiKit.relayout(stage.getRoot()); }
         double t = introTime();
         float dt = Math.min(0.1f, Gdx.graphics.getDeltaTime());
         Gdx.gl.glClearColor(base.getRed() / 255f, base.getGreen() / 255f, base.getBlue() / 255f, 1);

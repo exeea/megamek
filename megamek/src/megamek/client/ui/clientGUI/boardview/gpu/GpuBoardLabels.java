@@ -936,7 +936,6 @@ final class GpuBoardLabels implements GpuHud.Component {
     /** One waypoint's number: a disc centred on the route at its waypoint, {@code scale} times its size. */
     private final class Pin {
         private final Label label;
-        private final float labelScale;
         private float scale;
         private final Group badge = new Group() {
             @Override
@@ -959,7 +958,6 @@ final class GpuBoardLabels implements GpuHud.Component {
             badge.setName("pin-" + number);
             badge.setTransform(false);
             label = ui.label(String.valueOf(number), "hud-medium", PIN_TEXT, PIN_INK);
-            labelScale = label.getFontScaleX();
             badge.addActor(label);
             pins.addActor(badge);
             resize(1);
@@ -978,7 +976,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         private void resize(float scale) {
             this.scale = scale;
             badge.setSize(PIN_SIZE * scale, PIN_SIZE * scale);
-            label.setFontScale(labelScale * scale);
+            UiKit.size(label, "hud-medium", PIN_TEXT * scale);
             label.pack();
             label.setPosition(Math.round((badge.getWidth() - label.getWidth()) / 2),
                   Math.round((badge.getHeight() - label.getHeight()) / 2));

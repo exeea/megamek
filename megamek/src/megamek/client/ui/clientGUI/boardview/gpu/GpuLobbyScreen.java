@@ -1284,6 +1284,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         scale = DisplayScale.read(preferences.getGUIScale(), new GpuDisplayScale().contentScale());
+        boardSkin.uiTheme().wantScale(scale);
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         bw = Gdx.graphics.getBackBufferWidth();
@@ -1295,6 +1296,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     @Override
     public void render() {
+        // The HUD's glyphs follow a display scale that has held (UiTheme#settle): the stage lays its text out again.
+        if (boardSkin.uiTheme().settle()) { UiKit.relayout(stage.getRoot()); }
         Gdx.gl.glClearColor(base.getRed() / 255f, base.getGreen() / 255f, base.getBlue() / 255f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         if (railPending && folded) {

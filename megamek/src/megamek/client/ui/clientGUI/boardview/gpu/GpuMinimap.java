@@ -75,7 +75,6 @@ final class GpuMinimap implements GpuHud.Component {
     private final Canvas canvas;
     private final TextureRegion pixel;
     private final Label contact;
-    private final float contactScale;
     private GpuHud.Inputs inputs;
 
     GpuMinimap(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
@@ -95,7 +94,6 @@ final class GpuMinimap implements GpuHud.Component {
         corner.top().right().add(close).size(CLOSE_SIZE).pad(CLOSE_INSET);
         root.add(new Stack(canvas, corner)).growX();
         contact = ui.label("?", "hud-name", CONTACT_MINIMUM, UiTheme.BLIP);
-        contactScale = contact.getFontScaleX() / CONTACT_MINIMUM;
     }
 
     @Override
@@ -300,7 +298,10 @@ final class GpuMinimap implements GpuHud.Component {
                     continue;
                 }
                 if (unit.sensorContact()) {
-                    contact.setFontScale(contactScale * Math.max(CONTACT_MINIMUM, CONTACT_SIZE * radius));
+                    // Rasterised at its size, a whole unit at a time, so a layout change makes a few rasters, not one
+                    // a frame.
+                    float size = Math.max(CONTACT_MINIMUM, CONTACT_SIZE * radius);
+                    UiKit.size(contact, "hud-name", Math.round(size));
                     contact.pack();
                     contact.setPosition(from.x - contact.getWidth() / 2, from.y - contact.getHeight() / 2);
                     contact.draw(batch, alpha);

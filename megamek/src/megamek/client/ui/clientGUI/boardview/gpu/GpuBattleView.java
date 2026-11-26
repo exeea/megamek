@@ -624,6 +624,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The 3D board's own UI scale (the Tuning panel's); Swing's GUI scale never reaches the native window.
         float preference = source.uiPreferences().scale();
         float scale = DisplayScale.read(preference, displayScale.contentScale());
+        theme.uiTheme().wantScale(scale);
         int pixelWidth = Gdx.graphics.getBackBufferWidth();
         int pixelHeight = Gdx.graphics.getBackBufferHeight();
         if (width == layoutWidth && height == layoutHeight && scale == layoutScale && preference == layoutPreference
@@ -781,6 +782,11 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void renderFrame(TerrainSettings.Scope settings) {
         frameStarted = System.nanoTime();
+        // The HUD's glyphs follow a display scale that has held (UiTheme#settle): its stages lay their text out again.
+        if (theme != null && theme.uiTheme().settle()) {
+            if (ui != null) { UiKit.relayout(ui.stage().getRoot()); }
+            if (loadingStage != null) { UiKit.relayout(loadingStage.getRoot()); }
+        }
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             loadingPanel.message(loadingMessage);

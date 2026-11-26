@@ -364,6 +364,7 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
     @Override
     public void resize(int width, int height) {
         float scale = DisplayScale.read(preference, displayScale.contentScale());
+        boardSkin.uiTheme().wantScale(scale);
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         confirmation.resize(stage.getWidth(), stage.getHeight());
@@ -372,6 +373,8 @@ public final class GpuUiLibraryWindow extends ApplicationAdapter {
 
     @Override
     public void render() {
+        // The HUD's glyphs follow a display scale that has held (UiTheme#settle): the stage lays its text out again.
+        if (boardSkin.uiTheme().settle()) { UiKit.relayout(stage.getRoot()); }
         ScreenUtils.clear(color(tokens.color("surface.base", Mode.DARK)));
         stage.act(Gdx.graphics.getDeltaTime());
         hud.update(sprite == null ? Set.of() : Set.of(sprite));

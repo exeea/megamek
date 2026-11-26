@@ -91,6 +91,9 @@ final class GpuBoardSkin implements Disposable {
     }
 
     /** Adds the hex labels' fonts, default-font and its outline, to {@code theme}; returns default-font. */
+    /** The theme behind the skin: its HUD fonts follow a scene's display scale (UiTheme#wantScale, #settle). */
+    UiTheme uiTheme() { return theme; }
+
     static BitmapFont worldFonts(UiTheme theme) {
         BitmapFont font = theme.worldFont("default-font", "Noto Sans/NotoSans-Regular.ttf", 15, 0);
         theme.worldFont(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
