@@ -144,7 +144,8 @@ class GpuGameTerrainSmokeTest {
                     boolean checkedField = false;
                     for (var tile : scene.tiles()) {
                         if (!tile.features().isEmpty() || tile.barren()) { continue; }
-                        var field = planting.support(tile.coords());
+                        // The support the terrain itself reads: its build's field (none with the switch off) and scene.
+                        var field = planting.support(tile.coords(), GpuTestSupport.field(terrain, "fieldBoard"), scene);
                         // The field's stones are scatter faces; its shrubs are plants of the chunk's scatter stand.
                         int stones = (int) field.faces.stream().filter(BoardSurface.Face::scatter)
                               .filter(f -> field.relief.shade(f.a()).kind() == BoardRelief.Kind.ROCK).count();

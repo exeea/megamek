@@ -4157,7 +4157,7 @@ final class GpuTerrain implements Disposable {
         DetailJob job = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding, columns,
               CompletableFuture.supplyAsync(() -> settings.call(
                     () -> encodeMasks(withKits(scene, x, y, onlyObjects ? prepareObjects(scene, source, x, y, bottom, buildLod, paint,
-                          objectChanges, () -> checkBuild(generation, stale), settings, plants)
+                          objectChanges, () -> checkBuild(generation, stale), settings, plants, field)
                           : columns ? prepareColumns(scene, x, y, bottom, buildLod, flow, settings, reuse, paintSurfaces, paint,
                           () -> checkBuild(generation, stale), progress, roadMaskData)
                           : onlyPaint ? preparePaint(scene, x, y, bottom, buildLod, paintSurfaces, paint, repainted,
@@ -4192,7 +4192,7 @@ final class GpuTerrain implements Disposable {
     /** Only replacement object supports; the installed ground meshes, paint, water and atlas stay owned by the old chunk until commit. */
     private static Prepared prepareObjects(BoardScene scene, Chunk source, int x, int y, float floor, TerrainLod lod,
           Map<Coords, List<BoardDecals.Stamp>> paint, Set<Coords> changed, Runnable check, TerrainSettings settings,
-          BoardPlanting planting) {
+          BoardPlanting planting, FieldBoard field) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
         Map<Coords, BoardTacticalGeometry.Surface> support = new HashMap<>();
         Map<Coords, BoardBridge.Shape> bridges = new HashMap<>();
@@ -4213,7 +4213,8 @@ final class GpuTerrain implements Disposable {
               .filter(tile -> tile.features().stream().anyMatch(GpuTerrain::naturalPlant)).toList();
         return new Prepared(surfaces, null, null, support, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), bridges,
               Map.of(), reused, paint, false, GpuAuthoredBuilding.prepare(scene, rebuilt),
-              plantSupports(scene, planted, lod, surfaces, reused, settings, check, planting), true, Map.of(), Map.of());
+              plantSupports(scene, planted, lod, surfaces, reused, settings, check, planting, field, floor), true,
+              Map.of(), Map.of());
     }
 
     /**
@@ -4832,6 +4833,22 @@ final class GpuTerrain implements Disposable {
               ? new ChunkField(fieldBoard, GroundFamilies.ON ? scene : null, TerrainLod.DISTANT, floor) : null;
         Map<Coords, int[]> farPalettes = farField == null || !GroundFamilies.ON ? Map.of() : fieldPalettes(farField, chunkTiles);
         Map<Coords, ChunkMesh.Hex> farMeshes = new java.util.concurrent.ConcurrentHashMap<>();
+        // A hex the field takes beside a chunk hex it does not take lends that hex's walls (BoardSurface#sides) its
+        // field surface, not today's whole one.
+        if (field != null) {
+            for (BoardScene.Tile tile : chunkTiles) {
+                if (field.block(tile.coords()) != null) { continue; }
+                for (int d = 0; d < 6; d++) {
+                    Coords next = tile.coords().translated(d);
+                    ChunkField.Block block = surfaces.containsKey(next) ? null : field.block(next);
+                    if (block != null) {
+                        BoardScene.Tile neighbour = scene.tile(next);
+                        surfaces.put(next, settings.call(
+                              () -> fieldSurface(scene, neighbour, lod, block, fieldBoard)));
+                    }
+                }
+            }
+        }
         // Every neighbour's top is complete before cliff construction borrows it. Each task still owns its walls.
         progress.begin("cliffs", chunkTiles.size());
         chunkTiles.parallelStream().forEach(tile -> settings.run(() -> obstacles.run(() -> {
@@ -4873,7 +4890,7 @@ final class GpuTerrain implements Disposable {
         progress.begin("vegetation", planting == null ? plantingTiles.size() : 1);
         if (planting != null) {
             // A game's original roots: the ones this chunk drew already, the rest planted as at the game's start.
-            plants.putAll(planting.roots(plantingTiles, lod, surfaces, keptPlants, settings, check));
+            plants.putAll(planting.roots(plantingTiles, lod, surfaces, keptPlants, settings, check, fieldBoard, scene));
             progress.advance();
         } else {
             plantingTiles.parallelStream().forEach(tile -> settings.run(() -> obstacles.run(() -> {
@@ -4910,7 +4927,8 @@ final class GpuTerrain implements Disposable {
         progress.begin("masks", 3);
         return new Prepared(surfaces, water, lava, topography, plants, sculpts, currents, infrastructure.roads(),
               infrastructure.bridges(), infrastructure.bridgeShapes(), walls, reused, paint, false, infrastructure.authored(),
-              plantSupports(scene, chunkTiles, lod, surfaces, reused, settings, check, planting), false, fieldMeshes,
+              plantSupports(scene, chunkTiles, lod, surfaces, reused, settings, check, planting, fieldBoard, floor),
+              false, fieldMeshes,
               farMeshes);
     }
 
@@ -4920,7 +4938,7 @@ final class GpuTerrain implements Disposable {
      * a border draws in its surface's material, as without the cover weights.
      */
     /** A field hex's surface as a chunk builds it: its block's ground and, for a water hex, its water (FieldWater#fill). */
-    private static BoardSurface fieldSurface(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, ChunkField.Block block,
+    static BoardSurface fieldSurface(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, ChunkField.Block block,
           FieldBoard fieldBoard) {
         BoardSurface surface = new BoardSurface(scene, tile, lod, block);
         surface.contained(fieldBoard.wallFaces(tile.coords()));
@@ -4948,7 +4966,8 @@ final class GpuTerrain implements Disposable {
      * chunk's finished surfaces answer those queries identically and are shared.
      */
     private static Map<Coords, BoardSurface> plantSupports(BoardScene scene, List<BoardScene.Tile> chunkTiles, TerrainLod lod,
-          Map<Coords, BoardSurface> surfaces, Set<Coords> reused, TerrainSettings settings, Runnable check, BoardPlanting planting) {
+          Map<Coords, BoardSurface> surfaces, Set<Coords> reused, TerrainSettings settings, Runnable check,
+          BoardPlanting planting, FieldBoard field, float floor) {
         Map<Coords, BoardScene.Tile> needed = new HashMap<>();
         for (var tile : chunkTiles) {
             if (planting != null && planting.cleared(tile.coords()) && tile.features().isEmpty()) { continue; }
@@ -4978,9 +4997,17 @@ final class GpuTerrain implements Disposable {
             // A game's plants stand on the original ground: this chunk's own surface while no ground has changed.
             boolean original = planting == null || scene.ground().tiles() == planting.scene.tiles();
             result.put(tile.coords(), own != null && original ? own
-                  : planting != null ? planting.support(tile.coords()) : new BoardSurface(scene, tile));
+                  : planting != null ? planting.support(tile.coords(), field, scene)
+                  : fullSupport(scene, tile, field, floor));
         }));
         return result;
+    }
+
+    /** Full-detail support without a planting: the field's surface where {@code field} takes the hex, else today's. */
+    private static BoardSurface fullSupport(BoardScene scene, BoardScene.Tile tile, FieldBoard field, float floor) {
+        ChunkField.Block block = field == null || !field.taken(tile.coords()) ? null
+              : new ChunkField(field, GroundFamilies.ON ? scene : null, TerrainLod.FULL, floor).block(tile.coords());
+        return block == null ? new BoardSurface(scene, tile) : fieldSurface(scene, tile, TerrainLod.FULL, block, field);
     }
 
     private static boolean naturalPlant(BoardScene.Feature feature) {
@@ -6523,8 +6550,9 @@ final class GpuTerrain implements Disposable {
 
         /** Classic's cheap columns, a biodome's garden and a root past what the workers prepared are built on first use. */
         BoardSurface plantSupport(BoardScene.Tile tile) {
-            return plantSupports.computeIfAbsent(tile.coords(), at -> planting != null ? planting.support(at) : chunk.columns
-                  ? BoardSurface.columns(scene, tile, TerrainLod.FULL) : new BoardSurface(scene, tile));
+            return plantSupports.computeIfAbsent(tile.coords(), at -> planting != null
+                  ? planting.support(at, chunk.columns ? null : fieldBoard, scene) : chunk.columns
+                  ? BoardSurface.columns(scene, tile, TerrainLod.FULL) : fullSupport(scene, tile, fieldBoard, floor));
         }
 
         void prepare(Runnable check) {

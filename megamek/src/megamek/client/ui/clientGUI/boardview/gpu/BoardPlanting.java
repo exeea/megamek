@@ -25,6 +25,9 @@ import megamek.common.board.Coords;
  */
 final class BoardPlanting {
     final BoardScene scene;
+    /** This scene's height field once its ground changed (#field), and the build's field and outline it came from. */
+    private FieldBoard field, fieldFrom;
+    private BoardRelief.StepOutline fieldOutline;
     private final Map<Coords, List<BoardDecals.Stamp>> paint;
     /** Read by the terrain workers; the render thread adds to it. */
     private final Set<Coords> removed = ConcurrentHashMap.newKeySet();
@@ -75,9 +78,46 @@ final class BoardPlanting {
 
     /**
      * The hex's original support, which its planted models and field stones stand on, under the caller's settings.
-     * Built on request and not kept: a chunk build holds it only while it places that hex.
+     * Built on request and not kept: a chunk build holds it only while it places that hex. With the height field
+     * ({@code field}, the build's: null when the build draws none) a hex the field takes stands on the field's ground,
+     * as a full-detail chunk's own surface does: {@code field} while {@code scene} is this planting's ground, else the
+     * field of this planting's own scene (#field).
      */
-    BoardSurface support(Coords at) { return new BoardSurface(scene, scene.tile(at)); }
+    BoardSurface support(Coords at, FieldBoard field, BoardScene scene) {
+        FieldBoard original = original(field, scene);
+        BoardScene.Tile tile = this.scene.tile(at);
+        if (original == null || !original.taken(at)) { return new BoardSurface(this.scene, tile); }
+        ChunkField full = new ChunkField(original, GroundFamilies.ON ? this.scene : null, TerrainLod.FULL,
+              BoardGeometry.floor(this.scene));
+        return GpuTerrain.fieldSurface(this.scene, tile, TerrainLod.FULL, full.block(at), original);
+    }
+
+    /** This planting's field: the build's {@code field} while its {@code scene} is this ground; none without it. */
+    private FieldBoard original(FieldBoard field, BoardScene scene) {
+        if (field == null) { return null; }
+        return scene.ground().tiles() == this.scene.tiles() ? field : field(field, scene);
+    }
+
+    /**
+     * The height field of this planting's own scene once its ground has changed: the build's field of the changed
+     * ground ({@code current}, of {@code scene}) with the hexes in reach of each changed one recomputed from this scene
+     * and the rest shared with it (FieldBoard#of), as the terrain's own revisions are. Made again for the build's next
+     * field or another hill outline.
+     */
+    private synchronized FieldBoard field(FieldBoard current, BoardScene scene) {
+        var outline = BoardRelief.tuning().stepOutline();
+        if (field == null || fieldFrom != current || fieldOutline != outline) {
+            List<BoardScene.Tile> now = scene.ground().tiles(), then = this.scene.tiles();
+            Set<Coords> changed = new HashSet<>();
+            for (int i = 0; i < then.size(); i++) {
+                if (!then.get(i).equals(now.get(i))) { changed.add(then.get(i).coords()); }
+            }
+            field = FieldBoard.of(this.scene, outline, current, changed);
+            fieldFrom = current;
+            fieldOutline = outline;
+        }
+        return field;
+    }
 
     boolean cleared(Coords at) { return removed.contains(at); }
 
@@ -104,7 +144,7 @@ final class BoardPlanting {
      * task of the batch runs under.
      */
     Map<Coords, BoardPlants> roots(List<BoardScene.Tile> tiles, TerrainLod lod, Map<Coords, BoardSurface> installed,
-          Map<Coords, BoardPlants> kept, TerrainSettings settings, Runnable check) {
+          Map<Coords, BoardPlants> kept, TerrainSettings settings, Runnable check, FieldBoard field, BoardScene built) {
         Map<Coords, BoardPlants> result = new ConcurrentHashMap<>();
         List<BoardScene.Tile> needed = new ArrayList<>();
         for (var current : tiles) {
@@ -118,12 +158,33 @@ final class BoardPlanting {
         float floor = settings.call(() -> BoardGeometry.floor(scene));
         Map<Coords, BoardSurface> surfaces = new ConcurrentHashMap<>();
         var obstacles = new BoardObstacles.Cache(scene);
+        // With the height field, a hex it takes stands on the field's ground (#support), and so do the walls of a hex
+        // it does not take where they meet it (BoardSurface#sides).
+        FieldBoard original = settings.call(() -> original(field, built));
+        ChunkField medium = original == null ? null
+              : new ChunkField(original, GroundFamilies.ON ? scene : null, TerrainLod.MEDIUM, floor);
         needed.parallelStream().forEach(tile -> settings.run(() -> obstacles.run(() -> {
             check.run();
             var existing = lod == TerrainLod.MEDIUM ? installed.get(tile.coords()) : null;
+            ChunkField.Block block = medium == null ? null : medium.block(tile.coords());
             surfaces.put(tile.coords(), existing != null && tile.sameGeometry(existing.tile) ? existing
+                  : block != null ? GpuTerrain.fieldSurface(scene, tile, TerrainLod.MEDIUM, block, original)
                   : new BoardSurface(scene, tile, TerrainLod.MEDIUM));
         })));
+        if (medium != null) {
+            for (var tile : needed) {
+                if (medium.block(tile.coords()) != null) { continue; }
+                for (int d = 0; d < 6; d++) {
+                    Coords next = tile.coords().translated(d);
+                    ChunkField.Block block = surfaces.containsKey(next) ? null : medium.block(next);
+                    if (block != null) {
+                        BoardScene.Tile neighbour = scene.tile(next);
+                        surfaces.put(next, settings.call(
+                              () -> GpuTerrain.fieldSurface(scene, neighbour, TerrainLod.MEDIUM, block, original)));
+                    }
+                }
+            }
+        }
         needed.parallelStream().forEach(tile -> settings.run(() -> obstacles.run(() -> {
             check.run();
             var support = BoardTacticalGeometry.Surface.of(surfaces.get(tile.coords()), scene, floor, surfaces);

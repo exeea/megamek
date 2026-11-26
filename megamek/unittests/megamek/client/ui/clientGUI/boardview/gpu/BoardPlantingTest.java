@@ -14,7 +14,8 @@ class BoardPlantingTest {
 
     /** The hex's roots as a chunk at {@code lod} asks for them, holding {@code kept} already. */
     static BoardPlants roots(BoardPlanting planting, Coords at, TerrainLod lod, Map<Coords, BoardPlants> kept) {
-        return planting.roots(List.of(planting.scene.tile(at)), lod, Map.of(), kept, TerrainSettings.capture(), () -> { })
+        return planting.roots(List.of(planting.scene.tile(at)), lod, Map.of(), kept, TerrainSettings.capture(),
+              () -> { }, null, planting.scene)
               .get(at);
     }
 
@@ -46,7 +47,8 @@ class BoardPlantingTest {
         later.remove(cleared);
         assertEquals(roots(planting, unvisited), roots(later, unvisited), "Unvisited roots still use the original map");
         // One batch finishes the supports of all its hexes together; each hex's roots are those it gets alone.
-        var batch = planting.roots(board.tiles(), TerrainLod.FULL, Map.of(), Map.of(), TerrainSettings.capture(), () -> { });
+        var batch = planting.roots(board.tiles(), TerrainLod.FULL, Map.of(), Map.of(), TerrainSettings.capture(),
+              () -> { }, null, planting.scene);
         assertEquals(original, batch.get(AT), "Shared preparation must preserve the original placement");
     }
 
