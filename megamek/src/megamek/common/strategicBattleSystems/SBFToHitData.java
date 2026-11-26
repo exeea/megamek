@@ -143,6 +143,15 @@ public class SBFToHitData extends TargetRoll {
                 case MEDIUM, LONG -> toHit.addModifier(1, "sharp shooters range");
                 default -> { }
             }
+        } else if (attackingFormation.isBrawlers()) {
+            // Brawlers, IO:BF p. 225: "Short Range -1; Medium Range +2; Long Range +3; Extreme Range +5"
+            switch (toHit.range) {
+                case SHORT -> toHit.addModifier(-1, "brawlers range");
+                case MEDIUM -> toHit.addModifier(2, "brawlers range");
+                case LONG -> toHit.addModifier(3, "brawlers range");
+                case EXTREME -> toHit.addModifier(5, "brawlers range");
+                default -> { }
+            }
         } else {
             switch (toHit.range) {
                 case SHORT -> { }

@@ -36,6 +36,8 @@ package megamek.server.sbf;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import megamek.common.strategicBattleSystems.SBFFormation;
@@ -47,21 +49,32 @@ final class SBFCommandAbilities {
     }
 
     /**
-     * Sharp Shooters, IO:BF p. 225: "No more than one-third (rounding down) of all Formations may have this ability."
-     * Abilities beyond the limit are removed, lowest Formation IDs keeping theirs, and the owner is told.
+     * Sharp Shooters and Brawlers, IO:BF p. 225: "No more than one-third (rounding down) of all Formations may have this
+     * ability." Abilities beyond the limit are removed, lowest Formation IDs keeping theirs, and the owner is told. The
+     * two replace the same range modifiers, so a Formation authored with both keeps Sharp Shooters.
      */
     static void validateSetup(SBFGameManager manager) {
         Map<Integer, List<SBFFormation>> forces = manager.getGame().getActiveFormations().stream()
               .collect(Collectors.groupingBy(SBFFormation::getOwnerId));
         for (List<SBFFormation> force : forces.values()) {
-            List<SBFFormation> sharpShooters = force.stream().filter(SBFFormation::isSharpShooters)
-                  .sorted(Comparator.comparingInt(SBFFormation::getId)).toList();
-            for (SBFFormation extra : sharpShooters.subList(Math.min(force.size() / 3, sharpShooters.size()),
-                  sharpShooters.size())) {
-                extra.setSharpShooters(false);
-                manager.sendServerChat(extra.getOwnerId(), "Formation " + extra.getId()
-                      + " loses Sharp Shooters: no more than one-third of a Force's Formations may have it.");
-            }
+            force.stream().filter(f -> f.isSharpShooters() && f.isBrawlers()).forEach(both -> {
+                both.setBrawlers(false);
+                manager.sendServerChat(both.getOwnerId(), "Formation " + both.getId()
+                      + " loses Brawlers: it already has Sharp Shooters.");
+            });
+            limit(manager, force, SBFFormation::isSharpShooters, f -> f.setSharpShooters(false), "Sharp Shooters");
+            limit(manager, force, SBFFormation::isBrawlers, f -> f.setBrawlers(false), "Brawlers");
+        }
+    }
+
+    private static void limit(SBFGameManager manager, List<SBFFormation> force, Predicate<SBFFormation> has,
+          Consumer<SBFFormation> remove, String ability) {
+        List<SBFFormation> holders = force.stream().filter(has).sorted(Comparator.comparingInt(SBFFormation::getId))
+              .toList();
+        for (SBFFormation extra : holders.subList(Math.min(force.size() / 3, holders.size()), holders.size())) {
+            remove.accept(extra);
+            manager.sendServerChat(extra.getOwnerId(), "Formation " + extra.getId() + " loses " + ability
+                  + ": no more than one-third of a Force's Formations may have it.");
         }
     }
 }

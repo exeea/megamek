@@ -100,6 +100,16 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void brawlersReplaceTheRangeModifiers() {
+        // Brawlers, IO:BF p. 225: "Short Range -1; Medium Range +2; Long Range +3; Extreme Range +5."
+        attacker.setBrawlers(true);
+        assertEquals(List.of(3), modifiers("brawlers range"));
+        assertEquals(List.of(), modifiers("long range"));
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertEquals(List.of(5), modifiers("brawlers range"));
+    }
+
+    @Test
     void attackTwoHexesAwayIsAtExtremeRange() {
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
 

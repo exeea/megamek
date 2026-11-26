@@ -67,6 +67,7 @@ public class SBFFormationSerializer extends StdSerializer<SBFFormation> {
     static final String HIDDEN = "hidden";
     static final String RECON_FACING = "reconfacing";
     static final String SHARP_SHOOTERS = "sharpshooters";
+    static final String BRAWLERS = "brawlers";
     static final String TACTICS = "tactics";
     static final String MORALE = "morale";
 
@@ -104,6 +105,9 @@ public class SBFFormationSerializer extends StdSerializer<SBFFormation> {
         }
         if (formation.isSharpShooters()) {
             generator.writeBooleanField(SHARP_SHOOTERS, true);
+        }
+        if (formation.isBrawlers()) {
+            generator.writeBooleanField(BRAWLERS, true);
         }
         if (writeFullStats) {
             if (formation.getSkill() != 4) {

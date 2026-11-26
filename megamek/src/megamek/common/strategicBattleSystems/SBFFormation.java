@@ -891,6 +891,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         this.sharpShooters = sharpShooters;
     }
 
+    /** Brawlers special command ability, IO:BF p. 225; at most one-third of a Force's Formations have it. */
+    private boolean brawlers;
+
+    public boolean isBrawlers() {
+        return brawlers;
+    }
+
+    public void setBrawlers(boolean brawlers) {
+        this.brawlers = brawlers;
+    }
+
     /** Made up exclusively of wheeled Elements, which pay 1 MP less in urban hexes (IO:BF p. 216, urban table note *). */
     public boolean isExclusivelyWheeled() {
         return SBFTerrainMovement.Bonuses.of(SBFTerrainMovement.of(this).toList()).wheeled();

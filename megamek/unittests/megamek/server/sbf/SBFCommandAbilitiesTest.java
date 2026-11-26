@@ -61,6 +61,42 @@ class SBFCommandAbilitiesTest {
     }
 
     @Test
+    void brawlersTravelWithTheFormationAndOlderDataHasNone() throws Exception {
+        var mapper = new ObjectMapper();
+        String authored = """
+              {"type":"SBFFormation","generalname":"Close Assault","units":[],"brawlers":true}""";
+        SBFFormation brawlers = mapper.readValue(authored, SBFFormation.class);
+        assertTrue(brawlers.isBrawlers());
+        assertTrue(mapper.readValue(mapper.writeValueAsString(brawlers), SBFFormation.class).isBrawlers());
+        String older = """
+              {"type":"SBFFormation","generalname":"Line","units":[]}""";
+        assertFalse(mapper.readValue(older, SBFFormation.class).isBrawlers());
+    }
+
+    @Test
+    void brawlersHaveTheirOwnOneThirdLimitAndCannotJoinSharpShooters() {
+        // Brawlers, IO:BF p. 225: "No more than one-third (rounding down) of all Formations may have this ability."
+        var game = new SBFGame();
+        game.addPlayer(1, new Player(1, "Owner"));
+        for (int id = 10; id < 16; id++) {
+            var formation = new SBFFormation();
+            formation.setId(id);
+            formation.setOwnerId(1);
+            formation.setBrawlers(id >= 12);
+            formation.setSharpShooters(id == 12);
+            game.addUnit(formation);
+        }
+        var manager = mock(SBFGameManager.class);
+        when(manager.getGame()).thenReturn(game);
+        SBFCommandAbilities.validateSetup(manager);
+        assertTrue(game.getFormation(12).orElseThrow().isSharpShooters());
+        assertFalse(game.getFormation(12).orElseThrow().isBrawlers());
+        assertTrue(game.getFormation(13).orElseThrow().isBrawlers());
+        assertTrue(game.getFormation(14).orElseThrow().isBrawlers());
+        assertFalse(game.getFormation(15).orElseThrow().isBrawlers());
+    }
+
+    @Test
     void noMoreThanOneThirdOfAForcesFormationsKeepSharpShooters() {
         // Sharp Shooters, IO:BF p. 225: "No more than one-third (rounding down) of all Formations may have this ability."
         var game = new SBFGame();
