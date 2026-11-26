@@ -31,6 +31,23 @@ final class BoardConcrete {
     /** A placed object inside a wall or bank of its hex, whose Edges are Fitted: the editor lists it as an issue. */
     record Cut(Coords at, String object, String asset) { }
 
+    /**
+     * How far from a paved hex, in hexes, the fit reads the board: ConcreteFit reads a corner's hexes and the hexes
+     * across their sides (two hexes out), the cells read their neighbours (bridge ends, ramps), and the ways round a
+     * paved hex read theirs (#courses, #ways, #quayWays). A change farther from every paved hex leaves the fit as it
+     * is.
+     */
+    static final int REACH = 3;
+
+    /** Whether hex {@code at} of {@code scene} is within {@link #REACH} of a paved hex. */
+    static boolean near(BoardScene scene, Coords at) {
+        for (Coords c : at.allAtDistanceOrLess(REACH)) {
+            BoardScene.Tile tile = scene.tile(c);
+            if (tile != null && tile.surface() == BoardScene.Surface.CONCRETE) { return true; }
+        }
+        return false;
+    }
+
     static BoardConcrete of(BoardScene scene) {
         return scene.ground().concrete(scene);
     }

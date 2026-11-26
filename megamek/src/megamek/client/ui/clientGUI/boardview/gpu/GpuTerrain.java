@@ -3659,12 +3659,14 @@ final class GpuTerrain implements Disposable {
     /**
      * Whether any hex changed what the concrete fit reads: its ground ({@link BoardScene.Tile.Ground}'s own equality),
      * or the structures and placed objects whose footprint decides where they keep their hex
-     * ({@link BoardConcrete#fitFeature}, the one predicate); never trees, rocks or scenery rows.
+     * ({@link BoardConcrete#fitFeature}, the one predicate); never trees, rocks or scenery rows; and only within the
+     * fit's reach of pavement before or after ({@link BoardConcrete#near}).
      */
     private static boolean concreteInputsChanged(BoardScene before, BoardScene after) {
         for (int index = 0; index < after.tiles().size(); index++) {
             BoardScene.Tile was = before.tiles().get(index), is = after.tiles().get(index);
-            if (was != is && (!was.ground().equals(is.ground()) || !fitFeatures(was).equals(fitFeatures(is)))) {
+            if (was != is && (!was.ground().equals(is.ground()) || !fitFeatures(was).equals(fitFeatures(is)))
+                  && (BoardConcrete.near(before, was.coords()) || BoardConcrete.near(after, is.coords()))) {
                 return true;
             }
         }
