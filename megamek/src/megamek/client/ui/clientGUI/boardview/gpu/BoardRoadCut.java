@@ -543,7 +543,8 @@ final class BoardRoadCut {
                 if (!reserved.at(1 / 3f, 1 / 3f)) { result.add(face); }
                 continue;
             }
-            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road, natural);
+            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road,
+                  natural, !top);
         }
         return result;
     }
@@ -713,9 +714,10 @@ final class BoardRoadCut {
 
     private static final int KEPT = 0, RESERVED = 1;
 
+    /** {@code under}: the face keeps what passes under the road (a slope or cliff, see #clip). */
     private void clipFace(BoardSurface.Face face, List<Segment> chords, Area region, Reserved reserved, BoardRelief relief,
           List<BoardSurface.Face> result, WallBuilder wall, WallBuilder concrete, Map<List<Long>, Vector3> welded,
-          List<BoardSurface.Face> road, boolean natural) {
+          List<BoardSurface.Face> road, boolean natural, boolean under) {
         Vector3 a = face.a(), b = face.b(), c = face.c();
         List<Segment> segments = new ArrayList<>(chords);
         segments.add(new Segment(0, 0, 1, 0));
@@ -802,15 +804,18 @@ final class BoardRoadCut {
             boolean rightReserved = region.contains(a.x + rs * (b.x - a.x) + rt * (c.x - a.x), a.y + rs * (b.y - a.y) + rt * (c.y - a.y));
             if (leftReserved == rightReserved) {
                 // On the reserved ground, natural ground kept over the road's headroom meets the part that gave way
-                // below it: a cut face from its edge down to the road closes it, so the overhang stands on the verge.
+                // below it: a cut face from its edge down to the road closes it, so the overhang stands on the verge. A
+                // slope's part passing under the road gave way just under its surface: its edge closes up to the road
+                // as a fill does, so none opens a slit beside the road's edge.
                 if (natural && leftReserved && left != OUTSIDE && right != OUTSIDE && (left == KEPT) != (right == KEPT)) {
                     Vector3 p = vertex.apply(new Point(s.ax(), s.ay())), q = vertex.apply(new Point(s.bx(), s.by()));
                     float rp = roadHeight(road, p.x, p.y, Float.NaN), rq = roadHeight(road, q.x, q.y, Float.NaN);
                     float above = BoardRoadGrade.CLEARANCE * BoardGeometry.level() / 2;
-                    if (p.z - rp > above && q.z - rq > above) {
+                    boolean overhang = p.z - rp > above && q.z - rq > above;
+                    if (overhang || under) {
                         float gs = left == KEPT ? rs : ls, gt = left == KEPT ? rt : lt;
                         curtain(p, q, new Vector3(a).mulAdd(new Vector3(b).sub(a), gs).mulAdd(new Vector3(c).sub(a), gt),
-                              region, wall, concrete, road, false, natural);
+                              region, wall, concrete, road, !overhang, natural);
                     }
                 }
                 continue;
