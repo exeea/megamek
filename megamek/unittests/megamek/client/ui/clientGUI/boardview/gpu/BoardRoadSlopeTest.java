@@ -519,6 +519,8 @@ class BoardRoadSlopeTest {
             road.addAll(BoardSurface.road(scene, surface.tile));
             var faces = new ArrayList<>(surface.groundFaces());
             faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
+            // Cut faces cast in concrete (beside a bridge's ramp, or a road built in concrete) are drawn with the walls.
+            faces.addAll(surface.pouredWalls);
             for (var face : faces) {
                 if (face.finish() == BoardSurface.Finish.DRESSING || face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
                 all.add(face);
