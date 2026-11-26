@@ -660,7 +660,7 @@ final class BoardSurface {
             dig();
             quay(scene);
             relief.field(faces);
-            if (fieldWalls == null && bank != null) { closeTJunctions(List.of(faces), bank.cut); }
+            if (fieldWalls == null) { closeTJunctions(List.of(faces), joints()); }
             int roughStart = faces.size();
             relief.boulders(faces);
             roughModels = BoardRough.place(this);
@@ -3907,6 +3907,14 @@ final class BoardSurface {
         }
     }
 
+    /** The points a face left whole may lack on its edge: the bank's grid cuts and the emitted road's own vertices. */
+    private Set<Vector3> joints() {
+        Set<Vector3> points = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (bank != null) { points.addAll(bank.cut); }
+        reservedRoad.forEach(f -> points.addAll(List.of(f.a(), f.b(), f.c())));
+        return points;
+    }
+
     private static Vector3 corner(Face f, int i) { return i % 3 == 0 ? f.a() : i % 3 == 1 ? f.b() : f.c(); }
 
     /** A face's edge from corner i, by its ends' spots. */
@@ -3970,10 +3978,10 @@ final class BoardSurface {
                 if (lower == null || lower.elevation() >= tile.elevation()) { continue; }
                 for (var tunnel : BoardTunnel.entrances(scene, lower)) { tunnel.cut(wallFaces, relief); }
             }
-            // The walls meet the hex's own ground at the bank's grid cuts (#closeTJunctions).
-            if (fieldWalls == null && !columns && bank != null) {
+            // The walls meet the hex's own ground at the bank's grid cuts and the road's vertices (#closeTJunctions).
+            if (fieldWalls == null && !columns) {
                 wallFaces = new ArrayList<>(wallFaces);
-                closeTJunctions(List.of(faces.subList(0, faces.size() - rough.size()), wallFaces), bank.cut);
+                closeTJunctions(List.of(faces.subList(0, faces.size() - rough.size()), wallFaces), joints());
             }
             wallFloor = floor;
         }
