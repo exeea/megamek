@@ -626,6 +626,8 @@ TerrainMaterial compactBlend(GroundPixel px, vec4 raw, vec3 fields, TerrainMater
 #endif
     // A family repeated in the palette is evaluated once, unless it is paving (the base slab, aggregate elsewhere).
     bool reuse = needed.x > 0.0 && abs(coverFamilies.x - 4.0) > .5;
+#ifdef COVER_FAMILIES
+    // A family program's palette is constant: a call a slot, each folded to its family.
     TerrainMaterial a = needed.x > 0.0 ? compactSlot(px, 0, fields, incoming) : none;
     TerrainMaterial b = needed.y <= 0.0 ? none : reuse && abs(coverFamilies.y - coverFamilies.x) < .5 ? a
           : compactSlot(px, 1, fields, incoming);
@@ -633,6 +635,18 @@ TerrainMaterial compactBlend(GroundPixel px, vec4 raw, vec3 fields, TerrainMater
           : compactSlot(px, 2, fields, incoming);
     TerrainMaterial d = needed.w <= 0.0 ? none : reuse && abs(coverFamilies.w - coverFamilies.x) < .5 ? a
           : compactSlot(px, 3, fields, incoming);
+#else
+    // A generic program's palette is a uniform: its slots through one call, in a loop bounded by the last slot asked
+    // (no compiler folds it, so none unrolls it), or the program carries the whole material once a slot.
+    TerrainMaterial a = none, b = none, c = none, d = none;
+    int slots = needed.w > 0.0 ? 4 : needed.z > 0.0 ? 3 : needed.y > 0.0 ? 2 : needed.x > 0.0 ? 1 : 0;
+    for (int slot = 0; slot < slots; slot++) {
+        if (needed[slot] <= 0.0) continue;
+        TerrainMaterial m = slot > 0 && reuse && abs(coverFamilies[slot] - coverFamilies.x) < .5 ? a
+              : compactSlot(px, slot, fields, incoming);
+        if (slot == 0) a = m; else if (slot == 1) b = m; else if (slot == 2) c = m; else d = m;
+    }
+#endif
     vec4 heights = vec4(a.height, b.height, c.height, d.height);
     vec4 patches = vec4(fields.y, 1.0 - fields.y, fields.x, 1.0 - fields.x);
     weights = materialWeights(raw, heights * .45 + patches * mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, px.face.z)));
