@@ -201,15 +201,42 @@ class TerrainLodTest {
 
     @Test
     void screenSizeSelectsDetailWithHysteresis() {
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null, 1));
-        assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null, 1));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL, 1));
+        // Today's sizes, whichever the run's property installs (the height field's below).
+        TerrainLod.Tuning installed = TerrainLod.tuning();
+        TerrainLod.tune(TerrainLod.DEFAULTS);
+        try {
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null, 1));
+            assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL, 1));
+        } finally {
+            TerrainLod.tune(installed);
+        }
+    }
+
+    @Test
+    void heightFieldSizesSelectDetailWithHysteresis() {
+        TerrainLod.Tuning installed = TerrainLod.tuning();
+        TerrainLod.tune(TerrainLod.FIELD);
+        try {
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(30, null, 1));
+            assertEquals(TerrainLod.COARSE, TerrainLod.select(15, null, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(10, null, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(38, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(42, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(45, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(35, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(10, TerrainLod.FULL, 1));
+        } finally {
+            TerrainLod.tune(installed);
+        }
     }
 }
