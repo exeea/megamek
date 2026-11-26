@@ -276,10 +276,10 @@ public class SBFUnitConverter {
 
     private void calcUnitSpecialAbilities() {
         report.addLine("Special Abilities:", "");
-        addUnitSUAsIfAny(WAT, PRB, AECM, BH, BT, ECM, HPG, LPRB, LECM);
-        addUnitSUAs(elements.size() >= 6 ? 2 : 1, new BattleForceSUA[] {TAG});
-        addUnitSUAsIfHalf(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
-        addUnitSUAsIfAll(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW, TRN, UMU);
+        addUnitSUAs(UNIT_IF_ANY);
+        addUnitSUAs(List.of(TAG));
+        addUnitSUAs(UNIT_IF_HALF);
+        addUnitSUAs(UNIT_IF_ALL);
         sumUnitSUAs(CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
               VTS, AT, ATxD, DT, MT, PT, ST, STxD, SCR);
         sumUnitSUAsDivideBy3(ATAC, BOMB, PNT, IF);
@@ -387,22 +387,40 @@ public class SBFUnitConverter {
         return (int) elements.stream().filter(e -> e.hasSUA(SUA)).count();
     }
 
-    private void addUnitSUAsIfAny(BattleForceSUA... SUAs) {
-        addUnitSUAs(1, SUAs);
+    /** IO:BF p. 261, Step 5A: abilities a Unit has when one, half or all of its Elements have them. */
+    private static final List<BattleForceSUA> UNIT_IF_ANY = List.of(WAT, PRB, AECM, BH, BT, ECM, HPG, LPRB, LECM);
+    private static final List<BattleForceSUA> UNIT_IF_HALF = List.of(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
+    private static final List<BattleForceSUA> UNIT_IF_ALL = List.of(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW,
+          TRN, UMU);
+
+    /** IO:BF p. 261, Step 5A: how many of a Unit's Elements must have the ability before the Unit has it. */
+    private static int minimumCount(BattleForceSUA sua, int elementCount) {
+        if (sua == TAG) {
+            return (elementCount >= 6) ? 2 : 1;
+        } else if (UNIT_IF_HALF.contains(sua)) {
+            return Math.max(1, elementCount / 2);
+        } else if (UNIT_IF_ALL.contains(sua)) {
+            return elementCount;
+        } else if (UNIT_IF_ANY.contains(sua)) {
+            return 1;
+        }
+        throw new IllegalArgumentException(sua + " is not converted from an Element count");
     }
 
-    private void addUnitSUAsIfHalf(BattleForceSUA... SUAs) {
-        addUnitSUAs(Math.max(1, elements.size() / 2), SUAs);
+    /**
+     * IO:BF p. 261, Step 5A: whether a Unit of these Elements has the ability, counting the Elements that pass the
+     * test. The conversion counts Elements with the ability; play also counts Design Quirks ({@link SBFDesignQuirks}).
+     */
+    public static boolean unitHasSUA(BattleForceSUA sua, List<AlphaStrikeElement> elements,
+          Predicate<AlphaStrikeElement> elementHasIt) {
+        return elements.stream().filter(elementHasIt).count() >= minimumCount(sua, elements.size());
     }
 
-    private void addUnitSUAsIfAll(BattleForceSUA... SUAs) {
-        addUnitSUAs(elements.size(), SUAs);
-    }
-
-    private void addUnitSUAs(int minimumCount, BattleForceSUA[] SUAs) {
-        for (BattleForceSUA sua : SUAs) {
+    private void addUnitSUAs(List<BattleForceSUA> suas) {
+        for (BattleForceSUA sua : suas) {
             int count = suaCount(elements, sua);
-            if (count >= minimumCount) {
+            int minimumCount = minimumCount(sua, elements.size());
+            if (unitHasSUA(sua, elements, element -> element.hasSUA(sua))) {
                 report.addLine("",
                       sua + ": " + count + " of " + elements.size() + ", minimum " + minimumCount,
                       sua.toString());

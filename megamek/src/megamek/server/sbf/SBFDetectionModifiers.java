@@ -44,6 +44,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.TargetRollModifier;
+import megamek.common.strategicBattleSystems.SBFDesignQuirks;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
@@ -76,15 +77,18 @@ public class SBFDetectionModifiers extends TargetRoll {
         // Summary-only and scenario-authored counters may have only a Formation-level sensor rating.
         boolean allEquipmentKnown = !formation.getUnits().isEmpty()
               && formation.getUnits().stream().allMatch(unit -> !unit.getElements().isEmpty());
-        int best = allEquipmentKnown ? 0 : range(formation, formation.getType(), formation.hasSUA(RCN));
+        int best = allEquipmentKnown ? 0 : range(formation, formation.getType(), formation.hasSUA(RCN),
+              SBFDesignQuirks.formationHas(game, formation, PRB));
         for (var unit : formation.getUnits()) {
             if (unit.getArmor() > 0 && unit.getCurrentArmor() <= 0) {
                 continue;
             }
-            int unitRange = range(unit, unit.getType(), formation.hasSUA(RCN));
+            int unitRange = range(unit, unit.getType(), formation.hasSUA(RCN),
+                  SBFDesignQuirks.unitHas(game, unit, PRB));
             for (var element : unit.getElements()) {
                 var type = element.getASUnitType() == null ? unit.getType() : SBFElementType.getUnitType(element);
-                unitRange = Math.max(unitRange, range(element, type, formation.hasSUA(RCN)));
+                unitRange = Math.max(unitRange, range(element, type, formation.hasSUA(RCN),
+                      SBFDesignQuirks.elementHas(game, element, PRB)));
             }
             best = Math.max(best, (unitRange > 0) && hasImprovedSensors(game, unit) ? unitRange + 2 : unitRange);
         }
@@ -104,12 +108,13 @@ public class SBFDetectionModifiers extends TargetRoll {
         return (count > 0) && (count * 2 >= unit.getElements().size());
     }
 
-    private static int range(ASSpecialAbilityCollector sensors, SBFElementType type, boolean recon) {
+    /** @param probe whether the sensors have PRB, counting Improved Sensors ({@link SBFDesignQuirks}) */
+    private static int range(ASSpecialAbilityCollector sensors, SBFElementType type, boolean recon, boolean probe) {
         int basic = basicRange(type);
-        int probe = sensors.hasSUA(BH) ? 10 : sensors.hasSUA(PRB)
+        int probeRange = sensors.hasSUA(BH) ? 10 : probe
               ? (sensors instanceof AlphaStrikeElement element && element.hasClanActiveProbe() ? 9 : 8)
               : sensors.hasAnySUAOf(LPRB, WAT) ? 7 : 0;
-        return Math.max(basic > 0 && recon ? basic + 2 : basic, probe);
+        return Math.max(basic > 0 && recon ? basic + 2 : basic, probeRange);
     }
 
     private static int basicRange(SBFElementType type) {

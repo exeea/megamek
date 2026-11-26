@@ -43,6 +43,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.options.SBFRuleOptions;
+import megamek.common.strategicBattleSystems.SBFDesignQuirks;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFEngagementOrders;
 import megamek.common.strategicBattleSystems.SBFFormation;
@@ -176,7 +177,8 @@ final class SBFHiddenCommand extends ServerCommand {
         SBFGame game = manager.getGame();
         for (SBFFormation hidden : game.getActiveFormationsAt(location)) {
             if (hidden.isHidden() && game.areHostile(hidden, game.getPlayer(mover.getOwnerId()))
-                  && (mover.hasSUA(BattleForceSUA.PRB) || dice.getAsInt() + (mover.hasSUA(BattleForceSUA.RCN) ? 1 : 0) >= mover.getSkill() + 3)) {
+                  && (SBFDesignQuirks.formationHas(game, mover, BattleForceSUA.PRB)
+                        || dice.getAsInt() + (mover.hasSUA(BattleForceSUA.RCN) ? 1 : 0) >= mover.getSkill() + 3)) {
                 reveal(manager, hidden, mover);
             }
         }

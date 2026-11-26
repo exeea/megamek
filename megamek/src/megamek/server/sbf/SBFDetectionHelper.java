@@ -57,6 +57,7 @@ import megamek.common.rolls.Roll;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFDesignQuirks;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFRadarZone;
@@ -389,7 +390,8 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
               || distanceFromFlightPath(path, target) > sensor) {
             return false;
         }
-        int limit = squadron.hasAnySUAOf(BattleForceSUA.PRB, BattleForceSUA.RCN) ? Integer.MAX_VALUE
+        int limit = SBFDesignQuirks.formationHas(game, squadron, BattleForceSUA.PRB)
+              || squadron.hasSUA(BattleForceSUA.RCN) ? Integer.MAX_VALUE
               : path.size() / 8;
         return game.visibilityHelper().orderAerialScan(squadron.getId(), target.getId(), limit);
     }
@@ -453,7 +455,8 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
     }
 
     private static int scanModifier(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation location, int distance) {
-        int probe = viewer.hasAnySUAOf(BattleForceSUA.PRB, BattleForceSUA.BH) ? 1 : 0;
+        int probe = SBFDesignQuirks.formationHas(game, viewer, BattleForceSUA.PRB)
+              || viewer.hasSUA(BattleForceSUA.BH) ? 1 : 0;
         if (target.hasAnySUAOf(BattleForceSUA.ECM, BattleForceSUA.AECM) || game.minefields().inEmp(location, game.getCurrentRound())) {
             probe--;
         }
@@ -486,7 +489,8 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
               || groundTarget.getUnits().stream().allMatch(unit -> unit.isUnderwater(game, groundTarget))) {
             return false;
         }
-        int visual = squadron.hasAnySUAOf(BattleForceSUA.PRB, BattleForceSUA.RCN) ? 1
+        int visual = SBFDesignQuirks.formationHas(game, squadron, BattleForceSUA.PRB)
+              || squadron.hasSUA(BattleForceSUA.RCN) ? 1
               : visualLevel(game, groundTarget.getPosition());
         if (squadron.getRadarZone() == SBFRadarZone.INNER) {
             return visual <= 2;

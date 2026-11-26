@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import megamek.client.ui.clientGUI.calculationReport.CalculationReport;
 import megamek.client.ui.clientGUI.calculationReport.DummyCalculationReport;
@@ -192,10 +193,9 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
 
     void calcFormationSpecialAbilities() {
         report.addLine("Special Abilities:", "");
-        addFormationSpasIfAny(formation, DN, XMEC, COM, HPG, MCS, UCS, MEC, MAS, LMAS,
-              MSW, MFB, SAW, SDS, TRN, FD, HELI, SDCS);
-        addFormationSpasIf2Thirds(formation, AC3, PRB, AECM, ECM, ENG, LPRB, LECM, ORO, RCN, SRCH, SHLD, TAG, WAT);
-        addFormationSpasIfAll(formation, SPC, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL, RBT, UMU);
+        addFormationSpas(formation, FORMATION_IF_ANY);
+        addFormationSpas(formation, FORMATION_IF_TWO_THIRDS);
+        addFormationSpas(formation, FORMATION_IF_ALL);
         sumFormationSpas(SBF_OMNI, CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
               VTS, AT, ATxD, BOMB, DT, MT, PT, ST, STxD, SCR, PNT, IF, MHQ,
               ARTAIS, ARTAC, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12, ARTLT, ARTS, ARTT);
@@ -230,23 +230,39 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
         return (int) formation.getUnits().stream().filter(e -> e.hasSUA(spa)).count();
     }
 
-    private void addFormationSpasIfAny(SBFFormation formation, BattleForceSUA... spas) {
-        addFormationSpas(formation, 1, spas);
+    /** IO:BF p. 261, Step 5B: abilities a Formation has when one, two-thirds or all of its Units have them. */
+    private static final List<BattleForceSUA> FORMATION_IF_ANY = List.of(DN, XMEC, COM, HPG, MCS, UCS, MEC, MAS, LMAS,
+          MSW, MFB, SAW, SDS, TRN, FD, HELI, SDCS);
+    private static final List<BattleForceSUA> FORMATION_IF_TWO_THIRDS = List.of(AC3, PRB, AECM, ECM, ENG, LPRB, LECM,
+          ORO, RCN, SRCH, SHLD, TAG, WAT);
+    private static final List<BattleForceSUA> FORMATION_IF_ALL = List.of(SPC, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL,
+          RBT, UMU);
+
+    /** IO:BF p. 261, Step 5B: how many of a Formation's Units must have the ability before the Formation has it. */
+    private static int minimumCount(BattleForceSUA sua, int unitCount) {
+        if (FORMATION_IF_TWO_THIRDS.contains(sua)) {
+            return Math.max(unitCount - 1, 1);
+        } else if (FORMATION_IF_ALL.contains(sua)) {
+            return unitCount;
+        } else if (FORMATION_IF_ANY.contains(sua)) {
+            return 1;
+        }
+        throw new IllegalArgumentException(sua + " is not converted from a Unit count");
     }
 
-    private void addFormationSpasIfAll(SBFFormation formation, BattleForceSUA... spas) {
-        addFormationSpas(formation, formation.getUnits().size(), spas);
+    /**
+     * IO:BF p. 261, Step 5B: whether a Formation of these Units has the ability, counting the Units that pass the test.
+     * The conversion counts Units with the ability; play also counts Design Quirks (see {@link SBFDesignQuirks}).
+     */
+    public static boolean formationHasSUA(BattleForceSUA sua, List<SBFUnit> units, Predicate<SBFUnit> unitHasIt) {
+        return units.stream().filter(unitHasIt).count() >= minimumCount(sua, units.size());
     }
 
-    private void addFormationSpasIf2Thirds(SBFFormation formation, BattleForceSUA... spas) {
-        int twoThirds = Math.max(formation.getUnits().size() - 1, 1);
-        addFormationSpas(formation, twoThirds, spas);
-    }
-
-    private void addFormationSpas(SBFFormation formation, int minimumCount, BattleForceSUA[] spas) {
+    private void addFormationSpas(SBFFormation formation, List<BattleForceSUA> spas) {
         for (BattleForceSUA spa : spas) {
             int count = spaCount(formation, spa);
-            if (count >= minimumCount) {
+            int minimumCount = minimumCount(spa, formation.getUnits().size());
+            if (formationHasSUA(spa, formation.getUnits(), unit -> unit.hasSUA(spa))) {
                 report.addLine("",
                       spa + ": " + count + " of " + formation.getUnits().size() + ", minimum " + minimumCount,
                       spa.toString());

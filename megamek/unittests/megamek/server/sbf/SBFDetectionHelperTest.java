@@ -167,8 +167,9 @@ class SBFDetectionHelperTest {
 
     @Test
     void improvedSensorsAddTwoHexesWhenHalfTheUnitsElementsHaveThem() {
-        // Design Quirks Table, IO:BF p. 228: Improved Sensors "If 50% of Elements in Unit have PQIS, then increase
-        // detection range by 2 hexes"; only with the optional Design Quirks rules (p. 226)
+        // Design Quirks Table, IO:BF p. 228: Improved Sensors "Element is treated as having PRB" (range 8, p. 197) and
+        // "If 50% of Elements in Unit have PQIS, then increase detection range by 2 hexes"; only with the optional
+        // Design Quirks rules (p. 226)
         var game = new SBFGame();
         var formation = new SBFFormation();
         formation.setType(SBFElementType.BM);
@@ -183,9 +184,9 @@ class SBFDetectionHelperTest {
         formation.addUnit(unit);
         assertEquals(6, SBFDetectionModifiers.sensorRange(game, formation));
         game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
-        assertEquals(8, SBFDetectionModifiers.sensorRange(game, formation));
+        assertEquals(10, SBFDetectionModifiers.sensorRange(game, formation));
         unit.setElements(List.of(sensors, plain, plain));
-        assertEquals(6, SBFDetectionModifiers.sensorRange(game, formation));
+        assertEquals(8, SBFDetectionModifiers.sensorRange(game, formation));
     }
 
     @Test

@@ -52,6 +52,7 @@ import megamek.common.strategicBattleSystems.SBFArtilleryState.Battery;
 import megamek.common.strategicBattleSystems.SBFArtilleryState.Flight;
 import megamek.common.strategicBattleSystems.SBFArtilleryState.Mission;
 import megamek.common.strategicBattleSystems.SBFCombatOrders;
+import megamek.common.strategicBattleSystems.SBFDesignQuirks;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
@@ -236,7 +237,8 @@ public final class SBFArtillery extends AbstractSBFActionHandler {
                   SBFToHitData.standardAttackRange(game, attacker, t).orElse(ASRange.LONG), true));
         } else if (spotter != null) {
             tn.addModifier(-1, "spotter");
-            if (spotter.hasAnySUAOf(BattleForceSUA.LPRB, BattleForceSUA.PRB, BattleForceSUA.BH)) {
+            if (spotter.hasAnySUAOf(BattleForceSUA.LPRB, BattleForceSUA.BH)
+                  || SBFDesignQuirks.formationHas(game, spotter, BattleForceSUA.PRB)) {
                 tn.addModifier(-2, "probe");
             } else if (spotter.hasSUA(BattleForceSUA.RCN)) {
                 tn.addModifier(-1, "recon");
