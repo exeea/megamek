@@ -187,6 +187,29 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void antiAeroTargetingHelpsAgainstVtolsAndHurtsAgainstGroundTargets() {
+        // Design Quirks Table, IO:BF p. 228: Anti-Aero Targeting (Unit; BM, PM, V, MS) "Gains a -2 to-hit on all
+        // aerospace or Units with VTOL or WiGE movement type. Has a +1 to hit all ground units".
+        var unit = attacker.getUnits().getFirst();
+        unit.setType(SBFElementType.V);
+        List<AlphaStrikeElement> elements = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            var element = new AlphaStrikeElement();
+            element.setType(ASUnitType.CV);
+            element.getQuirks().getOption(OptionsConstants.QUIRK_POS_ANTI_AIR).setValue(true);
+            elements.add(element);
+        }
+        unit.setElements(elements);
+        assertEquals(List.of(), modifiers("anti-aero targeting"));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertEquals(List.of(1), modifiers("anti-aero targeting"));
+        target.setMovementMode(SBFMovementMode.VTOL);
+        assertEquals(List.of(-2), modifiers("anti-aero targeting"));
+        unit.setType(SBFElementType.BA);
+        assertEquals(List.of(), modifiers("anti-aero targeting"));
+    }
+
+    @Test
     void attackTwoHexesAwayIsAtExtremeRange() {
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
 

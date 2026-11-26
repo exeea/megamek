@@ -182,6 +182,16 @@ public class SBFToHitData extends TargetRoll {
         if (targetingQuirks && (poorTargeting != null) && firingUnit.hasUnitQuirk(poorTargeting)) {
             toHit.addModifier(1, "poor targeting");
         }
+        if (game.usesDesignQuirks()
+              && firingUnit.isAnyTypeOf(SBFElementType.BM, SBFElementType.PM, SBFElementType.V, SBFElementType.MS)
+              && firingUnit.hasUnitQuirk(OptionsConstants.QUIRK_POS_ANTI_AIR)) {
+            // Anti-Aero Targeting (BM, PM, V, MS): "Gains a -2 to-hit on all aerospace or Units with VTOL or WiGE
+            // movement type. Has a +1 to hit all ground units, including landing aerospace."
+            boolean air = (target.isAerospace() && target.isOnRadarMap())
+                  || (target.getMovementMode() == SBFMovementMode.VTOL)
+                  || (target.getMovementMode() == SBFMovementMode.WIGE);
+            toHit.addModifier(air ? -2 : 1, "anti-aero targeting");
+        }
         int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
               .filter(a -> a.getEntityId() == attackingFormation.getId()).count();
         if (artillery > 0) {
