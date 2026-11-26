@@ -291,9 +291,6 @@ public final class UiTheme implements Disposable {
     private final Map<BitmapFont, HudRaster> rasters = new java.util.WeakHashMap<>();
     /** The HUD fonts at the sizes elements asked for ({@link #sized}), by font and size. */
     private final Map<String, java.lang.ref.WeakReference<BitmapFont>> sizes = new HashMap<>();
-    /** Each display-rastered font's theme, so a label's font finds its sized copies ({@link #sizedFor}). */
-    private static final Map<BitmapFont, UiTheme> OWNERS =
-          java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     /** Screen pixels a stage unit the HUD's glyphs are rasterised for, and the one a scene last reported. */
     private float pixelScale = 1, wantedScale = 1;
     private long wantedSince;
@@ -2313,13 +2310,12 @@ public final class UiTheme implements Disposable {
         HudParameter hud = display ? hudSettings(size, tracking, border, packer, pixelScale) : null;
         Map<Character, BitmapFont.Glyph> layouts = new HashMap<>();
         if (hud != null) { hud.layouts = layouts; }
-        BitmapFont font = display ? generator.generateFont(hud, new HudFontData(hud.rasterScale(size)))
+        BitmapFont font = display ? generator.generateFont(hud, new HudFontData(this, hud.rasterScale(size)))
               : generator.generateFont(settings(size, tracking, border, packer));
         if (display) {
             // Laid out at 4x, in quarter units; drawn from its display raster (HudFontCache).
             font.getData().setScale(.25f);
             rasters.put(font, new HudRaster(generator, size, tracking, border, font, layouts));
-            OWNERS.put(font, this);
         } else {
             if (world) {
                 // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
@@ -2488,11 +2484,11 @@ public final class UiTheme implements Disposable {
             BitmapFont each = fonts.get(font);
             HudRaster raster = rasters.get(each);
             if (built.size() == font) {
-                HudFontData data = new HudFontData(1);
+                HudFontData data = new HudFontData(UiTheme.this, 1);
                 if (raster != null) {
                     HudParameter hud = hudSettings(raster.size(), raster.tracking(), raster.border(), packer, scale);
                     hud.layouts = raster.layouts();
-                    data = new HudFontData(hud.rasterScale(raster.size()));
+                    data = new HudFontData(UiTheme.this, hud.rasterScale(raster.size()));
                     // The regions FreeType appends a new page to; the swap gives the font its own list.
                     data.regions = new Array<>();
                     raster.generator().generateData(hud, data);
@@ -2576,10 +2572,15 @@ public final class UiTheme implements Disposable {
      */
     private static final class HudFontData extends FreeTypeFontGenerator.FreeTypeBitmapFontData {
         private final java.util.BitSet drawn = new java.util.BitSet();
+        /** The theme that rasterised the font, which makes its sized copies ({@link #sizedFor}). */
+        final UiTheme owner;
         /** Screen pixels a stage unit of the raster its glyphs were drawn for. */
         float rasterScale;
 
-        HudFontData(float rasterScale) { this.rasterScale = rasterScale; }
+        HudFontData(UiTheme owner, float rasterScale) {
+            this.owner = owner;
+            this.rasterScale = rasterScale;
+        }
 
         /** A display glyph's UVs come from its texel rectangle, not from its box in quarter units. */
         @Override
@@ -2808,11 +2809,10 @@ public final class UiTheme implements Disposable {
             HudParameter hud = hudSettings(size, base.tracking(), base.border(), hudGlyphs, pixelScale);
             Map<Character, BitmapFont.Glyph> layouts = new HashMap<>();
             hud.layouts = layouts;
-            made = base.generator().generateFont(hud, new HudFontData(hud.rasterScale(size)));
+            made = base.generator().generateFont(hud, new HudFontData(this, hud.rasterScale(size)));
             made.getData().setScale(.25f);
             made.setUseIntegerPositions(false);
             rasters.put(made, new HudRaster(base.generator(), size, base.tracking(), base.border(), root, layouts));
-            OWNERS.put(made, this);
             sizes.put(key, new java.lang.ref.WeakReference<>(made));
         }
         return made;
@@ -2820,8 +2820,7 @@ public final class UiTheme implements Disposable {
 
     /** {@code font} at {@code size} from the theme that rasterised it ({@link #sized}); null where none did. */
     public static BitmapFont sizedFor(BitmapFont font, float size) {
-        UiTheme owner = OWNERS.get(font);
-        return owner == null ? null : owner.sized(font, size);
+        return font.getData() instanceof HudFontData data ? data.owner.sized(font, size) : null;
     }
 
     @Override
