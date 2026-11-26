@@ -19,6 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.UnaryOperator;
@@ -79,6 +80,8 @@ class GpuContactsPanelSmokeTest {
         final Table root;
 
         Panel(GpuHudTestStage hud) {
+            // Pinned open: unpinned, it shows as its rail until the pointer rests on it (GpuContactsPanel#update).
+            state.contactsPinned = true;
             // The HUD's selection rule inspects an enemy (GpuHud.select): a row's click hands it the row's unit.
             contacts = new GpuContactsPanel(hud.kit, mock(GpuBoardSource.class), state, menu,
                   id -> state.inspected = id);
@@ -112,6 +115,19 @@ class GpuContactsPanelSmokeTest {
             return root.findActor(name);
         }
 
+        /** The label under the named actor that shows {@code text}. */
+        Label label(String name, String text) {
+            List<Label> labels = new ArrayList<>();
+            labels(find(name), labels);
+            return labels.stream().filter(label -> label.getText().toString().equals(text)).findFirst()
+                  .orElseThrow(() -> new AssertionError("No label " + text + " in " + name));
+        }
+
+        private static void labels(Actor actor, List<Label> labels) {
+            if (actor instanceof Label label) { labels.add(label); }
+            if (actor instanceof Group group) { group.getChildren().forEach(child -> labels(child, labels)); }
+        }
+
         /** The shown texts under the named actor, in drawing order. */
         List<String> texts(String name) {
             Actor actor = find(name);
@@ -134,7 +150,7 @@ class GpuContactsPanelSmokeTest {
             panel.update(hud, MOCK, shot02());
             panel.place(hud, LEFT, TOP, WIDTH, BOTTOM);
             assertEquals(TIMBER_WOLF, panel.state.inspected, "The row's click inspects the enemy, which opens it");
-            assertEquals(List.of("CONTACTS", "OUTGOING", "INCOMING"), panel.texts("contacts-header"));
+            assertEquals(List.of("CONTACTS", "5", "OUT", "IN"), panel.texts("contacts-header"));
             assertEquals(List.of("FROM DESTINATION", "3 targets \u00B7 ", "3 threats",
                   "Hex 1512 \u00B7 facing N \u00B7 Walked +1 \u00B7 TMM +0"), panel.texts("contacts-from"));
             assertEquals(List.of("Prime", "TIMBER WOLF", "5/7 weapons \u00B7 torso forward",
@@ -203,10 +219,11 @@ class GpuContactsPanelSmokeTest {
                         : unit)), GpuFirePreview.Snapshot.NONE);
             panel.place(hud, LEFT, TOP, WIDTH, BOTTOM);
             assertEquals(List.of("CONTACTS", "5"), panel.texts("contacts-header"));
-            assertEquals(List.of("Prime", "TIMBER WOLF", "Visual"), panel.texts("contacts-unit-" + TIMBER_WOLF));
-            assertEquals(List.of("?", "Unidentified", "SENSOR CONTACT", "Unidentified \u00B7 sensor return"),
+            // A row: name, model, its tag (no distance here); pilot, skills and movement; the A and S bars; the heat.
+            assertEquals(List.of("TIMBER WOLF", "Prime", "MW Kael", "3/4", "MP 5/8/0", "A", "S", "4"),
+                  panel.texts("contacts-unit-" + TIMBER_WOLF));
+            assertEquals(List.of("SENSOR CONTACT", "Unidentified \u00B7 sensor return", "?"),
                   panel.texts("contacts-unit-" + CONTACT));
-            assertEquals(List.of("Includes unidentified sensor contacts"), panel.texts("contacts-footer"));
             assertNull(panel.find("contacts-from"), "No preview, no from block");
             shoot(hud, panel, "contacts-01-initiative", "01-initiative.jpg");
 
@@ -214,11 +231,10 @@ class GpuContactsPanelSmokeTest {
             panel = fresh(hud);
             panel.update(hud, status(GamePhase.PHYSICAL, true, ATLAS, 0, physical()), GpuFirePreview.Snapshot.NONE);
             panel.place(hud, LEFT, TOP, WIDTH, BOTTOM);
-            assertEquals(List.of("KGC-000", "KING CRAB", "Prone", "7 hex"), panel.texts("contacts-unit-" + KING_CRAB));
-            assertEquals(UiTheme.CORAL, panel.<GpuHudKit.UnitRow>find("contacts-unit-" + KING_CRAB).line
-                  .getColor());
-            assertEquals("1 hex", panel.texts("contacts-unit-" + TIMBER_WOLF).get(3));
-            assertEquals(List.of("All contacts identified"), panel.texts("contacts-footer"));
+            assertEquals(List.of("KING CRAB", "KGC-000", "7 hex", "Sgt. V. Kross", "4/5", "Prone", "A", "S"),
+                  panel.texts("contacts-unit-" + KING_CRAB));
+            assertEquals(UiTheme.CORAL, panel.label("contacts-unit-" + KING_CRAB, "Prone").getColor());
+            assertEquals("1 hex", panel.texts("contacts-unit-" + TIMBER_WOLF).get(2));
             shoot(hud, panel, "contacts-09-physical", "09-physical-attacks.jpg");
         });
     }
@@ -353,23 +369,27 @@ class GpuContactsPanelSmokeTest {
             // Without a preview the column lists the contacts: a click inspects, a right click opens the menu.
             show(hud, panel, MOCK, GpuFirePreview.Snapshot.NONE);
             assertNull(panel.find("contacts-from"));
-            assertEquals("9 hex", panel.texts("contacts-unit-" + TIMBER_WOLF).get(3), "Distance from the acting Atlas");
+            assertEquals("9 hex", panel.texts("contacts-unit-" + TIMBER_WOLF).get(2), "Distance from the acting Atlas");
             click(hud, panel, "contacts-unit-" + BATTLEMASTER, Input.Buttons.LEFT);
             assertEquals(BATTLEMASTER, panel.state.inspected);
             show(hud, panel, MOCK, GpuFirePreview.Snapshot.NONE);
-            assertSame(hud.kit.ui.skin.getDrawable("row-foe"),
-                  panel.<GpuHudKit.UnitRow>find("contacts-unit-" + BATTLEMASTER).getBackground(),
-                  "The inspected enemy has coral edges");
+            assertTrue((boolean) GpuTestSupport.field(panel.find("contacts-unit-" + BATTLEMASTER), "highlight"),
+                  "The inspected enemy's row has the coral edge");
             click(hud, panel, "contacts-unit-" + CONTACT, Input.Buttons.RIGHT);
             verify(panel.menu).open(eq(unit(MOCK, CONTACT).position()), eq(CONTACT), anyFloat(), anyFloat());
-            // Heat with effects (the status carries the heat table's text, "" without effects) shows the amber flame
-            // instead of the distance (C5).
+            // Heat with effects (the status carries the heat table's text, "" without effects) turns the flame and the
+            // heat from amber to hot (C5).
             String effects = HeatEffects.getHeatEffects(5, false, false);
             List<UnitStatus> hot = change(MOCK.units(), unit -> unit.id() == TIMBER_WOLF
                   ? copy(unit, unit.position(), unit.pending(), unit.statusWords(), effects) : unit);
             show(hud, panel, status(GamePhase.MOVEMENT, true, ATLAS, 0, hot), GpuFirePreview.Snapshot.NONE);
-            assertEquals(UiTheme.AMBER, panel.<GpuHudKit.UnitRow>find("contacts-unit-" + TIMBER_WOLF).right
-                  .getActor().getColor());
+            Actor row = panel.find("contacts-unit-" + TIMBER_WOLF);
+            Actor flame = GpuTestSupport.field(row, "flame");
+            assertTrue(flame.isVisible());
+            Field hotColour = GpuContactsPanel.class.getDeclaredField("HOT");
+            hotColour.setAccessible(true);
+            assertEquals(hotColour.get(null), flame.getColor());
+            assertEquals(hotColour.get(null), panel.label("contacts-unit-" + TIMBER_WOLF, "4").getColor());
         });
     }
 
