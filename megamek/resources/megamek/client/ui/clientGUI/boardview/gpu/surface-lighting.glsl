@@ -289,10 +289,14 @@ vec2 shadowTexels() {
 float shadowTexel() { return shadowTexels().x; }
 
 // Where a surface at position (world) looks its shadow up in the map. Normal offset: out along its normal by half a
-// texel, and by up to two where the light skims it, so a flat face lit at a grazing angle never shadows itself.
+// texel, and by up to two where the light skims it, so a flat face lit at a grazing angle never shadows itself. Then
+// 1.5 texels toward the sun along its own ray: relief finer than a texel (a concave foot, scree, bumps), which a coarse
+// map's texels round off, does not shadow the ground it stands on. Both scale with the texel, so a coarser map (a lower
+// view's fit) only softens the shadows a finer one shows, and adds none.
 vec3 shadowLookup(vec3 position, vec3 normal, vec3 light, float texel) {
     float skim = 1.0 - abs(dot(normal, light));
-    vec4 lifted = u_shadowMapProjViewTrans * vec4(position + normal * texel * (.5 + 1.5 * skim), 1.0);
+    vec4 lifted = u_shadowMapProjViewTrans * vec4(position + normal * texel * (.5 + 1.5 * skim) + light * texel * 1.5,
+          1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;
     shadowUv.z = min(shadowUv.z, .998);
     return shadowUv;
