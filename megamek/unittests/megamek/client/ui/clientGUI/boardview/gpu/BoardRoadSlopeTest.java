@@ -198,7 +198,12 @@ class BoardRoadSlopeTest {
                 for (float t : lod == TerrainLod.FULL ? new float[] { .25f, .5f, .75f } : new float[0]) {
                     // This lower rock lies beneath the neighboring level-two road's supporting bank as well.
                     // Level-one rock can still belong to that transition; the deeper formation must be intact.
+                    // The band below a nearby road's headroom moves away from it as a whole (BoardRelief#roadPush),
+                    // so the native rock at half a level stands where the road's relief moves the rock below it.
                     var rock = nativeSurface.relief.wetCliffContact(example[2], t, .5f * BoardGeometry.level());
+                    var moved = surface.relief.wetCliffContact(example[2], t, .25f * BoardGeometry.level())
+                          .sub(nativeSurface.relief.wetCliffContact(example[2], t, .25f * BoardGeometry.level()));
+                    rock.add(moved.x, moved.y, 0);
                     float nearest = Float.POSITIVE_INFINITY;
                     for (var face : walls) {
                         if (face.landEdge() != example[2]) { continue; }
