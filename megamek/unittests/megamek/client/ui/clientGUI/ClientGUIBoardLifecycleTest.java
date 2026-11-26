@@ -21,7 +21,6 @@ import megamek.client.Client;
 import megamek.client.CloseClientListener;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
@@ -48,8 +47,7 @@ class ClientGUIBoardLifecycleTest {
     @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
     void nativeMapArrivalReplacementAndBoardSelectionNeedNoLegacy2DRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
-            try (var rulers = mockConstruction(RulerDialog.class);
-                  var display = mockConstruction(UnitDisplayPanel.class);
+            try (var display = mockConstruction(UnitDisplayPanel.class);
                   var dialog = mockConstruction(UnitDisplayDialog.class);
                   var weapons = mockConstruction(WeaponPanel.class);
                   var sound = mockConstruction(SoundManager.class);
@@ -95,9 +93,6 @@ class ClientGUIBoardLifecycleTest {
                 assertNull(gui.getBoardState(2));
                 assertSame(gui.getBoardState(0), gui.getBoardState());
                 assertEquals(List.of(), boardListeners(removedBoard));
-
-
-                assertTrue(rulers.constructed().isEmpty(), "Native startup must not construct a Swing ruler");
 
 
                 assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");

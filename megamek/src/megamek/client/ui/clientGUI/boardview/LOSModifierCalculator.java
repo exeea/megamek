@@ -59,8 +59,6 @@ import megamek.server.SmokeCloud;
  * Computes to-hit modifiers for the ruler/LOS tool without requiring actual Entity objects. Mirrors the fire phase
  * calculation from {@code ComputeTerrainMods} for terrain, attacker hex, target hex, water partial cover, and entity
  * state modifiers.
- *
- * <p>Extracted from {@code RulerDialog} to allow independent testing and reduce that class's size.</p>
  */
 final class LOSModifierCalculator {
 
@@ -83,7 +81,7 @@ final class LOSModifierCalculator {
         return measureEntities(game, attacker, target, false).description();
     }
 
-    /** One engine result supplies the ruler text, Swing diagram and native ray. */
+    /** One engine result supplies the ruler text and the native ray. */
     record Measurement(LosEffects effects, String description, String summary) {
         Measurement(LosEffects effects, ToHitData modifiers) {
             this(effects, (modifiers.getValue() == TargetRoll.IMPOSSIBLE ? "" : modifiers.getValue() + " = ")
@@ -345,52 +343,6 @@ final class LOSModifierCalculator {
           String deadZoneAttacker, String deadZoneTarget) {
     }
 
-    /**
-     * Computes LOS modifiers under all three rule modes (Standard, Diagrammed, Dead Zone) by temporarily toggling game
-     * options. Safe to call on the EDT since the ruler is a UI-only tool and no game logic runs concurrently during
-     * computation.
-     *
-     * @param game               the current game state
-     * @param attackerPos        the attacker hex coordinates
-     * @param targetPos          the target hex coordinates
-     * @param attackerHeight     the attacker's TW height
-     * @param targetHeight       the target's TW height
-     * @param attackerIsMek      whether the attacker is a Mek
-     * @param targetIsMek        whether the target is a Mek
-     * @param attackerIsAltitude whether the attacker uses altitude (aerospace)
-     * @param targetIsAltitude   whether the target uses altitude (aerospace)
-     *
-     * @return a record containing all six result strings (attacker/target for each mode)
-     */
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    static LOSComparison computeAllModes(Game game, Coords attackerPos, Coords targetPos,
-          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
-          boolean attackerIsAltitude, boolean targetIsAltitude) {
-        return computeAllModes(game, attackerPos, targetPos, attackerHeight, targetHeight,
-              attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude, null);
-    }
-
-    /**
-     * Computes LOS comparison across all three mutually-exclusive rule modes, with double-blind visibility filtering
-     * for entity state modifiers.
-     */
-    static LOSComparison computeAllModes(Game game, Coords attackerPos, Coords targetPos,
-          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
-          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
-        return computeAllModes(game, 0, attackerPos, targetPos, attackerHeight, targetHeight, attackerIsMek,
-              targetIsMek, attackerIsAltitude, targetIsAltitude, localPlayer);
-    }
-
-    static LOSComparison computeAllModes(Game game, int boardId, Coords attackerPos, Coords targetPos,
-          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
-          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
-        return compare(game,
-              () -> measure(game, boardId, attackerPos, targetPos, attackerHeight, targetHeight,
-                    attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude, localPlayer, false).description(),
-              () -> measure(game, boardId, targetPos, attackerPos, targetHeight, attackerHeight,
-                    targetIsMek, attackerIsMek, targetIsAltitude, attackerIsAltitude, localPlayer, false).description());
-    }
-
     /** Compare the same endpoints and calculation path in each rules mode, restoring the game's options afterward. */
     static LOSComparison compare(Game game, Supplier<String> forward, Supplier<String> reverse) {
         IOption losOption = game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_LOS1);
@@ -435,15 +387,7 @@ final class LOSModifierCalculator {
      * @return true if a Mek at the hex is hull-down
      */
     static boolean isMekHullDownAt(Game game, Coords hexPos) {
-        return isMekHullDownAt(game, hexPos, null);
-    }
-
-    /**
-     * Checks if a Mek at the given hex is hull-down, respecting the local player's visibility under double-blind rules.
-     * If {@code localPlayer} is null, no visibility filtering is applied.
-     */
-    static boolean isMekHullDownAt(Game game, Coords hexPos, @Nullable Player localPlayer) {
-        return isMekHullDownAt(game, 0, hexPos, localPlayer);
+        return isMekHullDownAt(game, 0, hexPos, null);
     }
 
     private static boolean isMekHullDownAt(Game game, int boardId, Coords hexPos, @Nullable Player localPlayer) {

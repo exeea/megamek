@@ -456,10 +456,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String NAG_FOR_ODD_SIZED_BOARD = "NagForOddSizedBoard";
     public static final String RULER_COLOR_1 = "RulerColor1";
     public static final String RULER_COLOR_2 = "RulerColor2";
-    public static final String RULER_POS_X = "RulerPosX";
-    public static final String RULER_POS_Y = "RulerPosY";
-    public static final String RULER_SIZE_HEIGHT = "RulerSizeHeight";
-    public static final String RULER_SIZE_WIDTH = "RulerSizeWidth";
     public static final String SCROLL_SENSITIVITY = "ScrollSensitivity";
     public static final String SHOW_FIELD_OF_FIRE = "ShowFieldOfFire";
     public static final String SHOW_SENSOR_RANGE = "ShowSensorRange";
@@ -543,9 +539,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_TRACE_OVERLAY = "ShowTraceOverlay";
     public static final String UNIT_LABEL_STYLE = "UnitLabelStyle";
     public static final String NAMEPLATE_MODE = "NameplateMode";
-    public static final String RULER_DIAGRAM_VISIBLE = "RulerDiagramVisible";
-    public static final String RULER_COMPARE_VISIBLE = "RulerCompareVisible";
-
     public static final String AS_CARD_FONT = "AsCardFont";
     public static final String AS_CARD_SIZE = "AsCardSize";
     public static final String SBF_SHEET_HEADER_FONT = "SBFSheetHeaderFont";
@@ -660,7 +653,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(BOARD_EDIT_RANDOM_DIALOG_START, false);
         store.setDefault(BOARD_SAVE_INCLUDE_LICENSE, true);
-        store.setDefault(RULER_DIAGRAM_VISIBLE, true);
         setDefault(ADVANCED_NO_SAVE_NAG, false);
         store.setDefault(ADVANCED_SAVE_LOBBY_ON_START, false);
         store.setDefault(ADVANCED_LOBBY_BACKUPS_TO_KEEP, 5);
@@ -1044,10 +1036,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         setDefault(RULER_COLOR_1, DEFAULT_CYAN);
         setDefault(RULER_COLOR_2, DEFAULT_MAGENTA);
-        store.setDefault(RULER_POS_X, -1);
-        store.setDefault(RULER_POS_Y, -1);
-        store.setDefault(RULER_SIZE_HEIGHT, 350);
-        store.setDefault(RULER_SIZE_WIDTH, 600);
 
         store.setDefault(SCROLL_SENSITIVITY, 3);
         store.setDefault(SHOW_FIELD_OF_FIRE, true);
@@ -1825,22 +1813,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public Color getRulerColor2() {
         return getColor(RULER_COLOR_2);
-    }
-
-    public int getRulerPosX() {
-        return store.getInt(RULER_POS_X);
-    }
-
-    public int getRulerPosY() {
-        return store.getInt(RULER_POS_Y);
-    }
-
-    public int getRulerSizeHeight() {
-        return store.getInt(RULER_SIZE_HEIGHT);
-    }
-
-    public int getRulerSizeWidth() {
-        return store.getInt(RULER_SIZE_WIDTH);
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)
@@ -2963,22 +2935,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setNagForWiGELanding(boolean b) {
         store.setValue(NAG_FOR_WIGE_LANDING, b);
-    }
-
-    public void setRulerPosX(int i) {
-        store.setValue(RULER_POS_X, i);
-    }
-
-    public void setRulerPosY(int i) {
-        store.setValue(RULER_POS_Y, i);
-    }
-
-    public void setRulerSizeHeight(int i) {
-        store.setValue(RULER_SIZE_HEIGHT, i);
-    }
-
-    public void setRulerSizeWidth(int i) {
-        store.setValue(RULER_SIZE_WIDTH, i);
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)
@@ -4580,21 +4536,5 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getForceDisplayBtnMisc() {return getBoolean(FORCE_DISPLAY_BTN_MISC);}
 
-    // region Ruler Diagram
-    public boolean getRulerDiagramVisible() {
-        return store.getBoolean(RULER_DIAGRAM_VISIBLE);
-    }
-
-    public void setRulerDiagramVisible(boolean visible) {
-        store.setValue(RULER_DIAGRAM_VISIBLE, visible);
-    }
-
-    public boolean getRulerCompareVisible() {
-        return store.getBoolean(RULER_COMPARE_VISIBLE);
-    }
-
-    public void setRulerCompareVisible(boolean visible) {
-        store.setValue(RULER_COMPARE_VISIBLE, visible);
-    }
     // endregion Ruler Diagram
 }

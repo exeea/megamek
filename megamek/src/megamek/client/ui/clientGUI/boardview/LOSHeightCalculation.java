@@ -32,48 +32,15 @@
  */
 package megamek.client.ui.clientGUI.boardview;
 
-import megamek.common.units.Entity;
-import megamek.common.units.Mek;
-
 /**
- * Shared utility for converting entity state to TW (Total Warfare) height values used by the ruler LOS tool and
- * elevation diagram.
+ * Converts TW (Total Warfare) heights to absolute heights for the ruler's line of sight ({@link RulerModel}).
  *
- * <p>TW height is 1-indexed: a standard Mek occupies 2 levels, a vehicle occupies 1 level.
- * This matches the height spinners in the ruler dialog and the diagram rendering.</p>
+ * <p>TW height is 1-indexed: a standard Mek occupies 2 levels, a vehicle occupies 1 level.</p>
  */
 final class LOSHeightCalculation {
 
     private LOSHeightCalculation() {
         // utility class
-    }
-
-    /**
-     * Returns the display height/altitude for an entity's ruler spinner.
-     *
-     * <p>For airborne aerospace units, returns the BT altitude (1-10) from {@code getAltitude()}.
-     * For ground units, returns TW height: {@code entity.relHeight() + 1}, minus 1 if hull-down Mek. This produces:
-     * standard Mek = 2, hull-down Mek = 1, superheavy Mek = 3, hull-down superheavy = 2, vehicle/infantry = 1.</p>
-     *
-     * @param entity the entity to calculate height for
-     *
-     * @return the TW height in levels (ground units) or altitude (airborne aero)
-     */
-    static int twHeightFromEntity(Entity entity) {
-        DiagramUnitType unitType = DiagramUnitType.fromEntity(entity);
-
-        // Airborne aero units use altitude (1-10), not elevation-derived height.
-        // Check getAltitude() > 0 directly rather than isAirborne(), because isAirborne()
-        // returns true for grounded dropships (AERODYNE/SPHEROID movement mode at altitude 0).
-        if ((entity.getAltitude() > 0) && unitType.isAltitudeUnit()) {
-            return Math.max(1, entity.getAltitude());
-        }
-
-        int twHeight = entity.relHeight() + 1;
-        if ((entity instanceof Mek) && entity.isHullDown()) {
-            twHeight -= 1;
-        }
-        return twHeight;
     }
 
     /**
