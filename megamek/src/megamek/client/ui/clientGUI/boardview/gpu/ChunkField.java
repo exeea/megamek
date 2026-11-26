@@ -1007,6 +1007,9 @@ final class ChunkField {
             int split = outside || cast ? 1 : full || medium ? 3 : 1;
             float[] out = new float[7], tops = new float[n + 1], feet = new float[n + 1];
             int[] samples = new int[n + 1];
+            // The foot is the lower hex's ground as its own block takes it: stepped back beside a containment wall
+            // (FieldStamps#stepBack) as that block's samples are, so the wall meets them.
+            boolean lowerWalled = other != null && FieldStamps.nearWalls(b, g, chunk::shares);
             for (int j = 0; j <= n; j++) {
                 int v = j == n ? vertex((e + 1) % 6, n, 0) : vertex(e, n, j);
                 samples[j] = v;
@@ -1014,6 +1017,7 @@ final class ChunkField {
                 feet[j] = otherZ;
                 if (other != null) {
                     b.height(g, other, chunk.shares(g), x[v], y[v], out);
+                    if (lowerWalled) { FieldStamps.stepBack(b, chunk::shares, g, x[v], y[v], out); }
                     feet[j] = out[0];
                 }
             }
