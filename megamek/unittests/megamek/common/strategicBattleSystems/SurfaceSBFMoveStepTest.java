@@ -242,6 +242,18 @@ class SurfaceSBFMoveStepTest {
     }
 
     @Test
+    void exclusivelyWheeledFormationsPayOneLessInUrbanHexes() {
+        // Urban table note *, IO:BF p. 216: "Formations made up exclusively of wheeled Elements may reduce all movement
+        // costs by 1 MP ... the movement penalty for moving through a Medium Urban hex would be +1, not +2."
+        game.getOptions().getOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN).setValue(true);
+        to.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        setMover(SBFElementType.V, SBFMovementMode.TRACKED);
+        assertEquals(3, step().getMpUsed());
+        setMover(SBFElementType.V, SBFMovementMode.WHEELED);
+        assertEquals(2, step().getMpUsed());
+    }
+
+    @Test
     void pavedCrossingBypassesWaterAndObstructingTerrain() {
         setMover(SBFElementType.V, SBFMovementMode.WHEELED);
         to.addTerrain(new Terrain(Terrains.WATER, 2));

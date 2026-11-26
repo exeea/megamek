@@ -56,7 +56,9 @@ final class SBFUrbanCombat {
         if (formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)) {
             return 0;
         }
-        return BUILDING_ENTRY_COST[Math.clamp(hex.terrainLevel(Terrains.BUILDING), 1, 4)];
+        int cost = BUILDING_ENTRY_COST[Math.clamp(hex.terrainLevel(Terrains.BUILDING), 1, 4)];
+        // Urban table note *, p. 216: exclusively wheeled Formations "may reduce all movement costs by 1 MP"
+        return formation.isExclusivelyWheeled() ? Math.max(0, cost - 1) : cost;
     }
 
     /**

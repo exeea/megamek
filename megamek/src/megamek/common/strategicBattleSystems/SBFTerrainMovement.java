@@ -131,13 +131,14 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
     /**
      * Movement bonuses that a Formation gains only when all its movers have them (Terrain Modifiers on Movement, IO:BF
      * p. 166: "all Elements in the Formation must have this mode or type ... to gain the bonus"): the infantry
-     * reductions, the ProtoMek building cost and the LG 'Mech reduction of advanced terrain.
+     * reductions, the ProtoMek building cost, the LG 'Mech reduction of advanced terrain and the wheeled urban reduction.
      */
-    record Bonuses(boolean infantry, boolean protoMek, boolean large) {
+    record Bonuses(boolean infantry, boolean protoMek, boolean large, boolean wheeled) {
         static Bonuses of(List<SBFTerrainMovement> movers) {
             return new Bonuses(movers.stream().allMatch(SBFTerrainMovement::isInfantry),
                   movers.stream().allMatch(mover -> mover.type == SBFElementType.PM),
-                  movers.stream().allMatch(mover -> mover.largeMekBonus() > 0));
+                  movers.stream().allMatch(mover -> mover.largeMekBonus() > 0),
+                  movers.stream().allMatch(mover -> mover.mode == SBFMovementMode.WHEELED));
         }
     }
 
@@ -203,7 +204,10 @@ record SBFTerrainMovement(SBFElementType type, SBFMovementMode mode, ASSpecialAb
         if (to.containsTerrain(Terrains.BUILDING)) {
             int buildingCost = Math.clamp(to.terrainLevel(Terrains.BUILDING), 1, 4);
             if (advanced) {
-                return base(cost + (bonuses.infantry() ? 0 : bonuses.protoMek() ? 1 : Math.max(0, buildingCost - large)));
+                // Urban table note *, IO:BF p. 216: "Formations made up exclusively of wheeled Elements may reduce all
+                // movement costs by 1 MP, reflecting the paved surfaces in the hex"
+                int wheeled = bonuses.wheeled() ? 1 : 0;
+                return base(cost + (bonuses.infantry() ? 0 : bonuses.protoMek() ? 1 : Math.max(0, buildingCost - large - wheeled)));
             }
             return base(cost + (bonuses.infantry() ? Math.max(0, buildingCost - 2) : buildingCost));
         }

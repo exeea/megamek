@@ -322,6 +322,21 @@ class SBFMovementProcessorTest {
     }
 
     @Test
+    void anExclusivelyWheeledFormationEntersMediumBuildingsForFree() {
+        // Urban table note *, IO:BF p. 216: exclusively wheeled Formations "may reduce all movement costs by 1 MP"
+        formation.setType(SBFElementType.V);
+        formation.setMovementMode(SBFMovementMode.WHEELED);
+        formation.setMovement(4);
+        game.getHex(BoardLocation.of(new Coords(2, 1), 0)).addTerrain(new Terrain(Terrains.BUILDING, 2));
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        var route = pathWithSteps(1);
+        route.enterBuildingsAtEnd();
+        assertTrue(processor.processMovement(route, formation));
+        assertTrue(formation.isInsideBuildings());
+        assertEquals(route.getMpUsed(), formation.getMpSpentThisTurn());
+    }
+
+    @Test
     void terrainCoverCostsHalfMoveProtectsFromDamageAndLosesStationaryTmm() {
         var route = pathWithSteps(1);
         route.enterHullDownAtEnd();
