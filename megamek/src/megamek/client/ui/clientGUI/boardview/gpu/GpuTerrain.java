@@ -1722,6 +1722,11 @@ final class GpuTerrain implements Disposable {
         private List<Vector3> supportTriangles;
         /** The near mesh in its own frame; authored slices retain their original object-space envelope. */
         private BoundingBox editorBounds;
+        /**
+         * A placed object's box in its model's frame as its build measured it (the near level, every part): its
+         * installed box and an editor preview's are this box placed, whatever level draws ({@link #detail}).
+         */
+        private BoundingBox nearBounds;
         private float decorationAnchorZ;
         /**
          * A placed object's feature, owned ones included: in every view its parts draw instanced
@@ -5797,6 +5802,7 @@ final class GpuTerrain implements Disposable {
                   : BoardFlag.ASSET.equals(feature.asset()) ? instance.calculateBoundingBox(new BoundingBox())
                   : new BoundingBox(assets.bounds(model, instance));
             BoundingBox editorBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
+            BoundingBox nearBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
             if (BoardFlag.ASSET.equals(feature.asset())) {
                 editorBounds.set(Vector3.Zero, new Vector3(GpuFlag.WIDTH, 0, GpuFlag.HEIGHT));
             }
@@ -5987,6 +5993,7 @@ final class GpuTerrain implements Disposable {
                         || feature.asset().startsWith("buildings/"),
                   false, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.editorBounds = editorBounds;
+            prop.nearBounds = nearBounds;
             prop.parts = feature.parts();
             BoardGroundCut.showParts(instance, prop.parts);
             if (standTree) { prop.plantFeature = feature; }
@@ -8636,7 +8643,9 @@ final class GpuTerrain implements Disposable {
                     prop.previewFeature = next;
                     prop.previewCoords = coords;
                     prop.previewInstance = preview;
-                    prop.previewBounds = preview == null ? null : preview.calculateBoundingBox(new BoundingBox()).mul(preview.transform);
+                    // The installed box's rule: the level a small object draws at has its own box (#nearBounds).
+                    prop.previewBounds = preview == null ? null
+                          : new BoundingBox(prop.nearBounds).mul(preview.transform);
                     if (preview != null && isFlag(prop)) { prop.previewBounds.set(GpuFlag.bounds(preview.transform)); }
                     prop.previewAnchorZ = z;
                     if (oldGeyser != null) {
