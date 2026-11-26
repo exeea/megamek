@@ -444,8 +444,12 @@ final class FieldBoard {
             float water = shore.water(h, x, y), cap = water - .3f * metre;
             if (z > cap) { z -= (z - cap) * ends * (1 - BoardRelief.smooth((behind - 4 * metre) / (2 * metre))); }
             // Where the edge does not pour, a dry rim of rock: a level top 0.5 m over the water one lattice step
-            // wide, its inner face falling a metre a metre (the pool's sheet ends inside it: FieldWater).
-            float dry = dry(h, e, t);
+            // wide, its inner face falling a metre a metre (the pool's sheet ends inside it: FieldWater). It eases out
+            // over the edge's last tenth toward an end whose next edge is neither a fall nor a pool's wall (#poolRim),
+            // so it meets the ground of the hex beside it there, which has no rim.
+            float dry = dry(h, e, t)
+                  * (before || poolWall(h, Math.floorMod(e - 1, 6)) ? 1 : BoardRelief.smooth(t / .1f))
+                  * (after || poolWall(h, (e + 1) % 6) ? 1 : BoardRelief.smooth((1 - t) / .1f));
             if (dry > 0) {
                 z += Math.max(0, water + .5f * metre - Math.max(0, behind - 1.9f * metre) - z) * dry;
                 if (dry > .5f && z >= water - .1f * metre) { out[1] = 1; }
@@ -1683,9 +1687,11 @@ final class FieldBoard {
             float best = Float.POSITIVE_INFINITY;
             for (int e = 0; e < 6; e++) {
                 Coords n = here.translated(BoardGeometry.edgeDirection(e));
-                float ndx = x - centerX(n), ndy = y - centerY(n);
-                if (ndx * ndx + ndy * ndy < best) {
-                    best = ndx * ndx + ndy * ndy;
+                float ndx = x - centerX(n), ndy = y - centerY(n), away = ndx * ndx + ndy * ndy;
+                // At here's corner two neighbours lie as near: h, one of them, decides, so a hex level with here reads
+                // here's water there as here does (no seam at the corner), and h across a wall keeps its own.
+                if (away < best * (1 - 1e-4f) || away <= best * (1 + 1e-4f) && n.equals(h)) {
+                    best = away;
                     edge = e;
                 }
             }
