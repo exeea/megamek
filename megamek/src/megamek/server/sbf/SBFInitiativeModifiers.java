@@ -194,7 +194,8 @@ final class SBFInitiativeModifiers {
 
     private int leadershipBonus() {
         int tier = units().mapToInt(SBFUnit::getCommandTier).max().orElse(0);
-        boolean computer = active.stream().filter(f -> f.moraleStatus() == SBFFormation.MoraleStatus.NORMAL)
+        boolean computer = game.usesDesignQuirks() && active.stream()
+              .filter(f -> f.moraleStatus() == SBFFormation.MoraleStatus.NORMAL)
               .flatMap(f -> f.getUnits().stream()).anyMatch(u -> u.getCurrentArmor() > 0 && u.hasSUA(COM)
                     && u.getElements().stream().anyMatch(e -> e.hasQuirk(OptionsConstants.QUIRK_POS_BATTLE_COMP)));
         return Math.max(tier >= 2 ? tier : 0, computer ? 2 : 0);

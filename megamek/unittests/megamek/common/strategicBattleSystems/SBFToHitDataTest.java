@@ -124,6 +124,9 @@ class SBFToHitDataTest {
             elements.add(element);
         }
         unit.setElements(elements);
+        // Only with the optional Design Quirks rules (p. 226)
+        assertEquals(List.of(), modifiers("improved targeting"));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
         assertEquals(List.of(-1), modifiers("improved targeting"));
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
         assertEquals(List.of(), modifiers("improved targeting"));

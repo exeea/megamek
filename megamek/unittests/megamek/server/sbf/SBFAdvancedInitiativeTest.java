@@ -90,6 +90,7 @@ class SBFAdvancedInitiativeTest {
     @Test
     void alliedEquipmentAndLeadershipStackWithOnlyBestLastRoundBattlefieldEvent() {
         enable(INIT_MODIFIERS);
+        enable(DESIGN_QUIRKS);
         SBFUnit hq = formation(10, blue).getUnits().getFirst();
         hq.getSpecialAbilities().mergeSUA(MHQ, 7);
         hq.getSpecialAbilities().setSUA(COM);

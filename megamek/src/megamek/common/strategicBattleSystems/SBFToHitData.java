@@ -170,7 +170,8 @@ public class SBFToHitData extends TargetRoll {
             case LONG -> OptionsConstants.QUIRK_POS_IMP_TARG_L;
             default -> null;
         };
-        if ((improvedTargeting != null) && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
+        if (game.usesDesignQuirks() && (improvedTargeting != null)
+              && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
               && firingUnit.hasUnitQuirk(improvedTargeting)) {
             toHit.addModifier(-1, "improved targeting");
         }

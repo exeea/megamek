@@ -79,9 +79,11 @@ public interface SBFRuleOptionsUser {
         return getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT);
     }
 
-    /**
-     * @return True when this game allows adjusting formations, IO:BF p.198.
-     */
+    /** The optional Design Quirks rules, IO:BF p. 226: "If the players are using the optional Design Quirks rules". */
+    default boolean usesDesignQuirks() {
+        return getOptions().booleanOption(SBFRuleOptions.DESIGN_QUIRKS);
+    }
+
     /** Urban Hexes (Buildings), IO:BF pp. 215-218. */
     default boolean usesUrbanCombat() {
         return getOptions().booleanOption(SBFRuleOptions.URBAN_COMBAT);
@@ -96,6 +98,9 @@ public interface SBFRuleOptionsUser {
               || getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FOR_WITHDRAWAL);
     }
 
+    /**
+     * @return True when this game allows adjusting formations, IO:BF p.198.
+     */
     @Deprecated(since = "0.51.0", forRemoval = true)
     default boolean usesAdjustingFormations() {
         return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS);
