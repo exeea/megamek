@@ -162,23 +162,25 @@ public class SBFToHitData extends TargetRoll {
                 default -> { }
             }
         }
-        // Design Quirks Table, IO:BF p. 228: Improved Targeting (Short, Medium, Long) "Unit receives a -1 to-hit
-        // modifier at this range", for all Unit types except infantry and battle armor
-        String improvedTargeting = switch (toHit.range) {
-            case SHORT -> OptionsConstants.QUIRK_POS_IMP_TARG_S;
-            case MEDIUM -> OptionsConstants.QUIRK_POS_IMP_TARG_M;
-            case LONG -> OptionsConstants.QUIRK_POS_IMP_TARG_L;
-            default -> null;
-        };
-        if (game.usesDesignQuirks() && (improvedTargeting != null)
-              && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
-              && firingUnit.hasUnitQuirk(improvedTargeting)) {
+        // Design Quirks Tables, IO:BF pp. 228-229: Improved Targeting (Short, Medium, Long) "Unit receives a -1 to-hit
+        // modifier at this range" and Poor Targeting "Unit receives a +1 to-hit modifier at this range", for all Unit
+        // types except infantry and battle armor
+        boolean targetingQuirks = game.usesDesignQuirks()
+              && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA);
+        String improvedTargeting = rangeQuirk(toHit.range, OptionsConstants.QUIRK_POS_IMP_TARG_S,
+              OptionsConstants.QUIRK_POS_IMP_TARG_M, OptionsConstants.QUIRK_POS_IMP_TARG_L);
+        String poorTargeting = rangeQuirk(toHit.range, OptionsConstants.QUIRK_NEG_POOR_TARG_S,
+              OptionsConstants.QUIRK_NEG_POOR_TARG_M, OptionsConstants.QUIRK_NEG_POOR_TARG_L);
+        if (targetingQuirks && (improvedTargeting != null) && firingUnit.hasUnitQuirk(improvedTargeting)) {
             toHit.addModifier(-1, "improved targeting");
-        } else if (game.usesDesignQuirks() && firingUnit.isAnyTypeOf(SBFElementType.BM, SBFElementType.PM)
+        } else if (targetingQuirks && firingUnit.isAnyTypeOf(SBFElementType.BM, SBFElementType.PM)
               && firingUnit.hasUnitQuirk(OptionsConstants.QUIRK_POS_VAR_RNG_TARG)) {
             // Variable Range Targeting (BM, PM): "Unit receives a -1 to-hit modifier on all attacks"; Improved
             // Targeting "May not be combined with Variable Targeting", so the two never stack
             toHit.addModifier(-1, "variable range targeting");
+        }
+        if (targetingQuirks && (poorTargeting != null) && firingUnit.hasUnitQuirk(poorTargeting)) {
+            toHit.addModifier(1, "poor targeting");
         }
         int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
               .filter(a -> a.getEntityId() == attackingFormation.getId()).count();
@@ -256,6 +258,16 @@ public class SBFToHitData extends TargetRoll {
         }
         processDeclarations(toHit, attackingFormation, game, attack, declarations);
         return toHit;
+    }
+
+    /** @return the quirk named for this range bracket, or null at extreme range (the quirks have no extreme row) */
+    private static String rangeQuirk(ASRange range, String shortRange, String mediumRange, String longRange) {
+        return switch (range) {
+            case SHORT -> shortRange;
+            case MEDIUM -> mediumRange;
+            case LONG -> longRange;
+            default -> null;
+        };
     }
 
     public static void processAttackerStatus(SBFToHitData toHit, SBFGame game, SBFFormation attackingFormation) {

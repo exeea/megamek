@@ -164,6 +164,29 @@ class SBFToHitDataTest {
     }
 
     @Test
+    void poorTargetingNeedsTheQuirkOnAWholeUnitOfFourElements() {
+        // Negative Design Quirks Table, IO:BF p. 229: Poor Targeting (Long) "Unit receives a +1 to-hit modifier at this
+        // range"; a Unit quirk is "available only when at least a Unit (4 or more Elements) has the same ability".
+        var unit = attacker.getUnits().getFirst();
+        List<AlphaStrikeElement> elements = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            var element = new AlphaStrikeElement();
+            element.setType(ASUnitType.BM);
+            element.getQuirks().getOption(OptionsConstants.QUIRK_NEG_POOR_TARG_L).setValue(true);
+            elements.add(element);
+        }
+        unit.setElements(elements);
+        assertEquals(List.of(), modifiers("poor targeting"));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertEquals(List.of(1), modifiers("poor targeting"));
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertEquals(List.of(), modifiers("poor targeting"));
+        target.setPosition(BoardLocation.of(new Coords(2, 1), 0));
+        unit.setType(SBFElementType.CI);
+        assertEquals(List.of(), modifiers("poor targeting"));
+    }
+
+    @Test
     void attackTwoHexesAwayIsAtExtremeRange() {
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
 
