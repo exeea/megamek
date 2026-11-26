@@ -129,11 +129,8 @@ record BoardTunnel(Coords road, int direction, Vector3 origin, Vector3 along, Bo
                   .filter(route -> RailRoute.kind(route) == RailRoute.Kind.RAIL && RailRoute.onDeck(route))
                   .mapToInt(route -> route.connections()).reduce(0, (a, b) -> a | b) : tile.railExits();
             float half = (rails & 1 << d) != 0 ? BoardRoad.CORRIDOR_HALF : kind.halfWidth;
-            // Long wings hold the field's scree, which only natural ground sheds; they would stand on a road or rail
-            // leaving at a side beside the tunnel's. Today's ground keeps the short ones.
-            int beside = 1 << (d + 1) % 6 | 1 << (d + 5) % 6;
-            Wings wings = bridge ? null : TerrainField.ON && FieldBoard.dryNatural(next)
-                  && ((tile.roadExits() | tile.railExits()) & beside) == 0 ? Wings.LONG : Wings.SHORT;
+            // The short wings on today's ground and the field's alike: the field holds its scree at their tops.
+            Wings wings = bridge ? null : Wings.SHORT;
             result.add(new BoardTunnel(tile.coords(), d, origin, along, kind, bridge, half / ASSET_ROAD_HALF, wings));
         }
     }
@@ -278,12 +275,14 @@ record BoardTunnel(Coords road, int direction, Vector3 origin, Vector3 along, Bo
     /**
      * A ground portal's frame (#local) as plain numbers: origin x, y, z, along x, y, the width's scale, the hex scale,
      * {@code top} (the entered hex's top, the scree's cap), its wings' root, end, length, high and low, its road hex
-     * (FieldBoard#packed), whose own ground its approach is (FieldStamps#approach), and its flat face's half span and
-     * reach (#relief).
+     * (FieldBoard#packed), whose own ground its approach is (FieldStamps#approach), and the half span and reach of the
+     * field's flat face (#relief): the shell's width alone, so the field's rock keeps its relief up to the head
+     * (today's relief keeps #span).
      */
     private float[] frame(float top) {
         return new float[] { origin.x, origin.y, origin.z, along.x, along.y, widthScale, BoardGeometry.hexScale(), top,
-              wings.root, wings.end, wings.length, wings.high, wings.low, FieldBoard.packed(road), span(), reach() };
+              wings.root, wings.end, wings.length, wings.high, wings.low, FieldBoard.packed(road), SHELL_HALF + .6f,
+              reach() };
     }
 
     /** Planes of the frame (#local) in world space: per plane six floats, its normal and a point on it. */
