@@ -136,10 +136,10 @@ final class GpuTargetingFixture implements AutoCloseable {
             board.game.setTurnIndex(0, board.player.getId());
             created.unitSelected(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, attacker.getId()));
             unitDisplay.selectWeapon(longTom);
-            view.addOverlay(new OffBoardTargetOverlay(gui));
+            when(gui.getOffBoardTargets()).thenReturn(new OffBoardTargetOverlay(gui));
             return created;
         });
-        overlay = view.getOverlay(OffBoardTargetOverlay.class);
+        overlay = gui.getOffBoardTargets();
         source = onSwing(() -> new GpuBoardSource(view, () -> display));
     }
 

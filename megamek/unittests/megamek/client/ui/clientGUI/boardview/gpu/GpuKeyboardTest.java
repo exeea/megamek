@@ -30,12 +30,9 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.KeyBindParser;
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
 import org.junit.jupiter.api.AfterEach;
@@ -51,8 +48,6 @@ class GpuKeyboardTest {
     private Client client;
     private CommonMenuBar menu;
     private TestController controller;
-    private KeyBindingsOverlay keys;
-    private PlanetaryConditionsOverlay conditions;
     private boolean originalKeys;
     private boolean originalConditions;
 
@@ -92,10 +87,6 @@ class GpuKeyboardTest {
                 }
                 view = new BoardClientState(fixture.game, controller, gui, 0, null);
                 view.setLocalPlayer(fixture.player);
-                keys = new KeyBindingsOverlay(view);
-                conditions = new PlanetaryConditionsOverlay(view);
-                view.addOverlay(keys);
-                view.addOverlay(conditions);
                 when(gui.getCurrentBoardState()).thenReturn(java.util.Optional.of(view));
                 when(gui.getBoardState()).thenReturn(view);
                 source = new GpuBoardSource(view, () -> fixture.panel);
@@ -118,14 +109,6 @@ class GpuKeyboardTest {
             if (gui != null && gui.getFrame() != null) { gui.getFrame().dispose(); }
             if (menu != null) {
                 menu.die();
-            }
-            if (keys != null) {
-                preferences.removePreferenceChangeListener(keys);
-                KeyBindParser.removePreferenceChangeListener(keys);
-            }
-            if (conditions != null) {
-                preferences.removePreferenceChangeListener(conditions);
-                KeyBindParser.removePreferenceChangeListener(conditions);
             }
             preferences.setValue(GUIPreferences.SHOW_KEYBINDS_OVERLAY, originalKeys);
             preferences.setValue(GUIPreferences.SHOW_PLANETARY_CONDITIONS_OVERLAY, originalConditions);

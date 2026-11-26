@@ -20,7 +20,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.VerticalGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -28,7 +27,7 @@ import megamek.client.ui.gdx.UiTheme;
 
 /**
  * Toast stack above the dock (C.1 G15, r1 3.23, plan A.15 O5): the client's toasts (GpuToasts) in MegaMek's stack of
- * {@link BoardToastOverlay#MAX_VISIBLE} with its five levels, each in the prototype's toast with a left bar in its
+ * {@link GpuToasts#MAX_VISIBLE} with its five levels, each in the prototype's toast with a left bar in its
  * level's color. The newest sits at the bottom, older ones above it, as the Swing stack orders them; each fades in,
  * stays for its level's duration and fades out, and a toast the full stack drops for a newer one leaves at once.
  * Presses pass through to the board, as in the prototype.

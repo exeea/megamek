@@ -17,7 +17,6 @@ import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.event.InputEvent;
-import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -47,19 +46,13 @@ import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
-import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
-import megamek.client.ui.util.UIUtil;
 import megamek.common.ArtilleryModifier;
 import megamek.common.Configuration;
 import megamek.common.ECMInfo;
@@ -159,7 +152,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     final List<BoardViewListener> listeners = new ArrayList<>();
     /** EDT: the hex pick that takes this board's clicks, or null. */
     private BoardHexPick hexPick;
-    final LinkedHashSet<IDisplayable> overlays = new LinkedHashSet<>();
     private final List<TacticalMark> published = new ArrayList<>();
     private List<TacticalMark.Step> pathSteps = List.of();
     private List<TacticalMark.FlightPath> flightPath = List.of();
@@ -184,8 +176,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private BoardElectronicWarfare electronicWarfare = BoardElectronicWarfare.EMPTY;
     private Shape[] facingPolys, movementPolys, finalFacingPolys;
     private Shape upArrow, downArrow;
-    Rectangle displayablesRect = new Rectangle();
-
     private Coords selected;
     private Coords deploymentPreview;
     private MovePath plannedMovement;
@@ -216,10 +206,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
         showAllDeployment = GUIP.getBoolean(GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO);
         if (controller != null) {
-            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT,
-                  this::shouldReceiveKeyCommands, () -> openChat(false)));
-            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD,
-                  this::shouldReceiveKeyCommands, () -> openChat(true)));
             keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED,
                   this::shouldReceiveKeyCommands, this::centerOnSelected));
         }
@@ -346,8 +332,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);
         keyRegistrations.forEach(Runnable::run);
         keyRegistrations.clear();
-        overlays.forEach(IDisplayable::dispose);
-        overlays.clear();
         hexDrawPlugins.clear();
         if (hexPick != null) { hexPick.cancel(); }
         listeners.clear();
@@ -429,8 +413,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
     /** EDT: the running hex pick, or null. */
     public @Nullable BoardHexPick getHexPick() { return hexPick; }
-    public void addOverlay(IDisplayable overlay) { overlays.add(overlay); }
-    public void removeOverlay(IDisplayable overlay) { overlays.remove(overlay); }
     private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();
     public void addHexDrawPlugin(HexDrawPlugin plugin) { hexDrawPlugins.add(plugin); repaint(); }
     public void drawHexPlugins(Graphics2D graphics, Coords coords) {
@@ -1395,101 +1377,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return movementPolyTmp;
     }
 
-    public BufferedImage captureOverlayImage(Dimension size, Dimension pixels) {
-        BufferedImage image = new BufferedImage(Math.max(1, pixels.width), Math.max(1, pixels.height),
-              BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = overlayGraphics(image, size, pixels);
-        try {
-            for (IDisplayable overlay : overlays) {
-                overlay.draw(graphics, new Rectangle(size));
-            }
-        } finally {
-            graphics.dispose();
-        }
-        return image;
-    }
-
-    public boolean overlayInput(int event, Point point, Dimension size, Dimension pixels) {
-        // Drawing establishes widget bounds for this viewport before hit testing.
-        if (event != MouseEvent.MOUSE_MOVED) {
-            captureOverlayImage(size, pixels);
-        }
-        for (IDisplayable overlay : overlays) {
-            boolean handled = switch (event) {
-                case MouseEvent.MOUSE_PRESSED -> overlay.isHit(point, size);
-                case MouseEvent.MOUSE_RELEASED -> overlay.isReleased();
-                case MouseEvent.MOUSE_DRAGGED -> overlay.isDragged(point, size);
-                default -> overlay.isMouseOver(point, size);
-            };
-            if (handled) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public int sidePanelInset() {
-        return unitStripInset(false);
-    }
-
-    public int leftPanelInset() {
-        return unitStripInset(true);
-    }
-
-    public int unitStripInset(boolean left) {
-        return overlays.stream().filter(UnitOverviewOverlay.class::isInstance)
-              .map(UnitOverviewOverlay.class::cast).filter(strip -> strip.isOnLeft() == left)
-              .mapToInt(UnitOverviewOverlay::sidePanelInset).max().orElse(0);
-    }
-
-    public List<OverlayImage> captureOverlayLayers(Dimension size, Dimension pixels) {
-        List<OverlayImage> layers = new ArrayList<>();
-        Rectangle bounds = new Rectangle(size);
-        Graphics2D metrics = overlayGraphics(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), size, pixels);
-        BufferedImage pending = null;
-        Graphics2D painter = null;
-        try {
-            for (IDisplayable overlay : overlays) {
-                List<OverlayImage> captured = overlay.captureLayers(metrics, bounds);
-                if (captured != null) {
-                    if (pending != null) {
-                        painter.dispose();
-                        painter = null;
-                        layers.add(new OverlayImage(pending, 0, 0, OverlayImage.Fade.OPAQUE));
-                        pending = null;
-                    }
-                    layers.addAll(captured);
-                } else {
-                    // Consecutive widgets can share a raster, but must retain their order around faded panels.
-                    if (pending == null) {
-                        pending = new BufferedImage(Math.max(1, pixels.width), Math.max(1, pixels.height),
-                              BufferedImage.TYPE_INT_ARGB);
-                        painter = overlayGraphics(pending, size, pixels);
-                    }
-                    overlay.draw(painter, bounds);
-                }
-            }
-            if (pending != null) {
-                layers.add(new OverlayImage(pending, 0, 0, OverlayImage.Fade.OPAQUE));
-            }
-        } finally {
-            metrics.dispose();
-            if (painter != null) {
-                painter.dispose();
-            }
-        }
-        return List.copyOf(layers);
-    }
-
-    public static Graphics2D overlayGraphics(BufferedImage image, Dimension size, Dimension pixels) {
-        Graphics2D graphics = image.createGraphics();
-        // Layout and hit coordinates stay logical; artwork is rasterized at the display's native density.
-        graphics.scale(Math.max(1, pixels.width) / (double) Math.max(1, size.width),
-              Math.max(1, pixels.height) / (double) Math.max(1, size.height));
-        UIUtil.setHighQualityRendering(graphics);
-        return graphics;
-    }
-
     public void setLastCursor(Coords lastCursor) {
         this.lastCursor = lastCursor;
     }
@@ -1676,16 +1563,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
     public void setShouldIgnoreKeys(boolean shouldIgnoreKeys) {
         this.shouldIgnoreKeys = shouldIgnoreKeys;
-    }
-
-    /** Finds a presentation overlay owned by this board, without keeping a second registry in the GUI. */
-    public <T extends IDisplayable> @Nullable T getOverlay(Class<T> type) {
-        return overlays.stream().filter(type::isInstance).map(type::cast).findFirst().orElse(null);
-    }
-
-    @Nullable
-    public TurnDetailsOverlay getTurnDetailsOverlay() {
-        return getOverlay(TurnDetailsOverlay.class);
     }
 
     /**
@@ -2053,7 +1930,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     public void setShowAllDeployment(boolean show) { showAllDeployment = show; repaint(); }
-    public Rectangle getDisplayablesRect() { return displayablesRect; }
     public void centerOnHex(Coords coords) { centerOn(coords, Entity.NONE); }
     public void centerOn(Entity entity) { if (entity != null) { centerOn(entity.getPosition(), entity.getId()); } }
     public void centerOnSelected() {
@@ -2120,18 +1996,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return Collections.list(game.getWreckedEntities()).stream().filter(entity ->
               isOnThisBord(entity) && entity.getPosition() != null && getBoard().contains(entity.getPosition())
                     && (!(entity instanceof Infantry) || entity instanceof CombatVehicleEscapePod)).toList();
-    }
-
-    public void chatKey(java.awt.event.KeyEvent event) {
-        for (IDisplayable overlay : overlays) {
-            if (overlay instanceof ChatterBoxOverlay chat) { chat.keyPressed(event); }
-        }
-    }
-
-    public void advanceOverlays(long elapsedMillis) {
-        for (IDisplayable overlay : overlays) {
-            if (overlay.isSliding()) { overlay.slide(); } else { overlay.setIdleTime(elapsedMillis, true); }
-        }
     }
 
     public void reloadAssets() throws IOException { tileManager.reloadAssets(); repaint(); }
@@ -2230,16 +2094,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return !closed && !chatterBoxActive && !shouldIgnoreKeys && !game.getPhase().isLounge()
               && inputEnabled.get() && (clientgui == null || !clientgui.shouldIgnoreHotKeys());
     }
-    private void openChat(boolean command) {
-        setChatterBoxActive(true);
-        for (IDisplayable overlay : overlays) {
-            if (overlay instanceof ChatterBoxOverlay chat) {
-                chat.slideUp();
-                if (command) { chat.setMessage("/"); }
-            }
-        }
-    }
-
     private void onClientThread(Runnable action) {
         Runnable guarded = () -> { if (!closed) { action.run(); } };
         if (SwingUtilities.isEventDispatchThread()) { guarded.run(); } else { SwingUtilities.invokeLater(guarded); }

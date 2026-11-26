@@ -20,7 +20,6 @@ import javax.swing.Timer;
 import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -285,10 +284,6 @@ class GpuGameplayStateTest {
             try (var session = Session.create();
                   var replacement = new BoardClientState(session.game(), null, session.state().getClientgui(), 0,
                         session.state().getTilesetManager())) {
-                var oldOverlay = mock(IDisplayable.class);
-                var newOverlay = mock(IDisplayable.class);
-                session.state().addOverlay(oldOverlay);
-                replacement.addOverlay(newOverlay);
                 long generation = session.source().takeFrame().boardGeneration();
                 when(session.state().getClientgui().getCurrentBoardState()).thenReturn(Optional.of(replacement));
                 session.source().refresh();
@@ -296,8 +291,6 @@ class GpuGameplayStateTest {
                 for (var tick : timer.getActionListeners()) {
                     tick.actionPerformed(null);
                 }
-                verify(newOverlay).setIdleTime(100, true);
-                verify(oldOverlay, never()).setIdleTime(anyLong(), anyBoolean());
                 assertTrue(session.source().takeFrame().boardGeneration() > generation,
                       "State replacement must reject old input even when the Board object is unchanged");
             }

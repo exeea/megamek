@@ -32,28 +32,15 @@
  */
 package megamek.client.ui.clientGUI.boardview.overlay;
 
-import java.awt.Dimension;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.Image;
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.awt.geom.Point2D;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
-import megamek.client.ui.util.UIUtil;
-import megamek.common.Configuration;
 import megamek.common.HexTarget;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
@@ -65,25 +52,14 @@ import megamek.common.equipment.Mounted;
 import megamek.common.game.Game;
 import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
-import megamek.common.util.ImageUtil;
-import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.common.weapons.bayWeapons.BayWeapon;
 
 /**
- * This class handles the display and logic for the off board targeting overlay.
+ * The rules of off-board artillery targets: which board edges offer an attack of the selected artillery weapon on an
+ * observed enemy beyond them, and that attack. The 3D board's dock offers the edges as commands.
  */
-public class OffBoardTargetOverlay implements IDisplayable {
-    private static final int EDGE_OFFSET = 5;
-    private static final int WIDE_EDGE_SIZE = 60;
-    private static final int NARROW_EDGE_SIZE = 40;
-    private static final String FILENAME_OFFBOARD_TARGET_IMAGE = "OffBoardTarget.png";
-
-    private boolean isHit = false;
+public class OffBoardTargetOverlay {
     private final ClientGUI clientGUI;
-    private final Map<OffBoardDirection, Rectangle> buttons = new HashMap<>();
-    private final Image offBoardTargetImage;
-    private BufferedImage buttonImage;
-
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
     private Game game() {
@@ -96,13 +72,6 @@ public class OffBoardTargetOverlay implements IDisplayable {
 
     public OffBoardTargetOverlay(ClientGUI clientGUI) {
         this.clientGUI = clientGUI;
-
-        offBoardTargetImage = ImageUtil.loadImageFromFile(
-              new MegaMekFile(Configuration.miscImagesDir(), FILENAME_OFFBOARD_TARGET_IMAGE).toString());
-
-        // Maybe TODO: display dimmed version of off-board icon during movement phase OR
-        // targeting phase when weapon is ineligible to fire
-        // Maybe TODO: maybe tooltips?
     }
 
     /**
@@ -208,8 +177,7 @@ public class OffBoardTargetOverlay implements IDisplayable {
 
     /**
      * The board edges whose arrows show now: in the local player's targeting turn, for the selected artillery weapon,
-     * each edge with an observed enemy unit beyond it that the weapon can fire at. A view that draws no overlays
-     * offers the same edges.
+     * each edge with an observed enemy unit beyond it that the weapon can fire at.
      */
     public List<OffBoardDirection> shownDirections() {
         return shouldBeVisible() ? directions(clientGUI.getBoardState().getSelectedArtilleryWeapon()) : List.of();
@@ -232,143 +200,9 @@ public class OffBoardTargetOverlay implements IDisplayable {
               .toList();
     }
 
-    @Override
-    public boolean isHit(Point point, Dimension size) {
-        if (!shouldBeVisible()) {
-            return false;
-        }
-
-        point.x = (int) (point.getX() + clientGUI.getBoardState().getDisplayablesRect().getX());
-        point.y = (int) (point.getY() + clientGUI.getBoardState().getDisplayablesRect().getY());
-
-        for (OffBoardDirection direction : OffBoardDirection.values()) {
-            if (direction != OffBoardDirection.NONE) {
-                if (buttons.containsKey(direction) &&
-                      buttons.get(direction).contains(point)) {
-                    isHit = true;
-                    handleButtonClick(direction);
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    @Override
-    public boolean isReleased() {
-        if (!shouldBeVisible()) {
-            return false;
-        }
-
-        if (isHit) {
-            isHit = false;
-            return true;
-        }
-        return false;
-    }
-
-    @Override
-    public void draw(Graphics graph, Rectangle rect) {
-        for (OverlayImage layer : captureLayers((Graphics2D) graph, rect)) {
-            layer.draw((Graphics2D) graph, System.nanoTime());
-        }
-    }
-
-    @Override
-    public List<OverlayImage> captureLayers(Graphics2D graph, Rectangle rect) {
-        buttons.clear();
-        if (!shouldBeVisible()) {
-            return List.of();
-        }
-        var transform = graph.getTransform();
-        int width = Math.max(1, (int) Math.ceil(WIDE_EDGE_SIZE
-              * Math.hypot(transform.getScaleX(), transform.getShearY())));
-        int height = Math.max(1, (int) Math.ceil(NARROW_EDGE_SIZE
-              * Math.hypot(transform.getScaleY(), transform.getShearX())));
-        if (buttonImage == null || buttonImage.getWidth() != width || buttonImage.getHeight() != height) {
-            buttonImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D painter = buttonImage.createGraphics();
-            try {
-                UIUtil.setHighQualityRendering(painter);
-                painter.drawImage(offBoardTargetImage, 0, 0, width, height, null);
-            } finally {
-                painter.dispose();
-            }
-        }
-        Mounted<?> weapon = clientGUI.getBoardState().getSelectedArtilleryWeapon();
-        List<OverlayImage> result = new ArrayList<>();
-        for (OffBoardDirection direction : directions(weapon)) {
-            Rectangle button = generateRectangle(direction, rect);
-            buttons.put(direction, button);
-            Point2D location = transform.transform(button.getLocation(), null);
-            result.add(new OverlayImage(buttonImage, (int) Math.round(location.getX()),
-                  (int) Math.round(location.getY()), OverlayImage.Fade.OPAQUE));
-        }
-        return List.copyOf(result);
-    }
-
     /**
-     * Worker function that generates a rectangle that can be drawn on screen or evaluated for hit detection.
-     */
-    private Rectangle generateRectangle(OffBoardDirection direction, Rectangle boundingRectangle) {
-        int xPosition;
-        int yPosition;
-
-        switch (direction) {
-            // north rectangle is wider than narrower, and at the top of the board view
-            case NORTH:
-                xPosition = boundingRectangle.x + (boundingRectangle.width / 2) - (WIDE_EDGE_SIZE / 2);
-                yPosition = boundingRectangle.y + EDGE_OFFSET;
-                return new Rectangle(xPosition, yPosition, WIDE_EDGE_SIZE, NARROW_EDGE_SIZE);
-            // west rectangle is narrower than wider, and at the left of the board view
-            case WEST:
-                xPosition = boundingRectangle.x + EDGE_OFFSET;
-                yPosition = boundingRectangle.y + (boundingRectangle.height / 2) - (WIDE_EDGE_SIZE / 2);
-                return new Rectangle(xPosition, yPosition, WIDE_EDGE_SIZE, NARROW_EDGE_SIZE); // used to be
-            // NARROW_EDGE_SIZE,
-            // WIDE_EDGE_SIZE);
-            // south rectangle is wider than narrower, and at the bottom of the board view
-            case SOUTH:
-                xPosition = boundingRectangle.x + (boundingRectangle.width / 2) - (WIDE_EDGE_SIZE / 2);
-                yPosition = boundingRectangle.y + boundingRectangle.height - EDGE_OFFSET - NARROW_EDGE_SIZE;
-                return new Rectangle(xPosition, yPosition, WIDE_EDGE_SIZE, NARROW_EDGE_SIZE);
-            // east rectangle is narrower than wider, and at the right of the board view,
-            // but to the left of the unit overview panel
-            case EAST:
-                int extraXOffset = GUIP.getShowUnitOverview() ? UnitOverviewOverlay.getUIWidth() : 0;
-                xPosition = boundingRectangle.x + boundingRectangle.width - WIDE_EDGE_SIZE - EDGE_OFFSET - extraXOffset;
-                yPosition = boundingRectangle.y + (boundingRectangle.height / 2) - (NARROW_EDGE_SIZE / 2);
-                return getRectangle(xPosition, yPosition);
-            default:
-                return null;
-        }
-    }
-
-    private Rectangle getRectangle(int xPosition, int yPosition) {
-        Rectangle myRectangle = new Rectangle(xPosition,
-              yPosition,
-              WIDE_EDGE_SIZE,
-              NARROW_EDGE_SIZE);  // used to be
-        // NARROW_EDGE_SIZE,
-        // WIDE_EDGE_SIZE);
-
-        // Account for possible floating Unit Display blocking arrow icon
-        if (GUIP.getUnitDisplayEnabled() && GUIP.getUnitDisplayLocation() == 0) {
-            // Move arrow inward if either side overlaps with the Unit Display
-            Rectangle udRectangle = clientGUI.getUnitDisplayDialog().getBounds();
-            if ((myRectangle.x + myRectangle.width + 5 > udRectangle.x
-                  && myRectangle.x <= udRectangle.x + udRectangle.width) ||
-                  (myRectangle.x <= udRectangle.x + udRectangle.width && myRectangle.x + 5 >= udRectangle.x)) {
-                myRectangle.translate(-GUIP.getUnitDisplaySizeWidth(), 0);
-            }
-        }
-        return myRectangle;
-    }
-
-    /**
-     * Worker function that handles a click on a 'counterbattery fire' overlay button. Possibly shows a target selection
-     * popup Generates an artillery attack action that is fed back to the targeting display.
+     * Runs the attack beyond {@code direction}: shows a target choice when several units are there, then feeds an
+     * artillery attack action back to the targeting display.
      */
     private void handleButtonClick(OffBoardDirection direction) {
         if (!(clientGUI.getCurrentPanel() instanceof TargetingPhaseDisplay targetingPhaseDisplay)) {

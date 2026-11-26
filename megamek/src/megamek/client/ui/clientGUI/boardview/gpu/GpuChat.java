@@ -9,7 +9,7 @@ import javax.swing.SwingUtilities;
 import jakarta.annotation.Nullable;
 import megamek.client.SBFClient;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
@@ -114,8 +114,8 @@ final class GpuChat implements AutoCloseable {
     }
 
     /**
-     * GL-safe: sends a line through the board chat's one send path, which also keeps it in the chat history. A chat
-     * line is not board input, so unlike the other commands it is sent while a modal dialog is shown, not dropped.
+     * GL-safe: sends a line to the game's chat and keeps it in the chat history. A chat line is not board input, so
+     * unlike the other commands it is sent while a modal dialog is shown, not dropped.
      */
     void send(String text) {
         SwingUtilities.invokeLater(() -> {
@@ -126,9 +126,10 @@ final class GpuChat implements AutoCloseable {
                 sbfClient.sendChat(text);
                 return;
             }
-            ChatterBoxOverlay chat = source.currentView().getOverlay(ChatterBoxOverlay.class);
-            if (chat != null) {
-                chat.send(text);
+            ClientGUI gui = source.currentView().getClientgui();
+            if (gui != null && gui.getChatterBox() != null) {
+                gui.getChatterBox().remember(text);
+                gui.getClient().sendChat(text);
             }
         });
     }

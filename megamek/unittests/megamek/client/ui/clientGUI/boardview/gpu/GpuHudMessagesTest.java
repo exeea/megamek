@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -32,7 +34,6 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
@@ -104,19 +105,19 @@ class GpuHudMessagesTest {
         Client client = mock(Client.class);
         ChatterBox chatterBox = mock(ChatterBox.class);
         chatterBox.history = new LinkedList<>(List.of("earlier"));
+        doCallRealMethod().when(chatterBox).remember(anyString());
         ClientGUI gui = mock(ClientGUI.class);
         when(gui.getClient()).thenReturn(client);
-        when(gui.getMainPanel()).thenReturn(new JPanel());
+        when(gui.getChatterBox()).thenReturn(chatterBox);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             when(client.getGame()).thenReturn(fixture.game);
-            ChatterBoxOverlay overlay = GpuTestSupport.onSwing(() -> {
-                ChatterBoxOverlay board = new ChatterBoxOverlay(gui, fixture.view, null, chatterBox);
-                fixture.view.addOverlay(board);
-                return board;
-            });
+            // The game's board state: its client GUI holds the chat (the fixture's state has none)
+            BoardClientState view = GpuTestSupport.onSwing(() -> new BoardClientState(fixture.game, null, gui, 0,
+                  null));
+            GpuBoardSource source = GpuTestSupport.onSwing(() -> new GpuBoardSource(view, JPanel::new));
             try {
-                fixture.source.chat().send("Moving Alpha to the ridge");
-                fixture.source.chat().send("   ");
+                source.chat().send("Moving Alpha to the ridge");
+                source.chat().send("   ");
                 SwingUtilities.invokeAndWait(() -> { });
 
                 verify(client).sendChat("Moving Alpha to the ridge");
@@ -124,22 +125,21 @@ class GpuHudMessagesTest {
                 assertEquals(List.of("Moving Alpha to the ridge", "earlier"), chatterBox.history);
 
                 // A chat line is not board input: it is sent while a native ask holds the board input back.
-                FutureTask<DialogAnswer> ask = new FutureTask<>(() -> fixture.source.ask(new DialogRequest(0,
+                FutureTask<DialogAnswer> ask = new FutureTask<>(() -> source.ask(new DialogRequest(0,
                       DialogKind.MESSAGE, "Confirm", "Continue?", false, List.of("Yes", "No"), 0, 1, List.of(),
                       List.of(), "", false, "", null, null, List.of())));
                 SwingUtilities.invokeLater(ask);
-                DialogRequest shown = awaitDialog(fixture.source);
-                assertFalse(GpuTestSupport.onSwing(fixture.source::acceptsInput));
-                fixture.source.chat().send("Holding at the ridge");
+                DialogRequest shown = awaitDialog(source);
+                assertFalse(GpuTestSupport.onSwing(source::acceptsInput));
+                source.chat().send("Holding at the ridge");
                 SwingUtilities.invokeAndWait(() -> { });
                 verify(client).sendChat("Holding at the ridge");
-                fixture.source.answer(shown.id(), DialogAnswer.cancelled(shown));
+                source.answer(shown.id(), DialogAnswer.cancelled(shown));
                 ask.get(30, TimeUnit.SECONDS);
             } finally {
                 SwingUtilities.invokeAndWait(() -> {
-                    fixture.view.removeOverlay(overlay);
-                    overlay.dispose();
-                    GUIPreferences.getInstance().removePreferenceChangeListener(overlay);
+                    source.close();
+                    view.close();
                 });
             }
         }

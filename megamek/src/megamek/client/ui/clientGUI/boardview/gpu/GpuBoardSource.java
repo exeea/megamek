@@ -552,10 +552,7 @@ final class GpuBoardSource implements BoardSource {
         view.game.addGameListener(gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
         preferences.addPreferenceChangeListener(preferenceListener);
-        timer = new Timer(100, event -> {
-            this.view.advanceOverlays(100);
-            refresh();
-        });
+        timer = new Timer(100, event -> refresh());
         timer.setCoalesce(true);
         try {
             refresh();

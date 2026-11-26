@@ -41,10 +41,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 
 /**
- * Formats server-side report HTML for display in the {@link BoardToastOverlay}. Owns the regex/i18n filters and the
+ * Formats server-side report HTML for display in the board's toasts. Owns the regex/i18n filters and the
  * report-splitting logic used to turn a single {@code gameReport} burst into an ordered list of per-event toast
  * bodies.
  *

@@ -19,12 +19,11 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GameCommandsMenu;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.overlay.AbstractBoardViewOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.OffBoardTargetOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
@@ -37,6 +36,7 @@ import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
 
 /** Read-only descriptions of existing controls. Every execution rechecks current Swing/game state. */
@@ -87,18 +87,17 @@ final class GpuBoardActions {
 
     /**
      * EDT: the phase info for the phase panel's status ({@link #phaseStatus}) and the captured phase commands. The turn
-     * details are the lines the phase display gives its turn-details overlay while it acts
-     * ({@code ActionPhaseDisplay.getTurnDetails}); the conditions are the lines of the planetary-conditions overlay for
-     * the shown board. Both are plain text: the colour codes the overlays add (a dimmed colour for an illegal step
-     * group, the hot or cold colour of an extreme temperature) are not kept.
+     * details are the lines the phase display keeps while it acts ({@code ActionPhaseDisplay.getTurnDetails}); the
+     * conditions are the planetary condition lines of the shown board ({@link #conditionLines}). Both are plain text:
+     * the colour code of a turn detail line (a dimmed colour for an illegal step group) is not kept.
      */
     PhaseInfo phaseInfo(List<BoardScene.Command> commands) {
         var status = phaseStatus(panel.get());
         List<String> turnDetails = panel.get() instanceof ActionPhaseDisplay action ? action.getTurnDetails().stream()
-              .map(line -> AbstractBoardViewOverlay.cleanedLine(line).strip()).toList() : List.of();
-        List<String> conditions = PlanetaryConditionsOverlay.conditionLines(view.game.getPlanetaryConditions(),
+              .map(line -> cleanedLine(line).strip()).toList() : List.of();
+        List<String> conditions = conditionLines(view.game.getPlanetaryConditions(),
               view.getBoard().isSpace()).stream().map(String::strip).toList();
-        List<String> notable = PlanetaryConditionsOverlay.notableConditions(view.game.getPlanetaryConditions(),
+        List<String> notable = notableConditions(view.game.getPlanetaryConditions(),
               view.getBoard().isSpace());
         return new PhaseInfo(status.text(), status.blocking(), present(commands, DONE_ID), skipId(commands),
               present(commands, CLEAR_ID), turnDetails, conditions, notable);
@@ -226,7 +225,8 @@ final class GpuBoardActions {
      * while the turn it was captured in lasts; the overlay keeps every rule.
      */
     private List<BoardScene.Command> offBoardTargets(Turn owner) {
-        OffBoardTargetOverlay overlay = view.getOverlay(OffBoardTargetOverlay.class);
+        ClientGUI gui = view.getClientgui();
+        OffBoardTargetOverlay overlay = gui == null ? null : gui.getOffBoardTargets();
         if (overlay == null) {
             return List.of();
         }
@@ -396,4 +396,187 @@ final class GpuBoardActions {
     private Runnable dispatch(Runnable action) { return menus.dispatch(action); }
 
     static String plainText(String text) { return GpuMenuCommands.plainText(text); }
+
+    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
+    private static final String MSG_TEMPERATURE = Messages.getString("PlanetaryConditionsOverlay.Temperature");
+    private static final String MSG_GRAVITY = Messages.getString("PlanetaryConditionsOverlay.Gravity");
+    private static final String MSG_LIGHT = Messages.getString("PlanetaryConditionsOverlay.Light");
+    private static final String MSG_ATMOSPHERIC_PRESSURE = Messages.getString(
+          "PlanetaryConditionsOverlay.AtmosphericPressure");
+    private static final String MSG_ATMOSPHERIC_TAINT = Messages.getString(
+          "PlanetaryConditionsOverlay.AtmosphericTaint");
+    private static final String MSG_EMI = Messages.getString("PlanetaryConditionsOverlay.EMI");
+    private static final String MSG_WEATHER = Messages.getString("PlanetaryConditionsOverlay.Weather");
+    private static final String MSG_WIND = Messages.getString("PlanetaryConditionsOverlay.Wind");
+    private static final String MSG_DIRECTION = Messages.getString("PlanetaryConditionsOverlay.WindDirection");
+    private static final String MSG_FOG = Messages.getString("PlanetaryConditionsOverlay.Fog");
+    private static final String MSG_BLOWING_SAND = Messages.getString("PlanetaryConditionsOverlay.BlowingSand");
+
+    /**
+     * The planetary condition lines of the phase panel, as plain text, following the planetary conditions display
+     * preferences. There are none in space.
+     *
+     * @param conditions the game's planetary conditions
+     * @param inSpace    true for a space board
+     *
+     * @return a new, modifiable list of the lines
+     */
+    static List<String> conditionLines(PlanetaryConditions conditions, boolean inSpace) {
+        List<String> result = new ArrayList<>();
+        if (!inSpace) {
+            int temp = conditions.getTemperature();
+
+            boolean showDefaultConditions = GUIP.getPlanetaryConditionsShowDefaults();
+
+            Boolean showLabel = GUIP.getPlanetaryConditionsShowLabels();
+            Boolean showValue = GUIP.getPlanetaryConditionsShowValues();
+            Boolean showIndicator = GUIP.getPlanetaryConditionsShowIndicators();
+
+            String tmpStr;
+
+            if (showDefaultConditions || (conditions.isExtremeTemperature())) {
+                tmpStr = (showLabel ? MSG_TEMPERATURE + "  " : "");
+                tmpStr = tmpStr + (showValue ? temp + "\u00B0C  " : ""); // Degree
+                tmpStr = tmpStr + (showIndicator ?
+                      (!showValue ? temp + "\u00B0C   " : "") + conditions.getTemperatureIndicator() : // Degree
+                      "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || (conditions.getGravity() != 1.0)) {
+                float grav = conditions.getGravity();
+                tmpStr = (showLabel ? MSG_GRAVITY + "  " : "");
+                tmpStr = tmpStr + (showValue ? grav + "g   " : "");
+                tmpStr = tmpStr + (showIndicator ?
+                      (!showValue ? grav + "g  " : "") + conditions.getGravityIndicator() :
+                      "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || !conditions.getLight().isDay()) {
+                tmpStr = (showLabel ? MSG_LIGHT + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getLight().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getLight().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || !conditions.getAtmosphere().isStandard()) {
+                tmpStr = (showLabel ? MSG_ATMOSPHERIC_PRESSURE + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getAtmosphere().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getAtmosphere().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || !conditions.getAtmosphericTaint().isBreathable()) {
+                tmpStr = (showLabel ? MSG_ATMOSPHERIC_TAINT + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getAtmosphericTaint().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getAtmosphericTaint().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || conditions.isEMI()) {
+                tmpStr = (showLabel ? MSG_EMI + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getEMI().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getEMI().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || !conditions.getWeather().isClear()) {
+                tmpStr = (showLabel ? MSG_WEATHER + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getWeather().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getWeather().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || !conditions.getWind().isCalm()) {
+                tmpStr = (showLabel ? MSG_WIND + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getWind().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getWind().getIndicator() : "");
+                result.add(tmpStr);
+                tmpStr = (showLabel ? MSG_DIRECTION + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getWindDirection().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getWindDirection().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || conditions.isFog()) {
+                tmpStr = (showLabel ? MSG_FOG + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getFog().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getFog().getIndicator() : "");
+                result.add(tmpStr);
+            }
+
+            if (showDefaultConditions || conditions.isBlowingSand()) {
+                tmpStr = (showLabel ? MSG_BLOWING_SAND + "  " : "");
+                tmpStr = tmpStr + (showValue ? conditions.getBlowingSand().toString() + "  " : "");
+                tmpStr = tmpStr + (showIndicator ? conditions.getBlowingSand().getIndicator() : "");
+                result.add(tmpStr);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * The conditions that differ from the standard ones (daylight, clear, calm, 1g, a breathable standard atmosphere,
+     * no fog, EMI or blowing sand, a temperature without effects), each as one short phrase, regardless of the
+     * display preferences. There are none in space.
+     *
+     * @param conditions the game's planetary conditions
+     * @param inSpace    true for a space board
+     *
+     * @return a new, modifiable list of the phrases
+     */
+    static List<String> notableConditions(PlanetaryConditions conditions, boolean inSpace) {
+        List<String> result = new ArrayList<>();
+        if (inSpace) {
+            return result;
+        }
+        if (!conditions.getLight().isDay()) {
+            result.add(conditions.getLight().toString());
+        }
+        if (!conditions.getWeather().isClear()) {
+            result.add(conditions.getWeather().toString());
+        }
+        if (!conditions.getWind().isCalm()) {
+            result.add(conditions.getWind().toString());
+        }
+        if (conditions.isFog()) {
+            result.add(conditions.getFog().toString());
+        }
+        if (conditions.isExtremeTemperature()) {
+            result.add(conditions.getTemperature() + "\u00B0C");
+        }
+        if (conditions.getGravity() != 1.0) {
+            result.add(conditions.getGravity() + "g");
+        }
+        if (!conditions.getAtmosphere().isStandard()) {
+            result.add(labelled(MSG_ATMOSPHERIC_PRESSURE, conditions.getAtmosphere().toString()));
+        }
+        if (!conditions.getAtmosphericTaint().isBreathable()) {
+            result.add(labelled(MSG_ATMOSPHERIC_TAINT, conditions.getAtmosphericTaint().toString()));
+        }
+        if (conditions.isEMI()) {
+            result.add(labelled(MSG_EMI, conditions.getEMI().toString()));
+        }
+        if (conditions.isBlowingSand()) {
+            result.add(labelled(MSG_BLOWING_SAND, conditions.getBlowingSand().toString()));
+        }
+        return result;
+    }
+
+    private static String labelled(String label, String value) {
+        return label.strip() + " " + value;
+    }
+
+    /**
+     * Returns the line but without the colour code a phase display may put at its start.
+     */
+    private static String cleanedLine(String line) {
+        if (line.startsWith("#") && line.length() > 7) {
+            return line.substring(7);
+        } else {
+            return line;
+        }
+    }
 }

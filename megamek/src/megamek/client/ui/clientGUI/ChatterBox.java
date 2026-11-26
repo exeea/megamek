@@ -255,6 +255,15 @@ public class ChatterBox implements KeyListener {
         }
     }
 
+    /** Keeps {@code line} first in the chat history (the last {@link #MAX_HISTORY} sent lines). */
+    public void remember(String line) {
+        history.addFirst(line);
+        historyBookmark = -1;
+        if (history.size() > MAX_HISTORY) {
+            history.removeLast();
+        }
+    }
+
     /** The chat's last {@code max} non-blank lines, oldest first. */
     public List<String> lines(int max) {
         List<String> lines = new ArrayList<>();
@@ -293,15 +302,9 @@ public class ChatterBox implements KeyListener {
     @Override
     public void keyPressed(KeyEvent ev) {
         if (ev.getKeyCode() == KeyEvent.VK_ENTER) {
-            history.addFirst(inputField.getText());
-            historyBookmark = -1;
-
+            remember(inputField.getText());
             submit(inputField.getText());
             inputField.setText("");
-
-            if (history.size() > MAX_HISTORY) {
-                history.removeLast();
-            }
         } else if (ev.getKeyCode() == KeyEvent.VK_UP) {
             historyBookmark++;
             fetchHistory();

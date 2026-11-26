@@ -23,7 +23,6 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
@@ -82,8 +81,6 @@ class ClientGUIBoardLifecycleTest {
                 game.receiveBoard(2, Board.createEmptyBoard(6, 6));
                 gui.showBoardView(2);
                 assertSame(first.getTilesetManager(), gui.getBoardState(2).getTilesetManager());
-                assertSame(gui.getBoardState(2).getOverlay(BoardToastOverlay.class),
-                      gui.getToastOverlay());
                 assertSame(gui.getBoardState(2), gui.getBoardState());
                 BoardClientState removed = gui.getBoardState(2);
                 Board removedBoard = removed.getBoard();

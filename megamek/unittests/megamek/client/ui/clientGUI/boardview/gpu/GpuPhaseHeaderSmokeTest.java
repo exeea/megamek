@@ -61,7 +61,7 @@ class GpuPhaseHeaderSmokeTest {
     private static final List<String> CONDITIONS = List.of("Temperature:  60\u00B0C", "Gravity:  0.5g",
           "Light:  Full Moon Night", "Fog:  Heavy Fog");
     /**
-     * The phrases of CONDITIONS that differ from the standard ones, as PlanetaryConditionsOverlay#notableConditions
+     * The phrases of CONDITIONS that differ from the standard ones, as GpuBoardActions#notableConditions
      * words them: unusual conditions, which the conditions card shows in every phase.
      */
     private static final List<String> NOTABLE = List.of("Full Moon Night", "Heavy Fog", "60°C", "0.5g");

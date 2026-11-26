@@ -1,7 +1,13 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JButton;
@@ -9,6 +15,8 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
+import megamek.client.Client;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -89,5 +97,39 @@ final class GpuBoardFixture implements AutoCloseable {
             source.close();
             view.close();
         });
+    }
+
+    /** A client GUI of {@code fixture}'s game whose local player acts now. */
+    static ClientGUI gui(GpuBoardFixture fixture) {
+        Client client = mock(Client.class);
+        when(client.getGame()).thenReturn(fixture.game);
+        when(client.getLocalPlayer()).thenReturn(fixture.player);
+        when(client.isMyTurn()).thenReturn(true);
+        ClientGUI gui = mock(ClientGUI.class);
+        when(gui.getClient()).thenReturn(client);
+        when(gui.getMainPanel()).thenReturn(new JPanel());
+        when(gui.getCurrentBoardState()).thenReturn(Optional.of(fixture.view));
+        when(gui.getBoardState()).thenReturn(fixture.view);
+        return gui;
+    }
+
+    /** EDT: {@code count} more Atlases of the fixture's player, ids from 2, in rows of four from 0708. */
+    static List<Entity> addUnits(GpuBoardFixture fixture, int count) throws Exception {
+        FutureTask<List<Entity>> task = new FutureTask<>(() -> {
+            List<Entity> units = new ArrayList<>();
+            for (int index = 0; index < count; index++) {
+                Entity unit = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf"))
+                      .getEntity();
+                unit.setId(index + 2);
+                unit.setOwner(fixture.player);
+                unit.setPosition(new Coords(7 + index % 4, 5 + index / 4));
+                unit.setDeployed(true);
+                fixture.game.addEntity(unit, false);
+                units.add(unit);
+            }
+            return units;
+        });
+        SwingUtilities.invokeAndWait(task);
+        return task.get();
     }
 }

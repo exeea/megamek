@@ -57,7 +57,6 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.overlay.AbstractBoardViewOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.*;
@@ -1838,8 +1837,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
     }
 
     private List<String> computeTurnDetails() {
-        String validTextColor = AbstractBoardViewOverlay.colorToHex(AbstractBoardViewOverlay.getTextColor());
-        String invalidTextColor = AbstractBoardViewOverlay.colorToHex(AbstractBoardViewOverlay.getTextColor(), 0.7f);
+        Color textColor = GUIP.getPlanetaryConditionsColorText();
+        String validTextColor = colorToHex(textColor, 1);
+        String invalidTextColor = colorToHex(textColor, 0.7f);
 
         MoveStepType accumType = null;
         int accumTypeCount = 0;
@@ -10129,5 +10129,11 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
     private static boolean isJumpDeclaration(MoveStepType type) {
         return (type == MoveStepType.START_JUMP) || (type == MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER);
+    }
+
+    /** The colour code a turn detail line starts with: {@code #RRGGBB}, each channel scaled by brightness. */
+    private static String colorToHex(Color color, float brightness) {
+        return String.format("#%02X%02X%02X", (int) (color.getRed() * brightness),
+              (int) (color.getGreen() * brightness), (int) (color.getBlue() * brightness));
     }
 }

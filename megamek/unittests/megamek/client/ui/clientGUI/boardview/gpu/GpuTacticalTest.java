@@ -209,7 +209,7 @@ class GpuTacticalTest {
     @Test
     void playbackKeepsObjectiveBoundariesAndLiveMeasurementsWhileHidingUnitOverlays() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            var second = GpuUnitHudTest.addUnits(fixture, 1).getFirst();
+            var second = GpuBoardFixture.addUnits(fixture, 1).getFirst();
             SwingUtilities.invokeAndWait(() -> {
                 var zone = new TacticalMark.ControlZone(new Coords(2, 4), 63, Color.GREEN);
                 var cursor = new TacticalMark.LosEnd(new Coords(3, 2));
@@ -268,7 +268,7 @@ class GpuTacticalTest {
     @Test
     void removingMarksLeavesPublishedGeometryIntact() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            var second = GpuUnitHudTest.addUnits(fixture, 1).getFirst();
+            var second = GpuBoardFixture.addUnits(fixture, 1).getFirst();
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.refresh();
                 BoardScene before = fixture.source.takeFrame().scene();

@@ -49,9 +49,8 @@ final class GpuForceOverview implements GpuHud.Component {
     private static final float BODY_INSET = 2 * 2 + 2 * 16;
     private static final float SEARCH_WIDTH = 280;
     /**
-     * The heat bar's length in heat points: 30, as the prototype's card (ui.js overviewBody) and MegaMek's own unit
-     * overview (UnitOverviewOverlay.heat) draw it. That overview runs to 50 under TacOps extended heat, an option the
-     * status does not carry, so heat above 30 fills the bar.
+     * The heat bar's length in heat points: 30, as the prototype's card (ui.js overviewBody) draws it. Heat runs to
+     * 50 under TacOps extended heat, an option the status does not carry, so heat above 30 fills the bar.
      */
     private static final int HEAT_SCALE = 30;
     /** A card's fill at rest, under the pointer and selected (.ucard, .ucard:hover, .ucard.sel). */

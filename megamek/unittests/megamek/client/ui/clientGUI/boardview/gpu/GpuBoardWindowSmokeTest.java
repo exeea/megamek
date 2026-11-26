@@ -64,7 +64,6 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
@@ -189,8 +188,7 @@ class GpuBoardWindowSmokeTest {
         }
     }
     /** {@code gpuChoice} is View > Renderer's item for the current graphics. */
-    private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardClientState view, JMenuItem gpuChoice,
-          UnitOverviewOverlay overview) { }
+    private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardClientState view, JMenuItem gpuChoice) { }
 
     private static void clickBoard(Coords coords, int button) {
         clickBoard(coords, button, 0);
@@ -1199,7 +1197,6 @@ class GpuBoardWindowSmokeTest {
             } finally {
                 GpuTestSupport.onSwing(() -> {
                     preferences.setBoardUiScale(originalScale);
-                    preferences.removePreferenceChangeListener(ui.overview());
                     GpuBoardWindow.closeFor(ui.view());
                     ui.frame().dispose();
                     ui.menus().die();
@@ -1271,7 +1268,6 @@ class GpuBoardWindowSmokeTest {
             }
             return null;
         }).when(gui).centerOnHex(any());
-        UnitOverviewOverlay overview = new UnitOverviewOverlay(gui);
         // ClientGUI's board switch; the menu bar has saved the Renderer choice before.
         menus.addActionListener(event -> {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_CLASSIC)
@@ -1292,7 +1288,7 @@ class GpuBoardWindowSmokeTest {
         String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
               ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
         JMenuItem gpuChoice = rendererItem(rendererMenu, graphics);
-        return new ClientWindow(frame, menus, view, gpuChoice, overview);
+        return new ClientWindow(frame, menus, view, gpuChoice);
     }
 
     private static JMenuItem rendererItem(JMenu renderer, String command) {

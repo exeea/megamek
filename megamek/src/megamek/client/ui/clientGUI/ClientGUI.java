@@ -102,14 +102,8 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHost;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.OffBoardTargetOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.*;
 import megamek.client.ui.clientGUI.unitDisplay.IHasUnitDisplay;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
@@ -348,6 +342,8 @@ public class ClientGUI extends AbstractClientGUI
 
     public MegaMekController controller;
     private ChatterBox cb;
+    /** The rules of the off-board artillery targets that the 3D board's dock offers. */
+    private final OffBoardTargetOverlay offBoardTargets = new OffBoardTargetOverlay(this);
     private boolean wasBoardFocused = false;
     private MovementEnvelopeSpriteHandler movementEnvelopeHandler;
     private MovementModifierSpriteHandler movementModifierSpriteHandler;
@@ -562,11 +558,6 @@ public class ClientGUI extends AbstractClientGUI
         });
     }
 
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public BoardToastOverlay getToastOverlay() {
-        return getCurrentBoardState().map(state -> state.getOverlay(BoardToastOverlay.class)).orElse(null);
-    }
-
     /**
      * Shows a toast notification on the board view. Safe to call even when the toast overlay has not been initialized
      * yet (e.g., during the lobby phase).
@@ -601,16 +592,8 @@ public class ClientGUI extends AbstractClientGUI
             return;
         }
         String normalizedText = ReportToastFormatter.normalizeToastText(text);
-        // The native battle window keeps its own stack, so it must not depend on the Swing overlay existing.
-        GpuBoardWindow.toast(this, level, normalizedText, entity);
-        BoardToastOverlay toastOverlay = getToastOverlay();
-        if (toastOverlay == null) {
-            logger.debug("[Toast] not on the Swing board [{}] ({}) - overlay not initialized yet: {}",
-                  level, entityLabel, normalizedText);
-            return;
-        }
         logger.debug("[Toast] shown [{}] ({}): {}", level, entityLabel, normalizedText);
-        toastOverlay.show(level, normalizedText, entity);
+        GpuBoardWindow.toast(this, level, normalizedText, entity);
     }
 
     /**
@@ -1085,6 +1068,11 @@ public class ClientGUI extends AbstractClientGUI
     /** The game's chat, which the native lobby shows and sends through; null before {@link #initialize}. */
     public ChatterBox getChatterBox() {
         return cb;
+    }
+
+    /** The rules of the off-board artillery targets that the 3D board's dock offers. */
+    public OffBoardTargetOverlay getOffBoardTargets() {
+        return offBoardTargets;
     }
 
     @Override
@@ -3796,14 +3784,6 @@ public class ClientGUI extends AbstractClientGUI
                     state.setLocalPlayer(client.getLocalPlayer());
                     state.addBoardViewListener(ClientGUI.this);
                     if (curPanel instanceof BoardViewListener listener) { state.addBoardViewListener(listener); }
-                    state.addOverlay(new ChatterBoxOverlay(ClientGUI.this, state, controller, cb));
-                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
-                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
-                    state.addOverlay(new OffBoardTargetOverlay(ClientGUI.this));
-                    state.addOverlay(new KeyBindingsOverlay(state));
-                    state.addOverlay(new PlanetaryConditionsOverlay(state));
-                    state.addOverlay(new TurnDetailsOverlay(state));
-                    state.addOverlay(new BoardToastOverlay(state, ClientGUI.this));
                     state.redrawAllEntities();
                     state.refreshAttacks();
                 } catch (IOException ex) { throw new IllegalStateException("Could not initialize board presentation", ex); }
