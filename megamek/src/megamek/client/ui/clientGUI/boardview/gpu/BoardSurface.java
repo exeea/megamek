@@ -3155,9 +3155,10 @@ final class BoardSurface {
     private static BoardRoadCut roadCut(BoardScene scene, BoardScene.Tile tile) {
         if (!BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
         var grades = grades(scene, tile, false, true);
-        if (tile.liquid().present()) {
-            // A water hex takes road ground only from the roads that run into it: a carriageway beside it reaching
-            // over its shore (a straightened quay's corner moved under a road) stays the land's, cut at the shore.
+        if (tile.liquid().present() && !cell(scene, tile.coords(), true).equals(cell(scene, tile.coords(), false))) {
+            // A water hex whose outline a straightened quay moved takes road ground only from the roads that run into
+            // it: a carriageway beside it reaching over its shore stays the land's, cut at the quay. A shore keeping
+            // its outline takes that ground as any hex does (at a bridge's mouth, say), so the road meets it flush.
             grades.removeIf(grade -> grade.tile() != tile && !runsInto(grade.tile(), tile));
         }
         if (grades.isEmpty()) { return null; }
