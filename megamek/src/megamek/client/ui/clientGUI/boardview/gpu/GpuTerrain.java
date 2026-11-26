@@ -5017,8 +5017,9 @@ final class GpuTerrain implements Disposable {
             road.clipPaint(patch.shape());
             // An Area caches its bounds when first asked: settled here, before other workers read it.
             patch.shape().getBounds2D();
-            // The paved wear field needs fewer samples (GpuRoads#maskDensity); paint and the coats' edges keep theirs.
-            int density = columns ? 4 : GpuRoads.maskDensity(patch, lod);
+            // The paved wear field needs fewer samples (GpuRoads#maskDensity), in both views; paint and the coats' edges
+            // keep theirs.
+            int density = GpuRoads.maskDensity(patch, lod);
             coats.add(new RoadCoat(patch, density, GpuRoads.maskKey(road, patch, density)));
         }
         return new RoadPaint(road, coats);
