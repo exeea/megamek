@@ -356,9 +356,8 @@ final class BoardNaturalBridge {
         // meets the anchor's rim at its height instead of passing under it; the span stays its own piece, joined along
         // that edge.
         for (int d = 0; d < 6 && !fullHex; d++) {
-            var next = scene.tile(tile.coords().translated(d));
-            if ((exits & (1 << d)) != 0 && next != null && BoardBridge.bank(tile, next, d) && !cliff(next, d)
-                  && next.floor() > level) {
+            if (rampLanding(scene, tile, d)) {
+                var next = scene.tile(tile.coords().translated(d));
                 facets = underAnchor(facets, tile.coords(), d, BoardGeometry.groundZ(next));
             }
         }
@@ -668,6 +667,20 @@ final class BoardNaturalBridge {
     }
 
     /** The bank in {@code direction} marks its side towards the span as a cliff top: a wall there, not a ramp. */
+    /**
+     * Whether the standing natural span in {@code tile} lands toward d on higher ground by a ramp: an exit the bridge
+     * data makes a bank, not marked a cliff top, the anchor's floor above the deck. Its top meets that anchor's rim
+     * (#underAnchor) and the anchor's crest stands straight there (FieldBoard#landing), so the span stays a piece of
+     * its own joined along that hex edge.
+     */
+    static boolean rampLanding(BoardScene scene, BoardScene.Tile tile, int d) {
+        var bridge = BoardBridge.standing(tile);
+        if (bridge == null || !natural(tile) || (bridge.bridgeExits() & (1 << d)) == 0) { return false; }
+        var next = scene.tile(tile.coords().translated(d));
+        return next != null && BoardBridge.bank(tile, next, d) && !cliff(next, d)
+              && next.floor() > tile.elevation() + bridge.elevation();
+    }
+
     private static boolean cliff(BoardScene.Tile bank, int direction) {
         return (bank.cliffTopExits() & (1 << ((direction + 3) % 6))) != 0;
     }

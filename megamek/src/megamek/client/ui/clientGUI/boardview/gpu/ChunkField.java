@@ -688,6 +688,8 @@ final class ChunkField {
             boolean wet;
             /** This hex pours over a fall here: the rows stand smooth behind the crest. */
             boolean fall;
+            /** A natural span lands on this hex across the edge (FieldBoard#landing): its crest stands straight. */
+            final boolean landing;
 
             Wall(int e, boolean outside, boolean wall, float landform, float base, float onx, float ony, int[] samples,
                   float[] tops, float[] feet, int rows) {
@@ -695,6 +697,7 @@ final class ChunkField {
                 this.onx = onx; this.ony = ony; this.samples = samples; this.tops = tops; this.feet = feet;
                 this.rows = rows;
                 this.family = b.family(h);
+                landing = wall && b.landing(h, e);
                 rimRelief = new float[samples.length];
                 rimShare = new float[samples.length];
                 java.util.Arrays.fill(rimShare, 1);
@@ -838,6 +841,9 @@ final class ChunkField {
                     if (fall) {
                         d = -FALL_RECESS * b.metre * BoardRelief.smooth((top - FALL_FACE * b.metre - zr) / (1.5f * b.metre));
                     }
+                    // Where a natural span lands the crest stands straight under the rim: no rock leaning out under
+                    // the span's top, which runs just under this rim (BoardNaturalBridge#underAnchor).
+                    if (landing) { d *= BoardRelief.smooth((top - LANDING_CREST * b.metre - zr) / (1.5f * b.metre)); }
                     out[0] += onx * d * share * rest * ease;
                     out[1] += ony * d * share * rest * ease;
                 }
@@ -848,6 +854,9 @@ final class ChunkField {
         }
 
         private static float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+        /** How far under its rim an anchor's crest stands straight where a natural span lands, metres (Wall#point). */
+        private static final float LANDING_CREST = 2;
 
         /** How far a fall's face stands behind its crest, metres. */
         private static final float FALL_RECESS = .8f;

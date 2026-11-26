@@ -52,6 +52,8 @@ final class FieldBoard {
      * alone with the previous revision, so an edit copies only the columns it reaches.
      */
     private final int[][] level, family, walls;
+    /** Per hex, the sides a standing natural span in it lands across by a ramp (BoardNaturalBridge#rampLanding). */
+    private final int[][] landings;
     /** Per water hex that falls, the stretch of each fall edge that pours (BoardSurface#pourEdges); null for others. */
     private final float[][][][] pours;
     private final boolean[][] taken;
@@ -144,6 +146,7 @@ final class FieldBoard {
             level = new int[cols][rows];
             family = new int[cols][rows];
             walls = new int[cols][rows];
+            landings = new int[cols][rows];
             pours = new float[cols][rows][][];
             taken = new boolean[cols][rows];
             cuts = new float[cols][rows][];
@@ -161,6 +164,7 @@ final class FieldBoard {
             level = previous.level.clone();
             family = previous.family.clone();
             walls = previous.walls.clone();
+            landings = previous.landings.clone();
             pours = previous.pours.clone();
             taken = previous.taken.clone();
             cuts = previous.cuts.clone();
@@ -182,6 +186,7 @@ final class FieldBoard {
                 level[x] = level[x].clone();
                 family[x] = family[x].clone();
                 walls[x] = walls[x].clone();
+                landings[x] = landings[x].clone();
                 pours[x] = pours[x].clone();
                 taken[x] = taken[x].clone();
                 cuts[x] = cuts[x].clone();
@@ -261,6 +266,10 @@ final class FieldBoard {
               .map(tunnel -> tunnel.footprint(false)).toArray(float[][]::new);
         if (openings[x][y].length == 0) { openings[x][y] = null; }
         walls[x][y] = 0;
+        landings[x][y] = 0;
+        for (int dir = 0; dir < 6; dir++) {
+            if (BoardNaturalBridge.rampLanding(scene, t, dir)) { landings[x][y] |= 1 << dir; }
+        }
         // A water hex that falls: the stretch each fall edge pours over, water's rule (#dry).
         pours[x][y] = null;
         for (int e = 0; liquid && pours[x][y] == null && e < 6; e++) {
@@ -810,6 +819,16 @@ final class FieldBoard {
         float keep = 1;
         for (int i = 0; frames != null && i < frames.length; i++) { keep = Math.min(keep, BoardTunnel.relief(frames[i], x, y, z)); }
         return keep;
+    }
+
+    /**
+     * Whether a standing natural span lands on hex h across its edge e by a ramp (BoardNaturalBridge#rampLanding):
+     * its top runs just under h's rim there, so h's crest stands straight (ChunkField.Wall).
+     */
+    boolean landing(Coords h, int e) {
+        int across = BoardGeometry.edgeDirection(e);
+        Coords span = h.translated(across);
+        return inside(span) && (landings[span.getX()][span.getY()] & 1 << (across + 3) % 6) != 0;
     }
 
     /** Whether the hex is a ground portal's road hex (BoardTunnel#frame): the one whose ground its approach lowers. */
