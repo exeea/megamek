@@ -357,6 +357,33 @@ class SBFMovementProcessorTest {
     }
 
     @Test
+    void nonInfantryEnteringAndLeavingTheBuildingsDamageTheUrbanHex() {
+        // Urban Hexes, IO:BF p. 217: "When a non-infantry Formation enters or exits buildings in an urban hex, it does
+        // damage to the hex equal to the number of non-infantry Elements in the Formation."
+        formation.setMovement(6);
+        for (int i = 0; i < 3; i++) {
+            var lance = new SBFUnit();
+            lance.setType(SBFElementType.BM);
+            lance.setMovementMode(SBFMovementMode.MEK_WALK);
+            formation.addUnit(lance);
+        }
+        BoardLocation urban = BoardLocation.of(new Coords(2, 1), 0);
+        game.getHex(urban).addTerrain(new Terrain(Terrains.BUILDING, 1));
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        var route = pathWithSteps(1);
+        route.enterBuildingsAtEnd();
+        assertTrue(processor.processMovement(route, formation));
+        assertEquals(3, game.artillery().terrainDamage(urban));
+
+        formation.setDone(false);
+        var away = new SBFMovePath(formation.getId(), urban, game);
+        away.addStep(SurfaceSBFMoveStep.createSurfaceMoveStep(game, formation.getId(), urban,
+              BoardLocation.of(new Coords(3, 1), 0)));
+        assertTrue(processor.processMovement(away, formation));
+        assertEquals(6, game.artillery().terrainDamage(urban));
+    }
+
+    @Test
     void terrainCoverCostsHalfMoveProtectsFromDamageAndLosesStationaryTmm() {
         var route = pathWithSteps(1);
         route.enterHullDownAtEnd();

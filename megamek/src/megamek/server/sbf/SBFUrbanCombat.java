@@ -34,10 +34,12 @@
 package megamek.server.sbf;
 
 import megamek.common.Hex;
+import megamek.common.board.BoardLocation;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
+import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.common.units.Terrains;
 
 /** Urban Hexes (Buildings), IO:BF pp. 215–218: where a Formation stands in an urban hex. */
@@ -67,6 +69,28 @@ final class SBFUrbanCombat {
      */
     static int roofVisualBonus(Hex hex) {
         return (hex == null) ? 0 : Math.min(2, Math.max(0, hex.terrainLevel(Terrains.BLDG_ELEV)) / 4);
+    }
+
+    /**
+     * p. 217: "When a non-infantry Formation enters or exits buildings in an urban hex, it does damage to the hex equal
+     * to the number of non-infantry Elements in the Formation"; infantry "inflict no damage to urban hexes by moving
+     * through them". The damage counts against the hex's CF in the same terrain-damage record as other terrain.
+     */
+    static void damageByPassage(SBFGame game, SBFFormation formation, BoardLocation site) {
+        int elements = formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA) ? 0 : formation.getUnits().isEmpty() ? 1
+              : formation.getUnits().stream().mapToInt(SBFUrbanCombat::nonInfantryElements).sum();
+        if (elements > 0) {
+            game.artillery().damageTerrain(site, elements);
+        }
+    }
+
+    /** A Unit without Element data counts as one Element (as SBFFormationCommand counts them). */
+    private static int nonInfantryElements(SBFUnit unit) {
+        if (unit.getElements().isEmpty()) {
+            return unit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA) ? 0 : 1;
+        }
+        return (int) unit.getElements().stream()
+              .filter(element -> (element.getASUnitType() == null) || !element.getASUnitType().isInfantry()).count();
     }
 
     /** p. 217 Building Weight Capacity: the largest Size the roofs carry (Light 1, Medium 2, Heavy 3, Hardened 4). */

@@ -125,7 +125,12 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
             formation.setAirVehicleLanded(false);
         }
         int entrance = movePath.passageEntrance();
+        BoardLocation origin = formation.getPosition();
+        boolean leavesBuildings = formation.isInsideBuildings() && !movePath.getSteps().isEmpty();
         formation.setPosition(movePath.getLastPosition());
+        if (leavesBuildings) {
+            SBFUrbanCombat.damageByPassage(game(), formation, origin);
+        }
         formation.setPassageEntrance(entrance);
         int hullCost = 0;
         if (approvedPath.entersHullDown() && (approvedPath.getSteps().size() == movePath.getSteps().size())
@@ -137,6 +142,7 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
               && SBFUrbanCombat.canEnterBuildings(game(), formation, approvedPath)) {
             hullCost += SBFUrbanCombat.entryCost(formation, game().getHex(approvedPath.getLastPosition()));
             formation.setInsideBuildings(true);
+            SBFUrbanCombat.damageByPassage(game(), formation, formation.getPosition());
         }
         if (approvedPath.climbsBuildings() && (approvedPath.getSteps().size() == movePath.getSteps().size())
               && SBFUrbanCombat.canClimbBuildings(game(), formation, approvedPath)) {
