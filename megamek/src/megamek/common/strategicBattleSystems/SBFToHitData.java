@@ -49,6 +49,7 @@ import megamek.common.alphaStrike.ASRange;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.game.InGameObject;
+import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Terrains;
 
@@ -160,6 +161,18 @@ public class SBFToHitData extends TargetRoll {
                 case EXTREME -> toHit.addModifier(3, "extreme range");
                 default -> { }
             }
+        }
+        // Design Quirks Table, IO:BF p. 228: Improved Targeting (Short, Medium, Long) "Unit receives a -1 to-hit
+        // modifier at this range", for all Unit types except infantry and battle armor
+        String improvedTargeting = switch (toHit.range) {
+            case SHORT -> OptionsConstants.QUIRK_POS_IMP_TARG_S;
+            case MEDIUM -> OptionsConstants.QUIRK_POS_IMP_TARG_M;
+            case LONG -> OptionsConstants.QUIRK_POS_IMP_TARG_L;
+            default -> null;
+        };
+        if ((improvedTargeting != null) && !firingUnit.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA)
+              && firingUnit.hasUnitQuirk(improvedTargeting)) {
+            toHit.addModifier(-1, "improved targeting");
         }
         int artillery = (int) declarations.stream().filter(SBFArtilleryAttack.class::isInstance)
               .filter(a -> a.getEntityId() == attackingFormation.getId()).count();

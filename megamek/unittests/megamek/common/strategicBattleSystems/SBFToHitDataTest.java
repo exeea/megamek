@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -54,6 +55,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -107,6 +109,27 @@ class SBFToHitDataTest {
         assertEquals(List.of(), modifiers("long range"));
         target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
         assertEquals(List.of(5), modifiers("brawlers range"));
+    }
+
+    @Test
+    void improvedTargetingNeedsTheQuirkOnAWholeUnitOfFourElements() {
+        // Design Quirks Table, IO:BF p. 228: Improved Targeting (Long) "Unit receives a -1 to-hit modifier at this
+        // range"; a Unit quirk is "available only when at least a Unit (4 or more Elements) has the same ability".
+        var unit = attacker.getUnits().getFirst();
+        List<AlphaStrikeElement> elements = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            var element = new AlphaStrikeElement();
+            element.setType(ASUnitType.BM);
+            element.getQuirks().getOption(OptionsConstants.QUIRK_POS_IMP_TARG_L).setValue(true);
+            elements.add(element);
+        }
+        unit.setElements(elements);
+        assertEquals(List.of(-1), modifiers("improved targeting"));
+        target.setPosition(BoardLocation.of(new Coords(3, 1), 0));
+        assertEquals(List.of(), modifiers("improved targeting"));
+        target.setPosition(BoardLocation.of(new Coords(2, 1), 0));
+        elements.getLast().getQuirks().getOption(OptionsConstants.QUIRK_POS_IMP_TARG_L).setValue(false);
+        assertEquals(List.of(), modifiers("improved targeting"));
     }
 
     @Test

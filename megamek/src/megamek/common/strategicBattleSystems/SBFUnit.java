@@ -356,6 +356,14 @@ public class SBFUnit implements ASSpecialAbilityCollector, BattleForceSUAFormatt
         this.elements = elements;
     }
 
+    /**
+     * Design Quirks, IO:BF p. 226: a quirk of the Unit type is "available only when at least a Unit (4 or more
+     * Elements) has the same ability".
+     */
+    public boolean hasUnitQuirk(String quirk) {
+        return (getElements().size() >= 4) && getElements().stream().allMatch(element -> element.hasQuirk(quirk));
+    }
+
     public List<AlphaStrikeElement> getElements() {
         return new ArrayList<>(elements);
     }
