@@ -1464,6 +1464,12 @@ final class FieldBoard {
 
     /** {@link #height}; {@code ends} false leaves out the cap beside a wall's end (#wallEndCap asks so for the corner's own height). */
     private void height(Coords h, List<Segment> segments, Shares shares, float x, float y, float[] out, boolean ends) {
+        // A point with no place (a coordinate not finite) lies in no hex (#hexAt): it has no height.
+        if (!Float.isFinite(x) || !Float.isFinite(y)) {
+            java.util.Arrays.fill(out, 0);
+            out[0] = Float.NaN;
+            return;
+        }
         int own = level(h), lowest = own, highest = own;
         // A plate is level, and so is natural ground on a plate's fitted outline at its level (FieldPlates).
         if (plate(h) || onPlate(h, x, y)) {

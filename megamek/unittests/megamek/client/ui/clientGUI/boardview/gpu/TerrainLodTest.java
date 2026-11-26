@@ -120,6 +120,21 @@ class TerrainLodTest {
         } finally { BoardRelief.tune(previous); }
     }
 
+    /** The field's height asked outside the board is still a height; asked at a point with no place, none, no throw. */
+    @Test
+    void fieldHeightOutsideTheBoardAndAtNoPlace() {
+        var scene = waterScene(new Coords(7, 3), false);
+        FieldBoard board = FieldBoard.of(scene, BoardRelief.tuning().stepOutline());
+        Coords h = new Coords(0, 0);
+        float[] out = new float[8];
+        var shares = board.new Shares(-1000, -1000, 1000, 1000);
+        float outsideX = BoardGeometry.centerX(h) - BoardGeometry.width(), outsideY = BoardGeometry.centerY(h);
+        board.height(h, board.segments(h), shares, outsideX, outsideY, out);
+        assertTrue(Float.isFinite(out[0]), "a point beside the board's edge keeps a height");
+        board.height(h, board.segments(h), shares, Float.NaN, Float.NaN, out);
+        assertTrue(Float.isNaN(out[0]), "a point with no place has no height");
+    }
+
     /** Height-field water's texels are the field's values at each texel's place (FieldWater), whatever the detail. */
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
