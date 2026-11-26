@@ -451,9 +451,7 @@ final class BoardRoadCut {
             }
             // A face standing upright on the outline the reserved ground shares with the lattice is probed just inside
             // this hex, where the ground it bounds lies: on the outline itself, which side holds it is arbitrary.
-            float upright = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-            float longest = Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
-            float nudge = Math.abs(upright) < 1e-4f * longest ? 4 * epsilon : 0;
+            float nudge = upright(a, b, c) ? 4 * epsilon : 0;
             float mx = (a.x + b.x + c.x) / 3, my = (a.y + b.y + c.y) / 3, md = (float) Math.hypot(cx - mx, cy - my);
             float ox = md > 0 ? (cx - mx) / md * nudge : 0, oy = md > 0 ? (cy - my) / md * nudge : 0;
             // The face's heights against the road's: above its surface, and for a natural top below it too, up to its
@@ -764,7 +762,7 @@ final class BoardRoadCut {
         });
         // Twice the face's area in plan; an upright face has none (see #clip).
         float plan = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        boolean upright = Math.abs(plan) < 1e-4f * Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
+        boolean upright = upright(a, b, c);
         Sweep sweep = sweep(segments, e, classifier, (p, q, r, source) -> {
             if (source != KEPT) { return; }
             // The sweep emits counter-clockwise in (s, t); keep the face's own winding in space.
@@ -826,6 +824,21 @@ final class BoardRoadCut {
             curtain(vertex.apply(new Point(s.ax(), s.ay())), vertex.apply(new Point(s.bx(), s.by())), null, region, wall,
                   concrete, road, left == right, natural);
         }
+    }
+
+    /**
+     * Whether a face stands upright: next to no area in plan against its extent in plan. Not in space: a steep face
+     * stands tall over a narrow plan, but has a side there, and its chords cut faces under them.
+     */
+    private boolean upright(Vector3 a, Vector3 b, Vector3 c) {
+        float plan = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        float extent = Math.max(Math.max(planDst2(a, b), planDst2(b, c)), Math.max(planDst2(c, a), epsilon * epsilon));
+        return Math.abs(plan) <= 1e-4f * extent;
+    }
+
+    /** The squared distance between two points in plan. */
+    private static float planDst2(Vector3 p, Vector3 q) {
+        return (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
     }
 
     /**
