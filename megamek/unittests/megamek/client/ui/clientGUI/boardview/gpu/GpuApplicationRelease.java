@@ -47,7 +47,7 @@ public final class GpuApplicationRelease implements TestExecutionListener {
                 if (held instanceof ObjectMap<?, ?> objects) {
                     objects.keys().forEach(key -> applications.add((Application) key));
                 } else {
-                    applications.addAll(((Map<Application, ?>) held).keySet());
+                    ((Map<?, ?>) held).keySet().forEach(key -> applications.add((Application) key));
                 }
             }
         } catch (IllegalAccessException failure) {
