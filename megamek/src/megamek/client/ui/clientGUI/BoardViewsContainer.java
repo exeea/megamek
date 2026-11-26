@@ -32,11 +32,8 @@
  */
 package megamek.client.ui.clientGUI;
 
-import java.awt.Component;
-import java.awt.GridLayout;
 import java.util.Objects;
 import java.util.Optional;
-import javax.swing.JPanel;
 
 import megamek.common.board.Board;
 import megamek.common.game.IGame;
@@ -46,9 +43,6 @@ import megamek.common.game.IGame;
  * keys. Call {@link #updateMapTabs()} when the client's boards change.
  */
 public class BoardViewsContainer {
-
-    /** The panel the Swing game frame lays out for the board; it holds no board view. */
-    private final JPanel boardViewsContainer = new JPanel(new GridLayout(1, 1));
 
     private final AbstractClientGUI clientGUI;
     private Integer selectedBoardId;
@@ -61,13 +55,6 @@ public class BoardViewsContainer {
      */
     public BoardViewsContainer(AbstractClientGUI clientGUI) {
         this.clientGUI = Objects.requireNonNull(clientGUI);
-    }
-
-    /**
-     * @return The panel the Swing game frame lays out for the board
-     */
-    public Component getPanel() {
-        return boardViewsContainer;
     }
 
     /**
@@ -102,10 +89,6 @@ public class BoardViewsContainer {
     public Optional<Integer> getCurrentBoardId() {
         updateSelection();
         return Optional.ofNullable(selectedBoardId);
-    }
-
-    public void setName(String name) {
-        boardViewsContainer.setName(name);
     }
 
     public void showBoardView(int boardId) {

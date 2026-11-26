@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
-import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.SwingUtilities;
 
@@ -173,7 +172,6 @@ class BoardViewsContainerTest {
             assertEquals(0, container.getCurrentBoardId().orElseThrow());
             gui.boardStates.clear();
             assertTrue(container.getCurrentBoardId().isEmpty());
-            assertEquals(0, ((JPanel) container.getPanel()).getComponentCount());
         });
     }
 

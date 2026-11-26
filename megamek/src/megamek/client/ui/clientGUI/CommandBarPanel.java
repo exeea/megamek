@@ -41,7 +41,6 @@ import jakarta.annotation.Nullable;
 import megamek.client.Client;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.Messages;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.HazardButton;
 import megamek.client.ui.widget.MegaMekButton;
@@ -50,8 +49,7 @@ import megamek.logging.MMLogger;
 
 /**
  * The command strip that sits directly under the menu bar, above the board. It always ends in the Commands button,
- * which opens the game commands menu ({@link GameCommandsMenu}), followed by the Report a Bug button, and it is the
- * strip the bot commands panel docks into when the player has it set to Dock.
+ * which opens the game commands menu ({@link GameCommandsMenu}), followed by the Report a Bug button.
  *
  * <p>Keeping the Commands button on a strip of its own, rather than on the bot commands panel, means it stays where
  * the player left it no matter how the bot commands panel is set: a player who commands no bots at all, and has the bot
@@ -67,7 +65,7 @@ public class CommandBarPanel extends JPanel {
 
     private static final BugReportMessages BUG_REPORT_I18N = new BugReportMessages();
 
-    /** The height of the strip, matching the docked layout of the bot commands panel it sits beside. */
+    /** The height of the strip. */
     private static final int BAR_HEIGHT = 40;
     /** Narrower than it was before the Report a Bug button joined it, which is what pays for that button's width. */
     private static final int COMMANDS_BUTTON_WIDTH = 110;
@@ -77,9 +75,6 @@ public class CommandBarPanel extends JPanel {
 
     private final ClientGUI clientGUI;
     private final MegaMekButton commandsButton;
-    /** The bot commands panel while it is docked in this bar, or {@code null} while it is off or floating. */
-    private BotCommandsPanel dockedBotCommandsPanel;
-
     /**
      * Creates the command strip.
      *
@@ -131,35 +126,4 @@ public class CommandBarPanel extends JPanel {
         }
     }
 
-    /**
-     * Docks the bot commands panel into the strip, to the left of the Commands button. Docking the panel that is
-     * already docked does nothing, so this can be called whenever the panel's location is refreshed.
-     *
-     * @param botCommandsPanel The bot commands panel to dock
-     */
-    public void dockBotCommandsPanel(BotCommandsPanel botCommandsPanel) {
-        if (botCommandsPanel.equals(dockedBotCommandsPanel)) {
-            return;
-        }
-        dockedBotCommandsPanel = botCommandsPanel;
-        add(botCommandsPanel, BorderLayout.CENTER);
-        revalidate();
-        repaint();
-        LOGGER.debug("[GameCommands] bot commands panel docked into the command bar");
-    }
-
-    /**
-     * Takes the bot commands panel back out of the strip, leaving the Commands button behind. Called when the panel
-     * moves to its floating dialog.
-     */
-    public void undockBotCommandsPanel() {
-        if (dockedBotCommandsPanel == null) {
-            return;
-        }
-        remove(dockedBotCommandsPanel);
-        dockedBotCommandsPanel = null;
-        revalidate();
-        repaint();
-        LOGGER.debug("[GameCommands] bot commands panel undocked from the command bar");
-    }
 }

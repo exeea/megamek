@@ -48,11 +48,6 @@ import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
-import java.awt.event.ComponentListener;
-import java.awt.event.FocusEvent;
-import java.awt.event.FocusListener;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -274,13 +269,8 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_BOT_COMMANDS = "viewBotCommands";
     public static final String VIEW_BOT_COMMANDS_OFF = "viewBotCommandsOff";
     public static final String VIEW_BOT_COMMANDS_FLOAT = "viewBotCommandsFloat";
-    public static final String VIEW_BOT_COMMANDS_DOCK = "viewBotCommandsDock";
     // endregion view menu
 
-    /** Bot commands panel location: shown in a floating dialog. */
-    public static final int BOT_COMMANDS_LOCATION_FLOATING = 0;
-    /** Bot commands panel location: docked into the top of the board area. */
-    public static final int BOT_COMMANDS_LOCATION_DOCKED = 1;
 
     // region fire menu
     public static final String FIRE_SAVE_WEAPON_ORDER = "saveWeaponOrder";
@@ -342,7 +332,6 @@ public class ClientGUI extends AbstractClientGUI
     private ChatterBox cb;
     /** The rules of the off-board artillery targets that the 3D board's dock offers. */
     private final OffBoardTargetOverlay offBoardTargets = new OffBoardTargetOverlay(this);
-    private boolean wasBoardFocused = false;
     private MovementEnvelopeSpriteHandler movementEnvelopeHandler;
     private MovementModifierSpriteHandler movementModifierSpriteHandler;
     private FleeZoneSpriteHandler fleeZoneSpriteHandler;
@@ -353,9 +342,6 @@ public class ClientGUI extends AbstractClientGUI
     private FiringArcSpriteHandler firingArcSpriteHandler;
 
     private JPanel panTop;
-    private JSplitPane splitPaneA;
-    private JPanel panA1;
-    private JPanel panA2;
 
     private UnitDisplayPanel unitDisplayPanel;
     private final UnitDisplayState unitDisplayState;
@@ -500,13 +486,6 @@ public class ClientGUI extends AbstractClientGUI
         panSecondary.setLayout(cardsSecondary);
 
         clientGuiPanel.setLayout(new BorderLayout());
-        ComponentListener resizeListener = new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent evt) {
-                boardViewsContainer.getPanel().setPreferredSize(clientGuiPanel.getSize());
-            }
-        };
-        clientGuiPanel.addComponentListener(resizeListener);
         clientGuiPanel.add(panMain, BorderLayout.CENTER);
         clientGuiPanel.add(panSecondary, BorderLayout.SOUTH);
 
@@ -539,21 +518,6 @@ public class ClientGUI extends AbstractClientGUI
         }
         registerCommand(new HelpCommand(this));
         registerCommand(new BotHelpCommand(this));
-    }
-
-    private void initializeFocusTracking() {
-        boardViewsContainer.getPanel().addFocusListener(new FocusListener() {
-            @Override
-            public void focusGained(FocusEvent e) {
-                wasBoardFocused = true;
-            }
-
-            @Override
-            public void focusLost(FocusEvent e) {
-                wasBoardFocused = false;
-                setChatBoxActive(false);
-            }
-        });
     }
 
     /**
@@ -991,26 +955,10 @@ public class ClientGUI extends AbstractClientGUI
         frame.setJMenuBar(menuBar);
         initializeFrame();
         super.initialize();
-        boardViewsContainer.setName(CG_BOARD_VIEW);
         try {
             client.getGame().addGameListener(gameListener);
 
             panTop = new JPanel(new BorderLayout());
-            panA1 = new JPanel();
-            panA1.setVisible(false);
-            panA2 = new JPanel();
-            panA2.setVisible(false);
-
-            splitPaneA = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-
-            splitPaneA.setDividerSize(10);
-            splitPaneA.setResizeWeight(0.5);
-
-            splitPaneA.setLeftComponent(panA1);
-            splitPaneA.setRightComponent(panA2);
-
-            panTop.add(splitPaneA, BorderLayout.CENTER);
-            initializeFocusTracking();
 
             cb = new ChatterBox(this);
 
@@ -1048,7 +996,7 @@ public class ClientGUI extends AbstractClientGUI
         commandBarPanel = new CommandBarPanel(this);
         panTop.add(commandBarPanel, BorderLayout.NORTH);
         maybeShowCommandBar();
-        // Place the panel in its configured location (floating dialog or docked strip) before first use.
+        // The panel waits in its hidden dialog; the 3D board's Players panel uses its actions.
         setBotCommandsLocation(GUIP.getBotCommandsEnabled());
         // The Bot Commands submenu can no longer carry a working menu accelerator, so wire the show/hide hotkey here.
         if (controller != null) {
@@ -1292,7 +1240,6 @@ public class ClientGUI extends AbstractClientGUI
             setPlayerListDialog(new PlayerListDialog(frame, client, false));
         }
         getPlayerListDialog().setVisible(true);
-        conditionalRequestFocus(true);
     }
 
     public void miniReportDisplayAddReportPages() {
@@ -1551,11 +1498,6 @@ public class ClientGUI extends AbstractClientGUI
                 GUIP.setBotCommandsEnabled(false);
                 break;
             case VIEW_BOT_COMMANDS_FLOAT:
-                GUIP.setBotCommandsLocation(BOT_COMMANDS_LOCATION_FLOATING);
-                GUIP.setBotCommandsEnabled(true);
-                break;
-            case VIEW_BOT_COMMANDS_DOCK:
-                GUIP.setBotCommandsLocation(BOT_COMMANDS_LOCATION_DOCKED);
                 GUIP.setBotCommandsEnabled(true);
                 break;
             case VIEW_TOGGLE_HEX_COORDS:
@@ -1721,7 +1663,6 @@ public class ClientGUI extends AbstractClientGUI
         // Unit Display Dialog
         if (getUnitDisplayDialog() != null) {
             getUnitDisplayDialog().saveSettings();
-            saveSplitPaneLocations();
         }
 
         // Force Display Dialog
@@ -1923,7 +1864,7 @@ public class ClientGUI extends AbstractClientGUI
 
     /**
      * The lounge shows the native lobby scene, and every later phase the native board, each replacing the other in the
-     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start. Before the
+     * one window; the frame stays hidden behind both. Before the
      * server sends its first phase the window keeps what it shows (the start screen, or nothing yet for MekHQ), so a
      * scenario or a running game goes straight to the board; between the lounge and the first board phase the lobby
      * stays.
@@ -2196,24 +2137,6 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /**
-     * Requests focus for the board view if the board was previously focused and the specified visibility condition is
-     * met.
-     *
-     * @param visible a boolean indicating whether the board view should be visible. If true and the board was
-     *                previously focused, focus will be requested.
-     */
-    private void conditionalRequestFocus(boolean visible) {
-        if (wasBoardFocused && visible && !GpuBoardWindow.isActiveFor(this)) {
-            requestFocus();
-        }
-    }
-
-    private void requestFocus() {
-        frame.requestFocusInWindow();
-        boardViewsContainer.getPanel().requestFocusInWindow();
-    }
-
-    /**
      * Shows the command bar during the phases that are played on the board and hides it everywhere else. Unlike the bot
      * commands panel it has no on/off setting: the Commands button it carries is the only way to reach the game
      * commands, so it is present whenever there is a game to issue them in.
@@ -2311,14 +2234,12 @@ public class ClientGUI extends AbstractClientGUI
     void setMiniReportVisible(boolean visible) {
         if (getMiniReportDisplayDialog() != null) {
             setMiniReportLocation(visible);
-            conditionalRequestFocus(visible && !GpuBoardWindow.isActiveFor(this));
         }
     }
 
     void setPlayerListVisible(boolean visible) {
         // The native battle window's HUD lists the players (Menu > Players); the Swing list stays hidden there.
         if (visible && GpuBoardWindow.isActiveFor(this)) { setPlayerListVisible(false); return; }
-        conditionalRequestFocus(visible);
         if (visible) {
             showPlayerList();
         } else if (getPlayerListDialog() != null) {
@@ -2340,7 +2261,6 @@ public class ClientGUI extends AbstractClientGUI
                 getRoundsInAirDialog().refresh();
             }
             getRoundsInAirDialog().setVisible(visible);
-            conditionalRequestFocus(visible);
         }
     }
 
@@ -2410,48 +2330,18 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /**
-     * Places the bot commands panel in its configured location and sets its visibility. Mirrors
-     * {@link #setUnitDisplayLocation(boolean)}: the single panel instance is reparented between the floating dialog and
-     * the command bar at the top of the board area, so no command functionality is lost when switching. Floating mode
-     * keeps the panel's original size and two-row layout; docked mode uses a single-row strip that shares the command
-     * bar with the Commands button.
+     * Keeps the bot commands panel in its Swing dialog, which stays hidden whatever {@code visible} asks: the 3D
+     * board's Players panel holds the bot commands and uses this panel's actions ({@code GpuBoardActions}).
      *
-     * @param visible whether the bot commands panel should be shown
+     * @param visible ignored; there is no Swing window to show the panel in
      */
     void setBotCommandsLocation(boolean visible) {
-        // The native battle window's Players panel holds the bot commands; the Swing panel stays hidden there.
-        if (visible && GpuBoardWindow.isActiveFor(this)) { setBotCommandsLocation(false); return; }
-        if ((botCommandsPanel == null) || (getBotCommandsDialog() == null) || (commandBarPanel == null)) {
+        if ((botCommandsPanel == null) || (getBotCommandsDialog() == null)) {
             return;
         }
-        boolean docked = !GpuBoardWindow.isActiveFor(this)
-              && GUIP.getBotCommandsLocation() == BOT_COMMANDS_LOCATION_DOCKED;
-        botCommandsPanel.setDockedLayout(docked);
-        if (docked) {
-            getBotCommandsDialog().setVisible(false);
-            commandBarPanel.dockBotCommandsPanel(botCommandsPanel);
-            botCommandsPanel.setVisible(visible);
-            logger.debug("[BotPanel] docked in the command bar, visible={}", visible);
-        } else {
-            commandBarPanel.undockBotCommandsPanel();
-            getBotCommandsDialog().add(botCommandsPanel);
-            botCommandsPanel.setVisible(true);
-            getBotCommandsDialog().setVisible(visible);
-            logger.debug("[BotPanel] floating dialog, visible={}", visible);
-        }
-        panTop.revalidate();
-        panTop.repaint();
-        conditionalRequestFocus(visible);
-    }
-
-    private void saveSplitPaneLocations() {
-        if ((panA1.isVisible()) && (panA2.isVisible())) {
-            GUIP.setSplitPaneALocation(splitPaneA.getDividerLocation());
-        }
-    }
-
-    private void setDividerLocations() {
-        splitPaneA.setDividerLocation(GUIP.getSplitPaneADividerLocation());
+        getBotCommandsDialog().add(botCommandsPanel);
+        botCommandsPanel.setVisible(true);
+        getBotCommandsDialog().setVisible(false);
     }
 
     public void setForceDisplayVisible(boolean visible) {
@@ -2459,53 +2349,6 @@ public class ClientGUI extends AbstractClientGUI
         if (visible && GpuBoardWindow.isActiveFor(this)) { setForceDisplayVisible(false); return; }
         if (getForceDisplayDialog() != null) {
             getForceDisplayDialog().setVisible(visible);
-            conditionalRequestFocus(visible);
-        }
-    }
-
-    private void hideEmptyPanel(JPanel p, JSplitPane sp, Double d) {
-        boolean b = false;
-
-        for (Component comp : p.getComponents()) {
-            if (comp.isVisible()) {
-                b = true;
-                break;
-            }
-        }
-
-        if (!b) {
-            p.setVisible(false);
-            sp.setDividerLocation(d);
-        } else {
-            p.setVisible(true);
-        }
-    }
-
-    private void revalidatePanels() {
-        if (unitDisplayPanel != null) {
-            unitDisplayPanel.setMinimumSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
-            unitDisplayPanel.setPreferredSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
-        }
-        getMiniReportDisplay().setMinimumSize(new Dimension(0, (int) (panTop.getHeight() * 0.3)));
-        getMiniReportDisplay().setPreferredSize(new Dimension(0, (int) (panTop.getHeight() * 0.3)));
-
-        if (unitDisplayDialog != null) {
-            unitDisplayDialog.revalidate();
-            unitDisplayDialog.repaint();
-        }
-        panA1.revalidate();
-        panA1.repaint();
-        panA2.revalidate();
-        panA2.repaint();
-    }
-
-    private void setDockAxis() {
-        if (GUIP.getDockMultipleOnYAxis()) {
-            panA1.setLayout(new BoxLayout(panA1, BoxLayout.Y_AXIS));
-            panA2.setLayout(new BoxLayout(panA2, BoxLayout.Y_AXIS));
-        } else {
-            panA1.setLayout(new BoxLayout(panA1, BoxLayout.X_AXIS));
-            panA2.setLayout(new BoxLayout(panA2, BoxLayout.X_AXIS));
         }
     }
 
@@ -2514,64 +2357,15 @@ public class ClientGUI extends AbstractClientGUI
         if (getUnitDisplayDialog() != null) { getUnitDisplayDialog().setVisible(false); }
     }
 
+    /**
+     * Keeps the Swing report window hidden whatever {@code visible} asks: the 3D board's log shows the reports, and
+     * over the 3D lobby the Swing window was a leftover.
+     *
+     * @param visible ignored; the report window stays hidden
+     */
     public void setMiniReportLocation(boolean visible) {
-        // The native reader owns reports while the 3D board is presented. Preference and docking changes can
-        // reach this method even while the Swing frame is hidden; never let them reopen its report dialog.
-        if (GpuBoardWindow.isActiveFor(this)) {
-            getMiniReportDisplayDialog().setVisible(false);
-            getMiniReportDisplay().setVisible(false);
-            return;
-        }
-        saveSplitPaneLocations();
-        setDockAxis();
-
-        if (GUIP.getDockOnLeft()) {
-            switch (GUIP.getMiniReportLocation()) {
-                case 0:
-                    panA2.add(boardViewsContainer.getPanel());
-                    panA2.setVisible(true);
-                    getMiniReportDisplayDialog().add(getMiniReportDisplay(), BorderLayout.CENTER);
-                    getMiniReportDisplayDialog().setVisible(visible);
-                    getMiniReportDisplay().setVisible(visible);
-                    hideEmptyPanel(panA1, splitPaneA, 0.0);
-                    conditionalRequestFocus(visible);
-                    break;
-                case 1:
-                    panA2.add(boardViewsContainer.getPanel());
-                    panA2.setVisible(true);
-                    panA1.add(getMiniReportDisplay());
-                    getMiniReportDisplayDialog().setVisible(false);
-                    getMiniReportDisplay().setVisible(visible);
-                    hideEmptyPanel(panA1, splitPaneA, 0.0);
-                    conditionalRequestFocus(visible);
-                    break;
-            }
-        } else {
-            switch (GUIP.getMiniReportLocation()) {
-                case 0:
-                    panA1.add(boardViewsContainer.getPanel());
-                    panA1.setVisible(true);
-                    getMiniReportDisplayDialog().add(getMiniReportDisplay(), BorderLayout.CENTER);
-                    getMiniReportDisplayDialog().setVisible(visible);
-                    getMiniReportDisplay().setVisible(visible);
-                    hideEmptyPanel(panA2, splitPaneA, 1.0);
-                    conditionalRequestFocus(visible);
-                    break;
-                case 1:
-                    panA1.add(boardViewsContainer.getPanel());
-                    panA1.setVisible(true);
-                    panA2.add(getMiniReportDisplay());
-                    getMiniReportDisplayDialog().setVisible(false);
-                    getMiniReportDisplay().setVisible(visible);
-                    hideEmptyPanel(panA2, splitPaneA, 1.0);
-                    conditionalRequestFocus(visible);
-                    break;
-            }
-        }
-
-        revalidatePanels();
-        setDividerLocations();
-        conditionalRequestFocus(true);
+        getMiniReportDisplayDialog().setVisible(false);
+        getMiniReportDisplay().setVisible(false);
     }
 
     /**
@@ -4736,12 +4530,7 @@ public class ClientGUI extends AbstractClientGUI
             case GUIPreferences.UNIT_DISPLAY_ENABLED, GUIPreferences.UNIT_DISPLAY_LOCATION ->
                   setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
             case GUIPreferences.FORCE_DISPLAY_ENABLED -> setForceDisplayVisible(GUIP.getForceDisplayEnabled());
-            case GUIPreferences.MINI_REPORT_ENABLED, GUIPreferences.MINI_REPORT_LOCATION ->
-                  setMiniReportVisible(GUIP.getMiniReportEnabled());
-            case GUIPreferences.DOCK_ON_LEFT, GUIPreferences.DOCK_MULTIPLE_ON_Y_AXIS -> {
-                setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
-                setMiniReportVisible(GUIP.getMiniReportEnabled());
-            }
+            case GUIPreferences.MINI_REPORT_ENABLED -> setMiniReportVisible(GUIP.getMiniReportEnabled());
             case GUIPreferences.DEFAULT_WEAPON_SORT_ORDER -> {
                 setWeaponOrderPrefs(true);
                 getUnitDisplayState().displayEntity(getUnitDisplayState().getCurrentEntity());
@@ -4755,7 +4544,7 @@ public class ClientGUI extends AbstractClientGUI
                  GUIPreferences.SOUND_BING_FILENAME_OTHERS_TURN,
                  GUIPreferences.SOUND_BING_FILENAME_PING -> audioService.loadSoundFiles();
             case GUIPreferences.MASTER_VOLUME -> audioService.setVolume();
-            case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
+            case GUIPreferences.BOT_COMMANDS_ENABLED ->
                 // Route through maybeShowBotCommands() so the phase rules (non-board phases never show the panel)
                 // are enforced consistently, whether the change came from the menu, the hotkey, or a phase change.
                   maybeShowBotCommands();

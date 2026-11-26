@@ -183,41 +183,16 @@ public class BotCommandsPanel extends JPanel {
         }
     }
 
-    /**
-     * Switches the panel between its floating and docked layouts. The floating layout keeps the original two-row grid
-     * and size; the docked layout uses a single row sized for the thin strip above the board. Only the arrangement and
-     * size hints change - the same buttons and their actions are preserved in both modes.
-     *
-     * @param docked {@code true} to use the single-row docked layout, {@code false} to use the floating two-row layout
-     */
-    public void setDockedLayout(boolean docked) {
-        applyLayout(docked);
-        revalidate();
-        repaint();
-    }
-
-    /**
-     * Applies the layout manager and size hints for the requested mode.
-     *
-     * @param docked {@code true} for the single-row docked layout, {@code false} for the floating two-row layout
-     */
-    private void applyLayout(boolean docked) {
-        if (docked) {
-            // One row, columns grow to fit the buttons - a thin strip that steals little height from the board.
-            this.setLayout(new GridLayout(1, 0, 2, 2));
-            this.setMinimumSize(UIUtil.scaleForGUI(600, 40));
-            this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(40)));
-            this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(40)));
-        } else {
-            this.setLayout(new GridLayout(2, 4, 2, 2));
-            this.setMinimumSize(UIUtil.scaleForGUI(600, 80));
-            this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
-            this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
-        }
+    /** Applies the two-row grid and its size hints. */
+    private void applyLayout() {
+        this.setLayout(new GridLayout(2, 4, 2, 2));
+        this.setMinimumSize(UIUtil.scaleForGUI(600, 80));
+        this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
+        this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
     }
 
     private void initialize() {
-        applyLayout(false);
+        applyLayout();
         UIUtil.applyTopBarBackground(this);
         ordersMenuBuilder = new BotOrdersMenuBuilder(client,
               (orderDescription, singleHex, onPicked) -> pickTargetHexes(orderDescription, singleHex, 0,

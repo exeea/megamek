@@ -109,7 +109,7 @@ class GpuSwingCutSmokeTest {
     void aScriptedBattleShowsNoSwingWindowOverTheNativeWindow() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         Map<String, String> saved = new LinkedHashMap<>();
-        for (String key : Stream.of(WINDOWS, SHOWN, List.of(GUIPreferences.BOT_COMMANDS_LOCATION)).flatMap(List::stream).toList()) {
+        for (String key : Stream.of(WINDOWS, SHOWN).flatMap(List::stream).toList()) {
             saved.put(key, preferences.getString(key));
         }
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -118,7 +118,6 @@ class GpuSwingCutSmokeTest {
             Application previous = Gdx.app;
             try {
                 onSwing(() -> {
-                    preferences.setBotCommandsLocation(ClientGUI.BOT_COMMANDS_LOCATION_FLOATING);
                     preferences.addPreferenceChangeListener(gui);
                     GpuBoardWindow.open(gui, () -> fixture.panel);
                     return null;

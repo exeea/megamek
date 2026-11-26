@@ -144,9 +144,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public static final String PLAYERS_REMAINING_TO_SHOW = "PlayersRemainingToShow";
     public static final String BUTTONS_PER_ROW = "ButtonsPerRow";
-    public static final String DOCK_ON_LEFT = "DockOnLeft";
     public static final String EXPAND_OPTION_SECTIONS = "ExpandOptionSections";
-    public static final String DOCK_MULTIPLE_ON_Y_AXIS = "DockMultipleOnYAxis";
     public static final String USE_CAMO_OVERLAY = "UseCamoOverlay";
 
     public static final String SHOW_COORDS = "showCoords";
@@ -257,7 +255,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_TOOLTIP_WEAPON_COLOR = "UnitToolTipWeaponColor";
     public static final String UNIT_TOOLTIP_QUIRK_COLOR = "UnitToolTipQuirkColor";
 
-    public static final String SPLIT_PANE_A_DIVIDER_LOCATION = "SplitPaneADividerLocation";
     public static final String GIF_GAME_SUMMARY_MINIMAP = "GifGameSummaryMinimap";
     public static final String GIF_GAME_SUMMARY_RECORDING = "GifGameSummaryRecording";
     public static final String GIF_GAME_SUMMARY_SAVE_DIRECTORY = "GifGameSummarySaveDirectory";
@@ -340,7 +337,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MINI_REPORT_ENABLED = "MiniReportEnabled";
     public static final String MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE = "MiniReportAutoDisplayReportPhase";
     public static final String MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE = "MiniReportAutoDisplayNonReportPhase";
-    public static final String MINI_REPORT_LOCATION = "MiniReportLocation";
     public static final String MINI_REPORT_COLOR_LINK = "MiniReportColorLink";
     public static final String MINI_REPORT_COLOR_SUCCESS = "MiniReportColorSuccess";
     public static final String MINI_REPORT_COLOR_MISS = "MiniReportColorMiss";
@@ -486,7 +482,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public static final String BOT_COMMANDS_ENABLED = "BotCommandsEnabled";
     public static final String BOT_COMMANDS_PAUSE_AT_START = "BotCommandsPauseAtStart";
-    public static final String BOT_COMMANDS_LOCATION = "BotCommandsLocation";
     public static final String BOT_COMMANDS_POS_X = "BotCommandsPosX";
     public static final String BOT_COMMANDS_POS_Y = "BotCommandsPosY";
     public static final String BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE = "BotCommandsAutoDisplayNonReportPhase";
@@ -699,9 +694,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(PLAYERS_REMAINING_TO_SHOW, 3);
         store.setDefault(BUTTONS_PER_ROW, 12);
 
-        setDefault(DOCK_ON_LEFT, true);
         store.setDefault(EXPAND_OPTION_SECTIONS, true);
-        setDefault(DOCK_MULTIPLE_ON_Y_AXIS, true);
         setDefault(USE_CAMO_OVERLAY, true);
 
         store.setDefault(FOV_HIGHLIGHT_RINGS_RADII, "5 10 15 20 25");
@@ -768,7 +761,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
         store.setDefault(UNIT_DISPLAY_ENABLED, true);
         store.setDefault(UNIT_DISPLAY_LOCATION, 0);
-        store.setDefault(BOT_COMMANDS_LOCATION, ClientGUI.BOT_COMMANDS_LOCATION_DOCKED);
         // -1 is the "no saved position yet" sentinel so the floating dialog centers on first use; a real saved
         // position (including a legitimate top-left 0,0) is restored instead.
         store.setDefault(BOT_COMMANDS_POS_X, -1);
@@ -779,7 +771,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE, MANUAL);
         // The minimap needs the same defaults: without them both values read 0 (= HIDE) and the minimap is closed
         // again on every phase change, so opening it with Ctrl+M never lasts.
-        store.setDefault(SPLIT_PANE_A_DIVIDER_LOCATION, 300);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_1, DEFAULT_HEAT_1_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_2, DEFAULT_HEAT_2_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_3, DEFAULT_HEAT_3_COLOR);
@@ -899,7 +890,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(MINI_REPORT_ENABLED, true);
         store.setDefault(MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE, 1);
         store.setDefault(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE, 0);
-        store.setDefault(MINI_REPORT_LOCATION, 0);
         setDefault(MINI_REPORT_COLOR_LINK, DEFAULT_REPORT_LINK_COLOR);
         setDefault(MINI_REPORT_COLOR_SUCCESS, new Color(51, 204, 0));
         setDefault(MINI_REPORT_COLOR_MISS, new Color(128, 128, 128));
@@ -1268,10 +1258,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getColor(UNIT_TOOLTIP_ARMOR_MINI_COLOR_DAMAGED);
     }
 
-    public int getSplitPaneADividerLocation() {
-        return store.getInt(SPLIT_PANE_A_DIVIDER_LOCATION);
-    }
-
     public boolean getCoordsEnabled() {
         return store.getBoolean(SHOW_COORDS);
     }
@@ -1474,10 +1460,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getMiniReportAutoDisplayNonReportPhase() {
         return store.getInt(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
-    public int getMiniReportLocation() {
-        return store.getInt(MINI_REPORT_LOCATION);
     }
 
     public boolean getMiniReportShowSprites() {
@@ -2314,10 +2296,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(UNIT_TOOLTIP_ARMOR_MINI_COLOR_DAMAGED, getColorString(c));
     }
 
-    public void setSplitPaneALocation(int i) {
-        store.setValue(SPLIT_PANE_A_DIVIDER_LOCATION, i);
-    }
-
     public void toggleCoords() {
         store.setValue(SHOW_COORDS, !getBoolean(SHOW_COORDS));
     }
@@ -2536,15 +2514,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setMiniReportAutoDisplayNonReportPhase(int i) {
         store.setValue(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE, i);
-    }
-
-    public void toggleMiniReportLocation() {
-        store.setValue(MINI_REPORT_LOCATION, ((getInt(MINI_REPORT_LOCATION) + 1) % 2));
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMiniReportLocation(int i) {
-        store.setValue(MINI_REPORT_LOCATION, i);
     }
 
     public void setMiniReportShowSprites(boolean b) {
@@ -3487,16 +3456,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getColor(UNIT_TOOLTIP_QUIRK_COLOR);
     }
 
-    public boolean getDockOnLeft() {
-        return getBoolean(DOCK_ON_LEFT);
-    }
-
     public boolean getExpandOptionSections() {
         return getBoolean(EXPAND_OPTION_SECTIONS);
-    }
-
-    public boolean getDockMultipleOnYAxis() {
-        return getBoolean(DOCK_MULTIPLE_ON_Y_AXIS);
     }
 
     public boolean getUseCamoOverlay() {
@@ -3524,14 +3485,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
      */
     public void setBotCommandsPauseAtStart(boolean state) {
         store.setValue(BOT_COMMANDS_PAUSE_AT_START, state);
-    }
-
-    /**
-     * @return The bot commands panel location: {@code 0} for a floating dialog, {@code 1} for docked into the top of
-     *       the board area
-     */
-    public int getBotCommandsLocation() {
-        return store.getInt(BOT_COMMANDS_LOCATION);
     }
 
     public void setReportLinkColor(Color color) {
@@ -3759,16 +3712,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(UNIT_TOOLTIP_QUIRK_COLOR, getColorString(c));
     }
 
-    public void setDockOnLeft(Boolean state) {
-        store.setValue(DOCK_ON_LEFT, state);
-    }
-
     public void setExpandOptionSections(boolean expanded) {
         store.setValue(EXPAND_OPTION_SECTIONS, expanded);
-    }
-
-    public void setDockMultipleOnYAxis(Boolean state) {
-        store.setValue(DOCK_MULTIPLE_ON_Y_AXIS, state);
     }
 
     public void setUseCamoOverlay(Boolean state) {
@@ -3781,15 +3726,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBotCommandsEnabled(boolean state) {
         store.setValue(BOT_COMMANDS_ENABLED, state);
-    }
-
-    /**
-     * Sets the bot commands panel location.
-     *
-     * @param location {@code 0} for a floating dialog, {@code 1} for docked into the top of the board area
-     */
-    public void setBotCommandsLocation(int location) {
-        store.setValue(BOT_COMMANDS_LOCATION, location);
     }
 
     public void setBotCommandsPosX(int i) {

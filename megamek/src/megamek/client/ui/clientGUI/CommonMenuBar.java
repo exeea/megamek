@@ -160,8 +160,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsOff"));
     private final JRadioButtonMenuItem viewBotCommandsFloat =
           new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsFloat"));
-    private final JRadioButtonMenuItem viewBotCommandsDock =
-          new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsDock"));
     private final JMenuItem toggleTactical = new JMenuItem(getString("GpuBoard.hud.util.tactical"));
     private final JCheckBoxMenuItem toggleHexCoords = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleHexCoords"));
@@ -643,7 +641,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.MINI_REPORT_ENABLED -> gameRoundReport.setSelected(GUIP.getMiniReportEnabled());
             case GUIPreferences.PLAYER_LIST_ENABLED -> gamePlayerList.setSelected(GUIP.getPlayerListEnabled());
             case GUIPreferences.ROUNDS_IN_AIR_ENABLED -> gameRoundsInAir.setSelected(GUIP.getRoundsInAirEnabled());
-            case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
+            case GUIPreferences.BOT_COMMANDS_ENABLED ->
                   updateBotCommandsSelection();
             case GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
         }
@@ -679,9 +677,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     /**
-     * Builds the Bot Commands submenu: three mutually exclusive radio items (Off / Float / Dock) grouped together, and
-     * adds the submenu to the given parent View menu. The submenu replaces the former single checkbox so the player can
-     * choose where the bot commands panel is shown without losing the on/off control.
+     * Builds the Bot Commands submenu, two mutually exclusive radio items (Off / Float), and adds it to the given
+     * parent View menu.
      *
      * @param parentMenu the View menu the submenu is added to
      */
@@ -689,24 +686,20 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewBotCommands.setMnemonic(VK_G);
         initMenuItem(viewBotCommandsOff, viewBotCommands, ClientGUI.VIEW_BOT_COMMANDS_OFF);
         initMenuItem(viewBotCommandsFloat, viewBotCommands, ClientGUI.VIEW_BOT_COMMANDS_FLOAT);
-        initMenuItem(viewBotCommandsDock, viewBotCommands, ClientGUI.VIEW_BOT_COMMANDS_DOCK);
         ButtonGroup botCommandsGroup = new ButtonGroup();
         botCommandsGroup.add(viewBotCommandsOff);
         botCommandsGroup.add(viewBotCommandsFloat);
-        botCommandsGroup.add(viewBotCommandsDock);
         parentMenu.add(viewBotCommands);
         updateBotCommandsSelection();
     }
 
     /**
-     * Selects the Bot Commands radio item that matches the current enabled and location preferences: Off when the panel
-     * is disabled, otherwise Dock or Float depending on the configured location.
+     * Selects the Bot Commands radio item that matches the enabled preference: Off when the panel is disabled,
+     * otherwise Float.
      */
     private void updateBotCommandsSelection() {
         if (!GUIP.getBotCommandsEnabled()) {
             viewBotCommandsOff.setSelected(true);
-        } else if (GUIP.getBotCommandsLocation() == ClientGUI.BOT_COMMANDS_LOCATION_DOCKED) {
-            viewBotCommandsDock.setSelected(true);
         } else {
             viewBotCommandsFloat.setSelected(true);
         }

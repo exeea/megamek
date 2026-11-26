@@ -78,7 +78,6 @@ import megamek.logging.MMLogger;
 public class MiniReportDisplayPanel extends JPanel implements ActionListener, HyperlinkListener {
     private final static MMLogger LOGGER = MMLogger.create(MiniReportDisplayPanel.class);
 
-    private JButton butSwitchLocation;
     private JTabbedPane tabs;
     private JButton butPlayerSearchUp;
     private JButton butPlayerSearchDown;
@@ -131,8 +130,6 @@ public class MiniReportDisplayPanel extends JPanel implements ActionListener, Hy
         };
 
         currentClient.getGame().addGameListener(gameListener);
-        butSwitchLocation = new JButton(Messages.getString("MiniReportDisplay.SwitchLocation"));
-        butSwitchLocation.addActionListener(this);
         butPlayerSearchUp = new JButton(Messages.getString("MiniReportDisplay.ArrowUp"));
         butPlayerSearchUp.addActionListener(this);
         butPlayerSearchDown = new JButton(Messages.getString("MiniReportDisplay.ArrowDown"));
@@ -262,7 +259,6 @@ public class MiniReportDisplayPanel extends JPanel implements ActionListener, Hy
         p.add(butQuickSearchDown);
         p.add(comboFilter);
         p.add(butQuickFilter);
-        p.add(butSwitchLocation);
 
         JScrollPane sp = new JScrollPane(p);
         JPanel panelMain = new JPanel(new BorderLayout());
@@ -509,9 +505,7 @@ public class MiniReportDisplayPanel extends JPanel implements ActionListener, Hy
 
     @Override
     public void actionPerformed(ActionEvent ae) {
-        if (ae.getSource().equals(butSwitchLocation)) {
-            GUIP.toggleMiniReportLocation();
-        } else if (ae.getSource().equals(butPlayerSearchDown)) {
+        if (ae.getSource().equals(butPlayerSearchDown)) {
             searchPattern(comboPlayer, true);
         } else if (ae.getSource().equals(butPlayerSearchUp)) {
             searchPattern(comboPlayer, false);

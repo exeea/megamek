@@ -289,9 +289,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private final JCheckBox entityOwnerColor =
           new JCheckBox(Messages.getString("CommonSettingsDialog.entityOwnerColor"));
     private final JCheckBox teamColoring = new JCheckBox(Messages.getString("CommonSettingsDialog.teamColoring"));
-    private final JCheckBox dockOnLeft = new JCheckBox(Messages.getString("CommonSettingsDialog.dockOnLeft"));
-    private final JCheckBox dockMultipleOnYAxis = new JCheckBox(Messages.getString(
-          "CommonSettingsDialog.dockMultipleOnYAxis"));
     private final JCheckBox useCamoOverlay = new JCheckBox(Messages.getString("CommonSettingsDialog.useCamoOverlay"));
     private final JCheckBox useAutoCenter = new JCheckBox(Messages.getString("CommonSettingsDialog.useAutoCenter"));
     private final JCheckBox useAutoSelectNext = new JCheckBox(Messages.getString(
@@ -573,8 +570,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private boolean savedDrawFacingArrowsOnMiniMap;
     private boolean savedPaintBorders;
     private boolean savedTeamColoring;
-    private boolean savedDockOnLeft;
-    private boolean savedDockMultipleOnYAxis;
     private boolean savedUseCamoOverlay;
     private boolean savedUnitLabelBorder;
     private boolean savedShowDamageDecal;
@@ -2507,15 +2502,11 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         addLineSpacer(comps);
 
         configureCheckBox(teamColoring, Messages.getString("CommonSettingsDialog.teamColoring.tooltip"));
-        configureCheckBox(dockOnLeft, null);
-        dockOnLeft.setSelected(GUIP.getDockOnLeft());
-        configureCheckBox(dockMultipleOnYAxis, null);
-        dockMultipleOnYAxis.setSelected(GUIP.getDockMultipleOnYAxis());
         configureCheckBox(useCamoOverlay, null);
         useCamoOverlay.setSelected(GUIP.getUseCamoOverlay());
         row = new ArrayList<>();
         row.add(createBehaviorOptionsGrid("CommonSettingsWindowLayoutGrid",
-              teamColoring, dockOnLeft, dockMultipleOnYAxis, useCamoOverlay));
+              teamColoring, useCamoOverlay));
         comps.add(row);
 
         addLineSpacer(comps);
@@ -2801,8 +2792,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             savedDrawFacingArrowsOnMiniMap = GUIP.getDrawFacingArrowsOnMiniMap();
             savedPaintBorders = GUIP.paintBorders();
             savedTeamColoring = GUIP.getTeamColoring();
-            savedDockOnLeft = GUIP.getDockOnLeft();
-            savedDockMultipleOnYAxis = GUIP.getDockMultipleOnYAxis();
             savedUseCamoOverlay = GUIP.getUseCamoOverlay();
             savedUnitLabelBorder = GUIP.getUnitLabelBorder();
             savedShowDamageDecal = GUIP.getShowDamageDecal();
@@ -2845,8 +2834,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setDrawFacingArrowsOnMiniMap(savedDrawFacingArrowsOnMiniMap);
         GUIP.setPaintBorders(savedPaintBorders);
         GUIP.setTeamColoring(savedTeamColoring);
-        GUIP.setDockOnLeft(savedDockOnLeft);
-        GUIP.setDockMultipleOnYAxis(savedDockMultipleOnYAxis);
         GUIP.setUseCamoOverlay(savedUseCamoOverlay);
         GUIP.setUnitLabelBorder(savedUnitLabelBorder);
         GUIP.setShowDamageDecal(savedShowDamageDecal);
@@ -3018,8 +3005,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setShowDamageDecal(showDamageDecal.isSelected());
         GUIP.setUnitLabelBorder(entityOwnerColor.isSelected());
         GUIP.setTeamColoring(teamColoring.isSelected());
-        GUIP.setDockOnLeft(dockOnLeft.isSelected());
-        GUIP.setDockMultipleOnYAxis(dockMultipleOnYAxis.isSelected());
         GUIP.setUseCamoOverlay(useCamoOverlay.isSelected());
         GUIP.setAutoEndFiring(autoEndFiring.isSelected());
         GUIP.setAutoDeclareSearchlight(autoDeclareSearchlight.isSelected());
