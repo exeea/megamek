@@ -877,6 +877,17 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         movingEvasively = true;
     }
 
+    /** Urban Hexes, IO:BF p. 217: inside the buildings of the urban hex it occupies rather than in its streets. */
+    private BoardLocation insideBuildingsPosition;
+
+    public boolean isInsideBuildings() {
+        return insideBuildingsPosition != null && insideBuildingsPosition.equals(position);
+    }
+
+    public void setInsideBuildings(boolean inside) {
+        insideBuildingsPosition = inside ? position : null;
+    }
+
     public boolean isHullDown() {
         return hullDownPosition != null && hullDownPosition.equals(position);
     }
@@ -1375,6 +1386,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public void embark(int carrierId, boolean external) {
         setHullDown(false);
+        setInsideBuildings(false);
         transportId = carrierId;
         externallyMounted = external;
         position = null;

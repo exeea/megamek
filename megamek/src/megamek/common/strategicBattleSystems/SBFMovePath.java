@@ -58,6 +58,7 @@ public class SBFMovePath implements EntityAction, Serializable {
     private List<TransportOrder> transportOrders;
     private Integer boardingCarrier;
     private boolean enterHullDown;
+    private boolean enterBuildings;
 
     public boolean entersHullDown() {
         return enterHullDown;
@@ -65,6 +66,15 @@ public class SBFMovePath implements EntityAction, Serializable {
 
     public void enterHullDownAtEnd() {
         enterHullDown = true;
+    }
+
+    /** Urban Hexes, IO:BF p. 217: the Formation moves into the buildings of the urban hex where this route ends. */
+    public boolean entersBuildings() {
+        return enterBuildings;
+    }
+
+    public void enterBuildingsAtEnd() {
+        enterBuildings = true;
     }
 
 
@@ -144,6 +154,7 @@ public class SBFMovePath implements EntityAction, Serializable {
         radarFlight = original.radarFlight;
         boardingCarrier = original.boardingCarrier;
         enterHullDown = original.enterHullDown;
+        enterBuildings = original.enterBuildings;
         transportOrders = original.transportOrders == null ? null : new ArrayList<>(original.transportOrders);
     }
 

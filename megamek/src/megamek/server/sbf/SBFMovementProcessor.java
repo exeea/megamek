@@ -90,6 +90,7 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
     private boolean executeMovement(SBFMovePath movePath, SBFFormation formation, boolean resuming) {
         var transport = SBFTransport.plan(game(), formation, movePath, resuming);
         if ((!resuming && movePath.entersHullDown() && !SBFFieldFortification.canEnter(game(), formation, movePath))
+              || (!resuming && movePath.entersBuildings() && !SBFUrbanCombat.canEnterBuildings(game(), formation, movePath))
               || transport.isEmpty() || (!resuming && (movePath.boardingCarrier() != null)
               && !SBFBayTransport.canBoard(game(), formation, movePath)) || (!resuming && !SBFWithdrawal.permitsMove(game(), formation, movePath))
               || (game().engagementOrders().pendingMove() != null)) {
@@ -130,6 +131,11 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
               && SBFFieldFortification.canEnter(game(), formation, approvedPath)) {
             formation.setHullDown(true);
             hullCost = SBFFieldFortification.hullCost(formation);
+        }
+        if (approvedPath.entersBuildings() && (approvedPath.getSteps().size() == movePath.getSteps().size())
+              && SBFUrbanCombat.canEnterBuildings(game(), formation, approvedPath)) {
+            hullCost += SBFUrbanCombat.entryCost(formation, game().getHex(approvedPath.getLastPosition()));
+            formation.setInsideBuildings(true);
         }
         transportCost += SBFBayTransport.board(gameManager, formation, approvedPath, movePath);
         formation.setMpSpentThisTurn(movePath.getMpUsed() + transportCost + hullCost);
@@ -221,6 +227,9 @@ record SBFMovementProcessor(SBFGameManager gameManager) implements SBFGameManage
             }
             if (submittedPath.entersHullDown()) {
                 rebuiltPath.enterHullDownAtEnd();
+            }
+            if (submittedPath.entersBuildings()) {
+                rebuiltPath.enterBuildingsAtEnd();
             }
             rebuiltPath.setJumpUsed(jumpUsed);
             return Optional.of(rebuiltPath);

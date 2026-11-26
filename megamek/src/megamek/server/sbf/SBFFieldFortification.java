@@ -63,8 +63,7 @@ final class SBFFieldFortification {
 
     static boolean canEnter(SBFGame game, SBFFormation formation, SBFMovePath route) {
         int level = level(game.getHex(route.getLastPosition()));
-        boolean large = formation.hasAnySUAOf(LG, VLG, SLG) || formation.getUnits().stream()
-              .anyMatch(u -> u.hasAnySUAOf(LG, VLG, SLG) || u.getElements().stream().anyMatch(e -> e.hasAnySUAOf(LG, VLG, SLG)));
+        boolean large = hasLargeElement(formation);
         return game.getOptions().booleanOption(SBFRuleOptions.MOVE_HULL_DOWN) && level > 0 && !large
               && !formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA) && formation.occupiesGroundHex()
               && (!formation.isAirVehicle() || (formation.isAirVehicleLanded() && route.getSteps().isEmpty()))
@@ -73,6 +72,11 @@ final class SBFFieldFortification {
               && route.boardingCarrier() == null
               && (route.getMpUsed() + hullCost(formation) + route.getTransportOrders().size()
               <= SBFMovePath.maximumMovementPoints(formation, game));
+    }
+
+    static boolean hasLargeElement(SBFFormation formation) {
+        return formation.hasAnySUAOf(LG, VLG, SLG) || formation.getUnits().stream()
+              .anyMatch(u -> u.hasAnySUAOf(LG, VLG, SLG) || u.getElements().stream().anyMatch(e -> e.hasAnySUAOf(LG, VLG, SLG)));
     }
 
     static boolean construct(SBFGameManager manager, SBFFormation formation, int index) {

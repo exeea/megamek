@@ -305,6 +305,23 @@ class SBFMovementProcessorTest {
     }
 
     @Test
+    void urbanCombatLetsAFormationMoveIntoTheBuildingsForTheSecondMoveCost() {
+        // Urban Hexes, IO:BF p. 217: "The second value in the MP Cost per hex column represents the MP cost for a
+        // Formation to enter buildings in an urban hex" (Medium +2 / +1), on entering the hex or later.
+        formation.setMovement(4);
+        game.getHex(BoardLocation.of(new Coords(2, 1), 0)).addTerrain(new Terrain(Terrains.BUILDING, 2));
+        var route = pathWithSteps(1);
+        route.enterBuildingsAtEnd();
+        assertRejected(route); // Only with the Urban Hexes option.
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        assertTrue(processor.processMovement(route, formation));
+        assertTrue(formation.isInsideBuildings());
+        assertEquals(route.getMpUsed() + 1, formation.getMpSpentThisTurn());
+        formation.setPosition(start);
+        assertFalse(formation.isInsideBuildings());
+    }
+
+    @Test
     void terrainCoverCostsHalfMoveProtectsFromDamageAndLosesStationaryTmm() {
         var route = pathWithSteps(1);
         route.enterHullDownAtEnd();
