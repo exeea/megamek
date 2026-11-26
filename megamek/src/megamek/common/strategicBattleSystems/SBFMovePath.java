@@ -59,6 +59,7 @@ public class SBFMovePath implements EntityAction, Serializable {
     private Integer boardingCarrier;
     private boolean enterHullDown;
     private boolean enterBuildings;
+    private boolean climbBuildings;
 
     public boolean entersHullDown() {
         return enterHullDown;
@@ -75,6 +76,15 @@ public class SBFMovePath implements EntityAction, Serializable {
 
     public void enterBuildingsAtEnd() {
         enterBuildings = true;
+    }
+
+    /** Urban Hexes, IO:BF p. 217: the Formation climbs onto the roofs of the urban hex where this route ends. */
+    public boolean climbsBuildings() {
+        return climbBuildings;
+    }
+
+    public void climbBuildingsAtEnd() {
+        climbBuildings = true;
     }
 
 
@@ -155,6 +165,7 @@ public class SBFMovePath implements EntityAction, Serializable {
         boardingCarrier = original.boardingCarrier;
         enterHullDown = original.enterHullDown;
         enterBuildings = original.enterBuildings;
+        climbBuildings = original.climbBuildings;
         transportOrders = original.transportOrders == null ? null : new ArrayList<>(original.transportOrders);
     }
 

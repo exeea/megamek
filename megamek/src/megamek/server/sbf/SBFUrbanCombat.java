@@ -61,6 +61,42 @@ final class SBFUrbanCombat {
         return formation.isExclusivelyWheeled() ? Math.max(0, cost - 1) : cost;
     }
 
+    /** p. 217 Building Weight Capacity: the largest Size the roofs carry (Light 1, Medium 2, Heavy 3, Hardened 4). */
+    static int weightCapacity(Hex hex) {
+        return Math.clamp(hex.terrainLevel(Terrains.BUILDING), 1, 4);
+    }
+
+    /**
+     * p. 217 "Climbing and Standing on Buildings": the MP to reach the roofs where the route ends, or -1 when this
+     * Formation cannot. Infantry and ProtoMechs climb inside the buildings at 1 MP per level of building height; 'Mechs
+     * climb the outside at 2 MP per level and "may not change levels once they are inside a building". A Formation
+     * heavier than the weight capacity would collapse the buildings; until collapses are played it may not climb.
+     */
+    static int climbCost(SBFGame game, SBFFormation formation, SBFMovePath route) {
+        Hex hex = game.getHex(route.getLastPosition());
+        boolean stays = route.getSteps().isEmpty();
+        if (!game.usesUrbanCombat() || (hex == null) || !hex.containsTerrain(Terrains.BUILDING)
+              || !formation.occupiesGroundHex() || (stays && formation.isOnTopOfBuildings())) {
+            return -1;
+        }
+        // "All non-battle armor infantry units are treated as if they have a Size of 0."
+        int size = formation.isType(SBFElementType.CI) ? 0 : formation.getSize();
+        if (size > weightCapacity(hex)) {
+            return -1;
+        }
+        int height = Math.max(0, hex.terrainLevel(Terrains.BLDG_ELEV));
+        boolean inside = stays && formation.isInsideBuildings();
+        if (formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA, SBFElementType.PM)) {
+            return (inside ? 0 : entryCost(formation, hex)) + height;
+        }
+        return (formation.isType(SBFElementType.BM) && !inside) ? 2 * height : -1;
+    }
+
+    static boolean canClimbBuildings(SBFGame game, SBFFormation formation, SBFMovePath route) {
+        int cost = climbCost(game, formation, route);
+        return (cost >= 0) && (route.getMpUsed() + cost <= SBFMovePath.maximumMovementPoints(formation, game));
+    }
+
     /**
      * p. 217: a Formation may enter the buildings "when first moving into the hex ... or a Formation already in an urban
      * hex may enter a building by paying the cost after the slash". Large Elements and aircraft collapse the buildings

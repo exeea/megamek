@@ -337,6 +337,26 @@ class SBFMovementProcessorTest {
     }
 
     @Test
+    void aMekFormationClimbsTheRoofsAtTwoMovePerLevelWithinTheWeightCapacity() {
+        // Urban Hexes, IO:BF p. 217: "'Mechs can climb up and down the structures' face ... at a cost of 2 MP per level";
+        // "a Medium Urban hex has an individual building weight capacity of 2".
+        formation.setMovement(8);
+        formation.setSize(3);
+        Hex urban = game.getHex(BoardLocation.of(new Coords(2, 1), 0));
+        urban.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        urban.addTerrain(new Terrain(Terrains.BLDG_ELEV, 2));
+        game.getOptions().getOption(SBFRuleOptions.URBAN_COMBAT).setValue(true);
+        var route = pathWithSteps(1);
+        route.climbBuildingsAtEnd();
+        assertRejected(route); // Size 3 on a Medium roof would collapse it.
+        formation.setSize(2);
+        assertTrue(processor.processMovement(route, formation));
+        assertTrue(formation.isOnTopOfBuildings());
+        assertFalse(formation.isInsideBuildings());
+        assertEquals(route.getMpUsed() + 4, formation.getMpSpentThisTurn());
+    }
+
+    @Test
     void terrainCoverCostsHalfMoveProtectsFromDamageAndLosesStationaryTmm() {
         var route = pathWithSteps(1);
         route.enterHullDownAtEnd();

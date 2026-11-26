@@ -891,6 +891,23 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
 
     public void setInsideBuildings(boolean inside) {
         insideBuildingsPosition = inside ? position : null;
+        if (inside) {
+            onTopOfBuildingsPosition = null;
+        }
+    }
+
+    /** Urban Hexes, IO:BF p. 217: standing on the roofs of the urban hex it occupies. */
+    private BoardLocation onTopOfBuildingsPosition;
+
+    public boolean isOnTopOfBuildings() {
+        return onTopOfBuildingsPosition != null && onTopOfBuildingsPosition.equals(position);
+    }
+
+    public void setOnTopOfBuildings(boolean onTop) {
+        onTopOfBuildingsPosition = onTop ? position : null;
+        if (onTop) {
+            insideBuildingsPosition = null;
+        }
     }
 
     public boolean isHullDown() {
@@ -1392,6 +1409,7 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     public void embark(int carrierId, boolean external) {
         setHullDown(false);
         setInsideBuildings(false);
+        setOnTopOfBuildings(false);
         transportId = carrierId;
         externallyMounted = external;
         position = null;

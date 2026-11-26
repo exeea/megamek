@@ -46,7 +46,7 @@ import megamek.server.commands.ServerCommand;
 /** Supplementary ground movement orders (IO:BF p. 166). */
 class SBFMovementCommand extends ServerCommand {
     static final String HELP = "/sbfmove <formation ID> surface|submerge|land|lift|evasive, "
-          + "hull [column,row ...], buildings [column,row ...], or fortify <Unit number>";
+          + "hull [column,row ...], buildings [column,row ...], rooftop [column,row ...], or fortify <Unit number>";
     private final SBFGameManager manager;
 
     SBFMovementCommand(Server server, SBFGameManager manager) {
@@ -66,7 +66,8 @@ class SBFMovementCommand extends ServerCommand {
                 return;
             }
             boolean buildings = args[2].equalsIgnoreCase("buildings");
-            if ((buildings || args[2].equalsIgnoreCase("hull")) && formation.occupiesGroundHex()) {
+            boolean rooftop = args[2].equalsIgnoreCase("rooftop");
+            if ((buildings || rooftop || args[2].equalsIgnoreCase("hull")) && formation.occupiesGroundHex()) {
                 var point = formation.getPosition();
                 var route = new SBFMovePath(formation.getId(), point, game);
                 if ((long) args.length > (long) SBFMovePath.maximumMovementPoints(formation, game) + 4) {
@@ -89,11 +90,14 @@ class SBFMovementCommand extends ServerCommand {
                 }
                 if (buildings) {
                     route.enterBuildingsAtEnd();
+                } else if (rooftop) {
+                    route.climbBuildingsAtEnd();
                 } else {
                     route.enterHullDownAtEnd();
                 }
                 if (!manager.movementProcessor.processMovement(route, formation)) {
                     server.sendServerChat(player, buildings ? "This Formation cannot enter the buildings on that route."
+                          : rooftop ? "This Formation cannot climb onto the roofs on that route."
                           : "This Formation cannot enter a fortified position on that route.");
                 }
                 manager.sendPendingPackets();
