@@ -335,7 +335,7 @@ public class SBFToHitData extends TargetRoll {
     /** Aerospace To-Hit Modifiers table, IO:BF p. 177. */
     /** Environmental darkness table, IO:BF pp. 210, 212. */
     public static void applyDarkness(SBFToHitData toHit, SBFGame game, SBFFormation attacker, BoardLocation aim) {
-        if (attacker.isAerospace() || attacker.hasSearchlight() || game.isIlluminated(aim)) {
+        if (attacker.isAerospace() || attacker.hasSearchlight(game) || game.isIlluminated(aim)) {
             return;
         }
         int modifier = switch (game.getPlanetaryConditions().getLight()) {

@@ -103,8 +103,8 @@ public class SBFDetectionModifiers extends TargetRoll {
         if (!game.usesDesignQuirks()) {
             return false;
         }
-        long count = unit.getElements().stream().filter(e -> e.hasQuirk(OptionsConstants.QUIRK_POS_IMPROVED_SENSORS)
-              && (SBFElementType.getUnitType(e) != SBFElementType.MS)).count();
+        long count = unit.getElements().stream()
+              .filter(e -> SBFDesignQuirks.hasQuirk(e, OptionsConstants.QUIRK_POS_IMPROVED_SENSORS)).count();
         return (count > 0) && (count * 2 >= unit.getElements().size());
     }
 

@@ -208,12 +208,14 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
     private boolean sprintedThisTurn = false;
     private boolean searchlightsOn;
 
-    public boolean hasSearchlight() {
-        return !isAerospace() && (isType(SBFElementType.BM) || hasSUA(BattleForceSUA.SRCH));
+    /** @param game the game, as Searchlight quirks count as SRCH with the optional Design Quirks rules (p. 228) */
+    public boolean hasSearchlight(SBFRuleOptionsUser game) {
+        return !isAerospace()
+              && (isType(SBFElementType.BM) || SBFDesignQuirks.formationHas(game, this, BattleForceSUA.SRCH));
     }
 
-    public boolean searchlightsOn() {
-        return searchlightsOn && hasSearchlight();
+    public boolean searchlightsOn(SBFRuleOptionsUser game) {
+        return searchlightsOn && hasSearchlight(game);
     }
 
     public void setSearchlightsOn(boolean on) {

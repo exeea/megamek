@@ -109,7 +109,7 @@ final class SBFCombatCommand extends ServerCommand {
                 var game = manager.getGame();
                 var formation = game.getFormation(Integer.parseInt(args[2])).orElse(null);
                 if ((game.getPhase().isEnd() || game.getPhase().isEndReport()) && formation != null && formation.occupiesGroundHex()
-                      && formation.getOwnerId() == connId && formation.hasSearchlight()
+                      && formation.getOwnerId() == connId && formation.hasSearchlight(game)
                       && (args[3].equalsIgnoreCase("on") || args[3].equalsIgnoreCase("off"))) {
                     formation.setSearchlightsOn(args[3].equalsIgnoreCase("on"));
                     manager.sendUnitUpdate(formation);

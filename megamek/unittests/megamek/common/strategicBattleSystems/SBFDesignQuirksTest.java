@@ -66,6 +66,36 @@ class SBFDesignQuirksTest {
         assertFalse(SBFDesignQuirks.formationHas(game, formationOfOne, BattleForceSUA.PRB));
     }
 
+    @Test
+    void searchlightCountsAsSrchForBattleMechAndVehicleElements() {
+        // Design Quirks Table, IO:BF p. 228: Searchlight (Element; BM, V) "Element is treated as having SRCH for SBF
+        // Conversion purposes". A Unit has SRCH when half its Elements do (p. 261, Step 5A). Support vehicles do not
+        // get SRCH at Alpha Strike conversion, so the quirk matters for them.
+        var game = new SBFGame();
+        var supportVehicles = new SBFUnit();
+        supportVehicles.setType(SBFElementType.V);
+        supportVehicles.setElements(List.of(element(ASUnitType.SV, true), element(ASUnitType.SV, false)));
+        var formation = new SBFFormation();
+        formation.setType(SBFElementType.V);
+        formation.addUnit(supportVehicles);
+        assertFalse(SBFDesignQuirks.unitHas(game, supportVehicles, BattleForceSUA.SRCH));
+        assertFalse(formation.hasSearchlight(game));
+        game.getOptions().getOption(SBFRuleOptions.DESIGN_QUIRKS).setValue(true);
+        assertTrue(SBFDesignQuirks.unitHas(game, supportVehicles, BattleForceSUA.SRCH));
+        assertTrue(formation.hasSearchlight(game));
+
+        var protoMeks = new SBFUnit();
+        protoMeks.setElements(List.of(element(ASUnitType.PM, true)));
+        assertFalse(SBFDesignQuirks.unitHas(game, protoMeks, BattleForceSUA.SRCH));
+    }
+
+    private static AlphaStrikeElement element(ASUnitType type, boolean searchlight) {
+        var element = new AlphaStrikeElement();
+        element.setType(type);
+        element.getQuirks().getOption(OptionsConstants.QUIRK_POS_SEARCHLIGHT).setValue(searchlight);
+        return element;
+    }
+
     private static SBFUnit unit(boolean improvedSensors) {
         var element = new AlphaStrikeElement();
         element.setType(ASUnitType.BM);

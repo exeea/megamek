@@ -279,7 +279,7 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     public boolean isIlluminated(BoardLocation location) {
         var hex = getHex(location);
         return hex != null && (hex.isStrategicallyIlluminated(getCurrentRound()) || getActiveFormationsAt(location).stream()
-              .anyMatch(f -> f.occupiesGroundHex() && f.searchlightsOn()));
+              .anyMatch(f -> f.occupiesGroundHex() && f.searchlightsOn(this)));
     }
 
     private SBFMinefields minefields;

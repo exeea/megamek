@@ -509,7 +509,8 @@ record SBFDetectionHelper(SBFGameManager gameManager) implements SBFGameManagerH
     }
 
     static int visualRange(SBFGame game, SBFFormation formation, BoardLocation target) {
-        int srchModifier = (formation.hasSUA(BattleForceSUA.SRCH) && !illuminated(game, target) &&
+        int srchModifier = (SBFDesignQuirks.formationHas(game, formation, BattleForceSUA.SRCH)
+              && !illuminated(game, target) &&
               (game.getPlanetaryConditions().getLight().isDuskDawn()
                     || game.getPlanetaryConditions().getLight().isMoonlessOrPitchBack())) ? 1 : 0;
         // IO:BF p. 197. Mixed and ProtoMek Formations use the BattleMek/Vehicle column. On a roof (p. 217) "infantry

@@ -64,11 +64,23 @@ public final class SBFDesignQuirks {
     }
 
     /**
-     * Improved Sensors: "Element is treated as having PRB for SBF Conversion purposes". Mobile Structures cannot have
-     * a quirk (footnote **).
+     * @return true when the Element has the quirk. Mobile Structures cannot have a quirk unless the row names MS
+     *       (Design Quirks Table footnote **, IO:BF p. 228), so this is for the rows that do not.
+     */
+    public static boolean hasQuirk(AlphaStrikeElement element, String quirk) {
+        return element.hasQuirk(quirk) && (SBFElementType.getUnitType(element) != SBFElementType.MS);
+    }
+
+    /**
+     * Improved Sensors: "Element is treated as having PRB for SBF Conversion purposes". Searchlight (BM, V): "Element
+     * is treated as having SRCH for SBF Conversion purposes".
      */
     private static boolean grants(AlphaStrikeElement element, BattleForceSUA sua) {
-        return (sua == BattleForceSUA.PRB) && element.hasQuirk(OptionsConstants.QUIRK_POS_IMPROVED_SENSORS)
-              && (SBFElementType.getUnitType(element) != SBFElementType.MS);
+        return switch (sua) {
+            case PRB -> hasQuirk(element, OptionsConstants.QUIRK_POS_IMPROVED_SENSORS);
+            case SRCH -> hasQuirk(element, OptionsConstants.QUIRK_POS_SEARCHLIGHT)
+                  && SBFElementType.getUnitType(element).isAnyOf(SBFElementType.BM, SBFElementType.V);
+            default -> false;
+        };
     }
 }
