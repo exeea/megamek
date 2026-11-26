@@ -29,12 +29,6 @@
   </UI_Element>
 
   <UI_Element>
-    <name>BoardViewBorder</name>
-    <plain />
-    <show_scroll_bars>true</show_scroll_bars>
-  </UI_Element>
-
-  <UI_Element>
     <name>MainMenuBorder</name>
     <no_border>true</no_border>
     <background_image>../misc/megamek_splash_spooky_fhd.png</background_image>

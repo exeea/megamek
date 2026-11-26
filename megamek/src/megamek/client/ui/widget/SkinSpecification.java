@@ -51,7 +51,6 @@ public class SkinSpecification {
     public enum UIComponents {
         DefaultUIElement("defaultElement"),
         DefaultButton("defaultButton"),
-        BoardView("BoardViewBorder"),
         PhaseDisplay("PhaseDisplayBorder"),
         PhaseDisplayDoneButton("PhaseDisplayDoneButton"),
         PhaseDisplayButton("PhaseDisplayButton"),
@@ -212,11 +211,6 @@ public class SkinSpecification {
      * Flag that determines whether the background image should be tiled or scaled.
      */
     public boolean tileBackground = true;
-
-    /**
-     * Used to specify whether a component should display scrollbars, particularly for the board view.
-     */
-    public boolean showScrollBars = false;
 
     /**
      * Specify a non-standard font, or null to use default.
