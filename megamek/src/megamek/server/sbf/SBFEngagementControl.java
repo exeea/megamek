@@ -474,8 +474,10 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
     private SBFFormation rollWinner(SBFFormation first, SBFFormation second, int firstModifier, int secondModifier) {
         first.setForcedOpponent(null);
         second.setForcedOpponent(null);
-        int firstTarget = first.getTactics() + firstModifier + atmosphereModifier(first, second) + moraleModifier(first);
-        int secondTarget = second.getTactics() + secondModifier + atmosphereModifier(second, first) + moraleModifier(second);
+        int firstTarget = first.getTactics() + firstModifier + atmosphereModifier(first, second) + moraleModifier(first)
+              + zoneOfControlModifier(first, second);
+        int secondTarget = second.getTactics() + secondModifier + atmosphereModifier(second, first) + moraleModifier(second)
+              + zoneOfControlModifier(second, first);
         while (true) {
             int firstRoll = dice.getAsInt();
             int secondRoll = dice.getAsInt();
@@ -504,6 +506,18 @@ record SBFEngagementControl(SBFGameManager manager, IntSupplier dice) {
             }
             notifyBoth(first, second, rolls + "Tied margin and Tactics. Rerolling.");
         }
+    }
+
+    /**
+     * Zone of Control, IO:BF p. 226: "a -1 Target Number modifier to all Engagement Control Rolls when Establishing
+     * Engagement Control during the Movement Phase (see p. 167)", while a commander Unit carrying it survives.
+     */
+    private int zoneOfControlModifier(SBFFormation formation, SBFFormation other) {
+        SBFGame game = manager.getGame();
+        Player owner = game.getPlayer(formation.getOwnerId());
+        return game.getPhase().isMovement() && (owner != null) && !formation.sharesAerospaceMap(other)
+              && new SBFInitiativeModifiers(game, owner)
+              .hasAbility(megamek.common.strategicBattleSystems.SBFUnit.InitiativeAbility.ZONE_OF_CONTROL) ? -1 : 0;
     }
 
     /** Engagement Control Roll Modifiers Table (IO:BF p. 168), including attempts to break off at End. */

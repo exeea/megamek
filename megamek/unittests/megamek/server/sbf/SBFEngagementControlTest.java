@@ -134,6 +134,21 @@ class SBFEngagementControlTest {
     }
 
     @Test
+    void zoneOfControlLowersTheTargetWhenEstablishingEngagementControl() {
+        // Zone of Control, IO:BF p. 226: "-1 Target Number modifier to all Engagement Control Rolls when Establishing
+        // Engagement Control during the Movement Phase"; the ability is carried by a surviving commander Unit.
+        var commander = new SBFUnit();
+        commander.setArmor(4);
+        commander.setCurrentArmor(4);
+        commander.getSpecialAbilities().setSUA(megamek.common.alphaStrike.BattleForceSUA.COM);
+        commander.getInitiativeAbilities().add(SBFUnit.InitiativeAbility.ZONE_OF_CONTROL);
+        mover.addUnit(commander);
+        orders(false, true);
+        rolls(5, 5, 5, 4).resolveMovement(mover, route);
+        verify(manager).sendServerChat(eq(1), contains("10 rolled 5 against 3"));
+    }
+
+    @Test
     void opposedRollCanStopTheMoverMidRouteAndLockBothFormations() {
         orders(false, true);
         SBFMovePath actual = rolls(2, 6).resolveMovement(mover, route);

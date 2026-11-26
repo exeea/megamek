@@ -173,8 +173,12 @@ final class SBFInitiativeModifiers {
     }
 
     boolean hasAbility(InitiativeAbility ability) {
-        return option(ability == InitiativeAbility.BANKING ? INIT_BANKING : INIT_FORCING)
-              && units().anyMatch(u -> u.hasAnySUAOf(COM, SCOM) && u.getInitiativeAbilities().contains(ability));
+        boolean inPlay = switch (ability) {
+            case BANKING -> option(INIT_BANKING);
+            case FORCING -> option(INIT_FORCING);
+            default -> true;
+        };
+        return inPlay && units().anyMatch(u -> u.hasAnySUAOf(COM, SCOM) && u.getInitiativeAbilities().contains(ability));
     }
 
     private int battlefieldBonus() {
