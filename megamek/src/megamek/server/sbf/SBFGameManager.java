@@ -561,7 +561,7 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      */
     void endCurrentTurn(SBFFormation entityUsed) {
         final int playerId = (entityUsed == null) ? Player.PLAYER_NONE : entityUsed.getOwnerId();
-        if (entityUsed != null && game.getPhase().isMovement() && game.getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)
+        if (entityUsed != null && game.getPhase().isMovement() && game.adjustsFormations()
               && game.continueDetachmentMovement(entityUsed)) {
             game.engagementOrders().finishMovement();
             sendServerChat(playerId, "Move the remaining counters of this detachment before the next player acts.");

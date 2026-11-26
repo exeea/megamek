@@ -82,6 +82,15 @@ public interface SBFRuleOptionsUser {
     /**
      * @return True when this game allows adjusting formations, IO:BF p.198.
      */
+    /**
+     * @return True when Formations may be adjusted at all: by the full rule (IO:BF p. 198) or, when players chose it, only
+     *       for Forced Withdrawals (IO:BF p. 172)
+     */
+    default boolean adjustsFormations() {
+        return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)
+              || getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FOR_WITHDRAWAL);
+    }
+
     @Deprecated(since = "0.51.0", forRemoval = true)
     default boolean usesAdjustingFormations() {
         return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS);

@@ -395,6 +395,33 @@ class SBFFormationCommandTest {
     }
 
     @Test
+    void adjustingOnlyForForcedWithdrawalLetsOnlyACrippledFormationDetachOrSplit() {
+        // Forced Withdrawal, IO:BF p. 172: "players may decide to use the Adjusting Formations rule only for Forced
+        // Withdrawals and not for other play. Note: This optional rule does not apply to failed Morale Checks"
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS).setValue(false);
+        game.getOptions().getOption(SBFRuleOptions.BASE_ADJUST_FOR_WITHDRAWAL).setValue(true);
+        game.getOptions().getOption(SBFRuleOptions.BASE_FORCED_WITHDRAWAL).setValue(true);
+        var healthy = formation(20, 2, 3);
+        assertFalse(game.takingAdjustmentOrders());
+        assertFalse(SBFFormationCommand.detach(game, 0, healthy, List.of(1), false));
+
+        var crippled = formation(30, 4, 3);
+        for (int i = 0; i < 3; i++) {
+            crippled.getUnits().getFirst().addMovementCrit();
+        }
+        SBFFormationConverter.calculateStatsFromUnits(crippled);
+        crippled.startForcedWithdrawal();
+        assertTrue(game.takingAdjustmentOrders());
+        assertTrue(SBFFormationCommand.detach(game, 0, crippled, List.of(1), false));
+        assertFalse(SBFFormationCommand.reform(game, 0, crippled));
+
+        var routed = formation(40, 6, 3);
+        routed.startForcedWithdrawal();
+        routed.setMoraleStatus(SBFFormation.MoraleStatus.ROUTED);
+        assertFalse(SBFFormationCommand.detach(game, 0, routed, List.of(), true));
+    }
+
+    @Test
     void crippledDetachedUnitKeepsItsPrintedMoveAndCannotClearMoraleWithdrawalByRejoining() {
         game.getOptions().getOption(SBFRuleOptions.BASE_FORCED_WITHDRAWAL).setValue(true);
         var parent = formation(20, 2, 3);

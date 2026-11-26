@@ -69,6 +69,9 @@ public class SBFRuleOptions extends BasicGameOptions {
     /** Allow changes to formation setup, IO BF p.198 */
     public static final String BASE_ADJUST_FORMATIONS = "base_formation_change";
 
+    /** Adjusting Formations only to let crippled Units withdraw, IO BF p.172 (Forced Withdrawal) */
+    public static final String BASE_ADJUST_FOR_WITHDRAWAL = "base_formation_change_withdrawal";
+
     /** Allow detaching part of a formation, IO BF p.198 */
     public static final String FORM_ALLOW_DETACH = "form_allow_detach";
 
@@ -121,6 +124,7 @@ public class SBFRuleOptions extends BasicGameOptions {
         addOption(base, BASE_TEAM_VISION, true);
         addOption(base, BASE_ADJUST_FORMATIONS, false);
         addOption(base, BASE_FORCED_WITHDRAWAL, false);
+        addOption(base, BASE_ADJUST_FOR_WITHDRAWAL, false);
         addOption(base, BASE_VICTORY_POINTS, false);
         addOption(base, BASE_SALVAGE, false);
         addOption(base, BASE_SIMPLIFIED_DAMAGE, false);

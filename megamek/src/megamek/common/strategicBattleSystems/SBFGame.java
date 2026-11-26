@@ -165,8 +165,14 @@ public final class SBFGame extends AbstractGame implements PlanetaryConditionsUs
     }
 
     public boolean takingAdjustmentOrders() {
-        return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS) && getPlayersList().stream()
-              .anyMatch(p -> !p.isObserver() && !p.isGhost() && !p.isDone());
+        return adjustsFormations() && getPlayersList().stream()
+              .anyMatch(p -> !p.isObserver() && !p.isGhost() && !p.isDone() && mayAdjustFormations(p.getId()));
+    }
+
+    /** With the p. 172 option alone, only the owner of a Formation in Forced Withdrawal gives adjustment orders. */
+    private boolean mayAdjustFormations(int playerId) {
+        return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS) || getActiveFormations().stream()
+              .anyMatch(f -> (f.getOwnerId() == playerId) && f.isInForcedWithdrawal());
     }
 
     public SBFScenarioProgress scenarioProgress() {

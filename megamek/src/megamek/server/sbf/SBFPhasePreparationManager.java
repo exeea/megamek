@@ -39,7 +39,6 @@ import megamek.MegaMek;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.InGameObject;
 import megamek.common.options.OptionsConstants;
-import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.logging.MMLogger;
 
@@ -108,7 +107,7 @@ record SBFPhasePreparationManager(SBFGameManager gameManager) implements SBFGame
                 losses.addAll(new SBFAerospace(gameManager).removeCrashedSquadrons());
                 SBFMoraleResolver.resolveEndPhase(gameManager, losses);
                 new SBFEngagementControl(gameManager).endEngagements();
-                if (game().getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)) {
+                if (game().adjustsFormations()) {
                     gameManager.resetActivePlayersDone();
                     gameManager.sendServerChat(SBFFormationCommand.HELP);
                 }

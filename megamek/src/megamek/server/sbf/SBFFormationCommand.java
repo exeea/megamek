@@ -108,9 +108,14 @@ final class SBFFormationCommand extends ServerCommand {
 
     private static boolean mayOrder(SBFGame game, int owner) {
         var player = game.getPlayer(owner);
-        return game.getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)
-              && player != null && !player.isObserver() && (game.getPhase() == GamePhase.LOUNGE
+        return game.adjustsFormations()
+              && player != null && !player.isObserver() && ((game.getPhase() == GamePhase.LOUNGE && fullRule(game))
               || (game.getPhase().isEnd() && !player.isDone() && game.engagementOrders().remainingEnds().isEmpty()));
+    }
+
+    /** False when players chose Adjusting Formations "only for Forced Withdrawals and not for other play" (p. 172). */
+    private static boolean fullRule(SBFGame game) {
+        return game.getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS);
     }
 
     private static boolean canAdjust(SBFGame game, int owner, SBFFormation f) {
@@ -172,7 +177,8 @@ final class SBFFormationCommand extends ServerCommand {
     }
 
     static boolean detach(SBFGame game, int owner, SBFFormation parent, List<Integer> numbers, boolean split) {
-        if (!canAdjust(game, owner, parent) || parent.originalFormationId() != parent.getId() || parent.getUnits().size() < 2) {
+        if (!canAdjust(game, owner, parent) || parent.originalFormationId() != parent.getId() || parent.getUnits().size() < 2
+              || (!fullRule(game) && !parent.isInForcedWithdrawal())) {
             return false;
         }
         var relatives = game.originalFamily(parent);
@@ -228,7 +234,7 @@ final class SBFFormationCommand extends ServerCommand {
     }
 
     static boolean reform(SBFGame game, int owner, SBFFormation member) {
-        if (!game.getPhase().isEnd() || !canAdjust(game, owner, member)) {
+        if (!game.getPhase().isEnd() || !fullRule(game) || !canAdjust(game, owner, member)) {
             return false;
         }
         var family = game.originalFamily(member);
@@ -259,7 +265,8 @@ final class SBFFormationCommand extends ServerCommand {
     }
 
     static boolean assemble(SBFGame game, int owner, SBFFormation receiver, List<String> choices) {
-        if (!game.getPhase().isEnd() || !canAdjust(game, owner, receiver) || choices.isEmpty() || receiver.getPosition() == null) {
+        if (!game.getPhase().isEnd() || !fullRule(game) || !canAdjust(game, owner, receiver) || choices.isEmpty()
+              || receiver.getPosition() == null) {
             return false;
         }
         Map<SBFFormation, List<SBFUnit>> transfers = new java.util.LinkedHashMap<>();

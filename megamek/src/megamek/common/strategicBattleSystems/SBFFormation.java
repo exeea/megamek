@@ -1417,6 +1417,11 @@ public class SBFFormation implements ASSpecialAbilityCollector, BattleForceSUAFo
         return forcedWithdrawal || isBroken() || isRouted();
     }
 
+    /** In Forced Withdrawal for its damage, not for a failed Morale Check (IO:BF p. 172). */
+    public boolean isInForcedWithdrawal() {
+        return forcedWithdrawal && !isBroken() && !isRouted();
+    }
+
     public void startForcedWithdrawal() {
         forcedWithdrawal = true;
     }
