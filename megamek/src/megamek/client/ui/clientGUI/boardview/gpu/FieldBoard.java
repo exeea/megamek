@@ -826,52 +826,17 @@ final class FieldBoard {
         return level(t[lower]) < level(t[third]) && level(t[third]) < level(t[upper]) ? new int[] { upper, third } : null;
     }
 
-    /** A wall's end nose (#wallEndNose), metres: level at the wall's upper level round the corner, and its reach. */
-    private static final float NOSE_CORE = 2f, NOSE_REACH = 6.5f;
-    /** The share of the nose's size left in front of the wall's face, and the turn from the bank it shrinks over. */
-    private static final float NOSE_FRONT = .35f, NOSE_TURN = (float) Math.toRadians(40);
     /**
-     * The share of the wall's height the bank beside its end must span for a nose: none at the first, whole from the
-     * second on. Where the bank is lower the wall has no nose and runs out into the banks, as today's.
+     * Whether the nearest wall of level set k stands under water the shore shapes (its upper hex; {@code d}: every
+     * step's squared distance, {@code nearest}: the set's nearest wall's): its rim is the water's (FieldShore).
      */
-    private static final float NOSE_BANK = .5f, NOSE_BANK_WHOLE = 2 / 3f;
-
-    /**
-     * The nose of rock a wall ends in at (x, y), a point of hex {@code here}, beside a corner of it where a wall ends
-     * against banks ({@link #wallEnd}; #corner holds it and the wall's row fades out to it): {the wall's upper
-     * level's height, the share of the rise to it the ground takes there, the wall's upper hex (#packed)}. The wall
-     * keeps its height to its end, as today's, and ends by its foot rising: the ground of all three hexes comes up
-     * to the rim round the corner, whole within {@link #NOSE_CORE} and falling away to {@link #NOSE_REACH}. On the
-     * bank's side the nose is whole; the lower hex {@code h}'s own ground, in front of the wall's face, takes
-     * {@link #NOSE_FRONT} of its size, eased in from the edge it shares with the bank's hex (where both give one
-     * height), so the cliff's end stands in the cliff's line. Null elsewhere.
-     */
-    private float[] wallEndNose(Coords h, Coords here, float x, float y) {
-        float reach = NOSE_REACH * metre, core = NOSE_CORE * metre;
-        for (int k = 0; inside(here) && k < 6; k++) {
-            float dx = x - cornerX(here, k), dy = y - cornerY(here, k), d2 = dx * dx + dy * dy;
-            if (d2 >= reach * reach) { continue; }
-            Coords[] t = { here, here.translated(BoardGeometry.edgeDirection((k + 5) % 6)),
-                  here.translated(BoardGeometry.edgeDirection(k)) };
-            int[] end = wallEnd(t);
-            if (end == null) { return null; }
-            float d = (float) Math.sqrt(d2), size = 1;
-            Coords up = t[end[0]], low = t[3 - end[0] - end[1]];
-            if (h.equals(low) && d > 1e-4f * metre) {
-                // The turn from the edge between the bank's hex and the lower one, which runs from the corner straight
-                // away from the upper hex's centre.
-                float ex = cornerX(here, k) - centerX(up), ey = cornerY(here, k) - centerY(up);
-                float along = (dx * ex + dy * ey) / (d * (float) Math.hypot(ex, ey));
-                float turn = (float) Math.acos(Math.clamp(along, -1, 1));
-                size = 1 - (1 - NOSE_FRONT) * BoardRelief.smooth(turn / NOSE_TURN);
-            }
-            float share = 1 - BoardRelief.smooth(Math.max(0, d / size - core) / (reach - core));
-            // By how much of the wall the bank beside its end spans: from the third hex's level up to the rim.
-            float spans = (level(up) - level(t[end[1]])) / (float) (level(up) - level(low));
-            share *= BoardRelief.smooth((spans - NOSE_BANK) / (NOSE_BANK_WHOLE - NOSE_BANK));
-            return new float[] { level(t[end[0]]) * levelZ, share, packed(t[end[0]]) };
+    private boolean wetWall(List<Segment> segments, float[] d, int k, float nearest) {
+        for (int i = 0; i < d.length; i++) {
+            Segment s = segments.get(i);
+            if (s.cliff() && s.low() < k && s.high() >= k && d[i] <= nearest + TIE && s.top() >= 0
+                  && shore.family(unpacked(s.top())) >= 0) { return true; }
         }
-        return null;
+        return false;
     }
 
     /** Whether the step's upper hex ({@link #packed}) is a plate (FieldPlates). */
@@ -2050,7 +2015,13 @@ final class FieldBoard {
                     easedStep = weight * talus * (1 - keep);
                     talus *= keep;
                 }
-                share = weight * (in ? 1 : talus);
+                // On a wall's upper side the ground is the adjoining bank's own surface, as today's (the corner where a
+                // wall ends against a bank): this level's bank by its own distance, whole beyond its band; the wall's
+                // face hangs from it on its row (ChunkField#walls). A wall under water the shore shapes keeps the
+                // water's rim (#wetWall).
+                boolean ownBank = bankD != Float.POSITIVE_INFINITY && !wetWall(segments, d, k, cliffTo[k - lowest - 1]);
+                float upper = !in ? 0 : ownBank ? bank(-bankD, x, y) : 1;
+                share = weight * (in ? upper : talus);
                 step = !in && !poured
                       && (streamStep && s < bankFoot(x, y, metre, room) || streamD < bankFoot(x, y, metre, room));
             }
@@ -2226,19 +2197,6 @@ final class FieldBoard {
         // face under the stream hex, and level land within 3 m of the line below the slope's foot is marked for its
         // rock (#gorgeGround): the gorge's rock down to the water (FieldCover#gorge). The point alone decides, so
         // hexes sharing a sample give it one height.
-        // Beside a corner where a wall ends against banks the ground rises to the wall's rim: its nose of rock, the
-        // cliff's own (#wallEndNose).
-        float[] nose = wallEndNose(h, here, x, y);
-        if (nose != null && z < nose[0]) {
-            float up = (nose[0] - z) * nose[1];
-            z += up;
-            zt += up;
-            if (up > .25f * metre) {
-                role = 1;
-                rock = Math.max(rock, nose[1]);
-                nearTop = (int) nose[2];
-            }
-        }
         float[] streams = streamsNear(here, x, y);
         float[] line = streams == null ? null : new float[6];
         float reach = bankFoot(x, y, metre, room) + 2 * metre, cut = 0, plane = Float.NaN;
