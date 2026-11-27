@@ -173,26 +173,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_UNIMPLEMENTED_SPAS = "ShowUnimplementedSpas";
     public static final String SHOW_UNIMPLEMENTED_QUIRKS = "ShowUnimplementedQuirks";
 
-    public static final String FORCE_DISPLAY_POS_X = "ForceDisplayPosX";
-    public static final String FORCE_DISPLAY_POS_Y = "ForceDisplayPosY";
-    public static final String FORCE_DISPLAY_SIZE_HEIGHT = "ForceDisplaySizeHeight";
-    public static final String FORCE_DISPLAY_SIZE_WIDTH = "ForceDisplaySizeWidth";
-    public static final String FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE = "ForceDisplayAutoDisplayReportPhase";
-    public static final String FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE = "ForceDisplayAutoDisplayNonReportPhase";
-    public static final String FORCE_DISPLAY_ENABLED = "ForceDisplayEnabled";
-    public static final String FORCE_DISPLAY_BTN_ID = "ForceDisplayBtnID";
-    public static final String FORCE_DISPLAY_BTN_PILOT = "ForceDisplayBtnPilot";
-    public static final String FORCE_DISPLAY_BTN_MP = "ForceDisplayBtnMP";
-    public static final String FORCE_DISPLAY_BTN_HEAT = "ForceDisplayBtnHeat";
-    public static final String FORCE_DISPLAY_BTN_WEAPONS = "ForceDisplayBtnWeapons";
-    public static final String FORCE_DISPLAY_BTN_DAMAGE_DESC = "ForceDisplayBtnDamageDesc";
-    public static final String FORCE_DISPLAY_BTN_ARMOR = "ForceDisplayBtnArmor";
-    public static final String FORCE_DISPLAY_BTN_TONNAGE = "ForceDisplayBtnTonnage";
-    public static final String FORCE_DISPLAY_BTN_ROLE = "ForceDisplayBtnRole";
-    public static final String FORCE_DISPLAY_BTN_ECM = "ForceDisplayBtnECM";
-    public static final String FORCE_DISPLAY_BTN_QUIRKS = "ForceDisplayBtnQuirks";
-    public static final String FORCE_DISPLAY_BTN_C3 = "ForceDisplayBtnC3";
-    public static final String FORCE_DISPLAY_BTN_MISC = "ForceDisplayBtnMisc";
 
     public static final String UNIT_DISPLAY_POS_X = "UnitDisplayPosX";
     public static final String UNIT_DISPLAY_POS_Y = "UnitDisplayPosY";
@@ -329,13 +309,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MEK_SELECTOR_POS_X = "MekSelectorPosX";
     public static final String MEK_SELECTOR_POS_Y = "MekSelectorPosY";
     public static final String MEK_SELECTOR_SPLIT_POS = "MekSelectorSplitPos";
-    public static final String MINI_REPORT_POS_X = "MiniReportPosX";
-    public static final String MINI_REPORT_POS_Y = "MiniReportPosY";
-    public static final String MINI_REPORT_SIZE_HEIGHT = "MiniReportSizeHeight";
-    public static final String MINI_REPORT_SIZE_WIDTH = "MiniReportSizeWidth";
-    public static final String MINI_REPORT_ENABLED = "MiniReportEnabled";
-    public static final String MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE = "MiniReportAutoDisplayReportPhase";
-    public static final String MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE = "MiniReportAutoDisplayNonReportPhase";
     public static final String MINI_REPORT_COLOR_LINK = "MiniReportColorLink";
     public static final String MINI_REPORT_COLOR_SUCCESS = "MiniReportColorSuccess";
     public static final String MINI_REPORT_COLOR_MISS = "MiniReportColorMiss";
@@ -347,12 +320,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MINI_REPORT_SHOW_KEYWORDS = "MiniReportShowKeywords";
     public static final String MINI_REPORT_SHOW_FILTER = "MiniReportShowFilter";
 
-    public static final String PLAYER_LIST_POS_X = "PlayerListPosX";
-    public static final String PLAYER_LIST_POS_Y = "PlayerListPosY";
-    public static final String PLAYER_LIST_ENABLED = "PlayerListEnabled";
-    public static final String ROUNDS_IN_AIR_POS_X = "RoundsInAirPosX";
-    public static final String ROUNDS_IN_AIR_POS_Y = "RoundsInAirPosY";
-    public static final String ROUNDS_IN_AIR_ENABLED = "RoundsInAirEnabled";
     // Hidden testing/debug flag: reveals ALL in-flight artillery (both teams' target hexes) to this client, overriding
     // the normal hidden-information rule that a player sees only their own and allied rounds' target hexes. Deliberately
     // NOT prefixed "Advanced" so it does not appear in the Client Settings > Advanced list - it can only be enabled by
@@ -361,8 +328,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     // Hidden developer flag: key 1 on the start screen plays its intro again. Like the flag above, it can only be
     // enabled by manually adding StartScreenReplayKey=true to clientsettings.xml.
     public static final String START_SCREEN_REPLAY_KEY = "StartScreenReplayKey";
-    public static final String PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE = "PlayerListAutoDisplayReportPhase";
-    public static final String PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE = "PlayerListAutoDisplayNonReportPhase";
     public static final String MINI_MAP_ENABLED = "MinimapEnabled";
     public static final String MINI_MAP_ZOOM = "MinimapZoom";
     public static final String MINI_MAP_HEIGHT_DISPLAY_MODE = "MinimapHeightDisplayMode";
@@ -479,12 +444,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SBF_SHEET_VALUE_FONT = "SBFSheetValueFont";
     public static final String SUMMARY_FONT = "SummaryCardFont";
 
-    public static final String BOT_COMMANDS_ENABLED = "BotCommandsEnabled";
     public static final String BOT_COMMANDS_PAUSE_AT_START = "BotCommandsPauseAtStart";
-    public static final String BOT_COMMANDS_POS_X = "BotCommandsPosX";
-    public static final String BOT_COMMANDS_POS_Y = "BotCommandsPosY";
-    public static final String BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE = "BotCommandsAutoDisplayNonReportPhase";
-    public static final String BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE = "BotCommandsAutoDisplayReportPhase";
 
 
     // RAT dialog preferences
@@ -720,31 +680,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SHOW_UNIMPLEMENTED_SPAS, false);
         store.setDefault(SHOW_UNIMPLEMENTED_QUIRKS, false);
 
-        store.setDefault(FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, 2);
-        store.setDefault(FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 2);
-        store.setDefault(FORCE_DISPLAY_ENABLED, false);
-
-        // without these defaults the auto-display values read 0 (= HIDE) and the Bot Commands dialog
-        // is force-hidden on every phase change; 2 (= MANUAL) leaves it as the player set it
-        store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE, 2);
-        store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE, 2);
-        store.setDefault(BOT_COMMANDS_ENABLED, true);
         store.setDefault(BOT_COMMANDS_PAUSE_AT_START, true);
-        store.setDefault(FORCE_DISPLAY_SIZE_HEIGHT, 500);
-        store.setDefault(FORCE_DISPLAY_SIZE_WIDTH, 300);
-        store.setDefault(FORCE_DISPLAY_BTN_ID, true);
-        store.setDefault(FORCE_DISPLAY_BTN_PILOT, true);
-        store.setDefault(FORCE_DISPLAY_BTN_MP, false);
-        store.setDefault(FORCE_DISPLAY_BTN_HEAT, false);
-        store.setDefault(FORCE_DISPLAY_BTN_WEAPONS, false);
-        store.setDefault(FORCE_DISPLAY_BTN_DAMAGE_DESC, true);
-        store.setDefault(FORCE_DISPLAY_BTN_ARMOR, false);
-        store.setDefault(FORCE_DISPLAY_BTN_TONNAGE, true);
-        store.setDefault(FORCE_DISPLAY_BTN_ROLE, true);
-        store.setDefault(FORCE_DISPLAY_BTN_ECM, true);
-        store.setDefault(FORCE_DISPLAY_BTN_QUIRKS, true);
-        store.setDefault(FORCE_DISPLAY_BTN_C3, true);
-        store.setDefault(FORCE_DISPLAY_BTN_MISC, true);
 
         store.setDefault(UNIT_DISPLAY_SIZE_HEIGHT, 500);
         store.setDefault(UNIT_DISPLAY_SIZE_WIDTH, 300);
@@ -759,16 +695,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, 0);
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
         store.setDefault(UNIT_DISPLAY_ENABLED, true);
-        // -1 is the "no saved position yet" sentinel so the floating dialog centers on first use; a real saved
-        // position (including a legitimate top-left 0,0) is restored instead.
-        store.setDefault(BOT_COMMANDS_POS_X, -1);
-        store.setDefault(BOT_COMMANDS_POS_Y, -1);
-        // Default to MANUAL so the bot commands panel stays in whatever mode the player chose (Float/Dock/Off)
-        // instead of being auto-hidden on every phase change.
-        store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE, MANUAL);
-        store.setDefault(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE, MANUAL);
-        // The minimap needs the same defaults: without them both values read 0 (= HIDE) and the minimap is closed
-        // again on every phase change, so opening it with Ctrl+M never lasts.
         setDefault(UNIT_DISPLAY_HEAT_COLOR_1, DEFAULT_HEAT_1_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_2, DEFAULT_HEAT_2_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_3, DEFAULT_HEAT_3_COLOR);
@@ -881,13 +807,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(MINIMUM_SIZE_WIDTH, 120);
 
         store.setDefault(HIGH_PERFORMANCE_GRAPHICS, false);
-        store.setDefault(MINI_REPORT_POS_X, 200);
-        store.setDefault(MINI_REPORT_POS_Y, 150);
-        store.setDefault(MINI_REPORT_SIZE_HEIGHT, 300);
-        store.setDefault(MINI_REPORT_SIZE_WIDTH, 400);
-        store.setDefault(MINI_REPORT_ENABLED, true);
-        store.setDefault(MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE, 1);
-        store.setDefault(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE, 0);
         setDefault(MINI_REPORT_COLOR_LINK, DEFAULT_REPORT_LINK_COLOR);
         setDefault(MINI_REPORT_COLOR_SUCCESS, new Color(51, 204, 0));
         setDefault(MINI_REPORT_COLOR_MISS, new Color(128, 128, 128));
@@ -899,16 +818,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(MINI_REPORT_SHOW_KEYWORDS, true);
         store.setDefault(MINI_REPORT_SHOW_FILTER, false);
 
-        store.setDefault(PLAYER_LIST_ENABLED, true);
-        store.setDefault(PLAYER_LIST_POS_X, 200);
-        store.setDefault(PLAYER_LIST_POS_Y, 150);
-        store.setDefault(ROUNDS_IN_AIR_ENABLED, false);
-        store.setDefault(ROUNDS_IN_AIR_POS_X, 200);
-        store.setDefault(ROUNDS_IN_AIR_POS_Y, 150);
         store.setDefault(REVEAL_ALL_ARTILLERY_ROUNDS, false);
         store.setDefault(START_SCREEN_REPLAY_KEY, false);
-        store.setDefault(PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE, 1);
-        store.setDefault(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE, 0);
 
 
         store.setDefault(NAG_FOR_CRUSHING_BUILDINGS, true);
@@ -1070,34 +981,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     /** @return whether the quirks list also shows the quirks MegaMek will not act on */
     public boolean getShowUnimplementedQuirks() {
         return store.getBoolean(SHOW_UNIMPLEMENTED_QUIRKS);
-    }
-
-    public int getForceDisplayPosX() {
-        return store.getInt(FORCE_DISPLAY_POS_X);
-    }
-
-    public int getForceDisplayPosY() {
-        return store.getInt(FORCE_DISPLAY_POS_Y);
-    }
-
-    public int getForceDisplaySizeHeight() {
-        return store.getInt(FORCE_DISPLAY_SIZE_HEIGHT);
-    }
-
-    public int getForceDisplaySizeWidth() {
-        return store.getInt(FORCE_DISPLAY_SIZE_WIDTH);
-    }
-
-    public int getForceDisplayAutoDisplayReportPhase() {
-        return store.getInt(FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
-    public int getForceDisplayAutoDisplayNonReportPhase() {
-        return store.getInt(FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
-    public boolean getForceDisplayEnabled() {
-        return store.getBoolean(FORCE_DISPLAY_ENABLED);
     }
 
     public int getUnitDisplayPosX() {
@@ -1444,18 +1327,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getInt(MINI_MAP_HEIGHT_DISPLAY_MODE);
     }
 
-    public boolean getMiniReportEnabled() {
-        return store.getBoolean(MINI_REPORT_ENABLED);
-    }
-
-    public int getMiniReportAutoDisplayReportPhase() {
-        return store.getInt(MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
-    public int getMiniReportAutoDisplayNonReportPhase() {
-        return store.getInt(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
     public boolean getMiniReportShowSprites() {
         return store.getBoolean(MINI_ROUND_REPORT_SPRITES);
     }
@@ -1476,60 +1347,12 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getBoolean(MINI_REPORT_SHOW_FILTER);
     }
 
-    public boolean getPlayerListEnabled() {
-        return store.getBoolean(PLAYER_LIST_ENABLED);
-    }
-
-    public int getPlayerListPosX() {
-        return store.getInt(PLAYER_LIST_POS_X);
-    }
-
-    public int getPlayerListPosY() {
-        return store.getInt(PLAYER_LIST_POS_Y);
-    }
-
-    public boolean getRoundsInAirEnabled() {
-        return store.getBoolean(ROUNDS_IN_AIR_ENABLED);
-    }
-
-    public int getRoundsInAirPosX() {
-        return store.getInt(ROUNDS_IN_AIR_POS_X);
-    }
-
-    public int getRoundsInAirPosY() {
-        return store.getInt(ROUNDS_IN_AIR_POS_Y);
-    }
-
-    public int getPlayerListAutoDisplayReportPhase() {
-        return store.getInt(PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
-    public int getPlayerListAutoDisplayNonReportPhase() {
-        return store.getInt(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
     public int getMinimumSizeHeight() {
         return store.getInt(MINIMUM_SIZE_HEIGHT);
     }
 
     public int getMinimumSizeWidth() {
         return store.getInt(MINIMUM_SIZE_WIDTH);
-    }
-
-    public int getMiniReportPosX() {
-        return store.getInt(MINI_REPORT_POS_X);
-    }
-
-    public int getMiniReportPosY() {
-        return store.getInt(MINI_REPORT_POS_Y);
-    }
-
-    public int getMiniReportSizeHeight() {
-        return store.getInt(MINI_REPORT_SIZE_HEIGHT);
-    }
-
-    public int getMiniReportSizeWidth() {
-        return store.getInt(MINI_REPORT_SIZE_WIDTH);
     }
 
     public boolean getNagForDoomedMove() {
@@ -2085,46 +1908,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(SHOW_UNIMPLEMENTED_QUIRKS, state);
     }
 
-    public void setForceDisplayPosX(int i) {
-        store.setValue(FORCE_DISPLAY_POS_X, i);
-    }
-
-    public void setForceDisplayPosY(int i) {
-        store.setValue(FORCE_DISPLAY_POS_Y, i);
-    }
-
-    public void setForceDisplaySizeHeight(int i) {
-        store.setValue(FORCE_DISPLAY_SIZE_HEIGHT, i);
-    }
-
-    public void setForceDisplaySizeWidth(int i) {
-        store.setValue(FORCE_DISPLAY_SIZE_WIDTH, i);
-    }
-
-    public void setForceDisplayAutoDisplayReportPhase(int i) {
-        store.setValue(FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setForceDisplayAutoDisplayNonReportPhase(int i) {
-        store.setValue(FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, i);
-    }
-
-    public void setBotCommandAutoDisplayReportPhase(int i) {
-        store.setValue(BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setBotCommandAutoDisplayNonReportPhase(int i) {
-        store.setValue(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE, i);
-    }
-
-    public void toggleForceDisplay() {
-        store.setValue(FORCE_DISPLAY_ENABLED, !getBoolean(FORCE_DISPLAY_ENABLED));
-    }
-
-    public void setForceDisplayEnabled(boolean b) {
-        store.setValue(FORCE_DISPLAY_ENABLED, b);
-    }
-
     public void setUnitDisplayPosX(int i) {
         store.setValue(UNIT_DISPLAY_POS_X, i);
     }
@@ -2448,18 +2231,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(GPU_CONTACTS_ENABLED, !getGpuContactsEnabled());
     }
 
-    public void toggleBotCommandsEnabled() {
-        setBotCommandsEnabled(!getBotCommandsEnabled());
-    }
-
-    public int getBotCommandsAutoDisplayNonReportPhase() {
-        return store.getInt(BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
-    public int getBotCommandsAutoDisplayReportPhase() {
-        return store.getInt(BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
 
     public void setMinimapZoom(int zoom) {
         store.setValue(MINI_MAP_ZOOM, zoom);
@@ -2475,30 +2246,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setMoveDisplayTabDuringMovePhases(boolean b) {
         store.setValue(MOVE_DISPLAY_TAB_DURING_PHASES, b);
-    }
-
-    public void setMiniReportEnabled(boolean b) {
-        store.setValue(MINI_REPORT_ENABLED, b);
-    }
-
-    public void toggleRoundReportEnabled() {
-        setMiniReportEnabled(!getMiniReportEnabled());
-    }
-
-    public void setMiniReportPosX(int i) {
-        store.setValue(MINI_REPORT_POS_X, i);
-    }
-
-    public void setMiniReportPosY(int i) {
-        store.setValue(MINI_REPORT_POS_Y, i);
-    }
-
-    public void setMiniReportAutoDisplayReportPhase(int i) {
-        store.setValue(MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setMiniReportAutoDisplayNonReportPhase(int i) {
-        store.setValue(MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE, i);
     }
 
     public void setMiniReportShowSprites(boolean b) {
@@ -2521,56 +2268,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(MINI_REPORT_SHOW_FILTER, b);
     }
 
-    public void setPlayerListEnabled(boolean b) {
-        store.setValue(PLAYER_LIST_ENABLED, b);
-    }
-
-    public void togglePlayerListEnabled() {
-        setPlayerListEnabled(!getPlayerListEnabled());
-    }
-
-    public void setPlayerListPosX(int i) {
-        store.setValue(PLAYER_LIST_POS_X, i);
-    }
-
-    public void setPlayerListPosY(int i) {
-        store.setValue(PLAYER_LIST_POS_Y, i);
-    }
-
-    public void setRoundsInAirEnabled(boolean b) {
-        store.setValue(ROUNDS_IN_AIR_ENABLED, b);
-    }
-
-    public void toggleRoundsInAirEnabled() {
-        setRoundsInAirEnabled(!getRoundsInAirEnabled());
-    }
-
-    public void setRoundsInAirPosX(int i) {
-        store.setValue(ROUNDS_IN_AIR_POS_X, i);
-    }
-
-    public void setRoundsInAirPosY(int i) {
-        store.setValue(ROUNDS_IN_AIR_POS_Y, i);
-    }
-
-    public void setPlayerListAutoDisplayReportPhase(int i) {
-        store.setValue(PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setPlayerListAutoDisplayNonReportPhase(int i) {
-        store.setValue(PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE, i);
-    }
-
     public void setTeamColoring(boolean bt) {
         store.setValue(TEAM_COLORING, bt);
-    }
-
-    public void setMiniReportSizeHeight(int i) {
-        store.setValue(MINI_REPORT_SIZE_HEIGHT, i);
-    }
-
-    public void setMiniReportSizeWidth(int i) {
-        store.setValue(MINI_REPORT_SIZE_WIDTH, i);
     }
 
     public void setNagForCrushingBuildings(boolean b) {
@@ -3453,10 +3152,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return getInt(PLAYERS_REMAINING_TO_SHOW);
     }
 
-    public boolean getBotCommandsEnabled() {
-        return getBoolean(BOT_COMMANDS_ENABLED);
-    }
-
     /**
      * @return {@code true} if a game only bots have units in, watched by a player, starts paused so the player can
      *       give the bots orders first
@@ -3709,26 +3404,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(PLAYERS_REMAINING_TO_SHOW, i);
     }
 
-    public void setBotCommandsEnabled(boolean state) {
-        store.setValue(BOT_COMMANDS_ENABLED, state);
-    }
-
-    public void setBotCommandsPosX(int i) {
-        store.setValue(BOT_COMMANDS_POS_X, i);
-    }
-
-    public void setBotCommandsPosY(int i) {
-        store.setValue(BOT_COMMANDS_POS_Y, i);
-    }
-
-    public int getBotCommandsPosX() {
-        return getInt(BOT_COMMANDS_POS_X);
-    }
-
-    public int getBotCommandsPosY() {
-        return getInt(BOT_COMMANDS_POS_Y);
-    }
-
     public void togglePlanetaryConditionsOverlay() {
         store.setValue(SHOW_PLANETARY_CONDITIONS_OVERLAY, !getBoolean(SHOW_PLANETARY_CONDITIONS_OVERLAY));
     }
@@ -3978,58 +3653,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public void setNagForOddSizedBoard(boolean value) {
         store.setValue(NAG_FOR_ODD_SIZED_BOARD, value);
     }
-
-    public void setForceDisplayBtnID(boolean value) {store.setValue(FORCE_DISPLAY_BTN_ID, value);}
-
-    public boolean getForceDisplayBtnID() {return getBoolean(FORCE_DISPLAY_BTN_ID);}
-
-    public void setForceDisplayBtnPilot(boolean value) {store.setValue(FORCE_DISPLAY_BTN_PILOT, value);}
-
-    public boolean getForceDisplayBtnPilot() {return getBoolean(FORCE_DISPLAY_BTN_PILOT);}
-
-    public void setForceDisplayBtnMP(boolean value) {store.setValue(FORCE_DISPLAY_BTN_MP, value);}
-
-    public boolean getForceDisplayBtnMP() {return getBoolean(FORCE_DISPLAY_BTN_MP);}
-
-    public void setForceDisplayBtnHeat(boolean value) {store.setValue(FORCE_DISPLAY_BTN_HEAT, value);}
-
-    public boolean getForceDisplayBtnHeat() {return getBoolean(FORCE_DISPLAY_BTN_HEAT);}
-
-    public void setForceDisplayBtnWeapons(boolean value) {store.setValue(FORCE_DISPLAY_BTN_WEAPONS, value);}
-
-    public boolean getForceDisplayBtnWeapons() {return getBoolean(FORCE_DISPLAY_BTN_WEAPONS);}
-
-    public void setForceDisplayBtnDamageDesc(boolean value) {store.setValue(FORCE_DISPLAY_BTN_DAMAGE_DESC, value);}
-
-    public boolean getForceDisplayBtnDamageDesc() {return getBoolean(FORCE_DISPLAY_BTN_DAMAGE_DESC);}
-
-    public void setForceDisplayBtnArmor(boolean value) {store.setValue(FORCE_DISPLAY_BTN_ARMOR, value);}
-
-    public boolean getForceDisplayBtnArmor() {return getBoolean(FORCE_DISPLAY_BTN_ARMOR);}
-
-    public void setForceDisplayBtnTonnage(boolean value) {store.setValue(FORCE_DISPLAY_BTN_TONNAGE, value);}
-
-    public boolean getForceDisplayBtnTonnage() {return getBoolean(FORCE_DISPLAY_BTN_TONNAGE);}
-
-    public void setForceDisplayBtnRole(boolean value) {store.setValue(FORCE_DISPLAY_BTN_ROLE, value);}
-
-    public boolean getForceDisplayBtnRole() {return getBoolean(FORCE_DISPLAY_BTN_ROLE);}
-
-    public void setForceDisplayBtnECM(boolean value) {store.setValue(FORCE_DISPLAY_BTN_ECM, value);}
-
-    public boolean getForceDisplayBtnECM() {return getBoolean(FORCE_DISPLAY_BTN_ECM);}
-
-    public void setForceDisplayBtnQuirks(boolean value) {store.setValue(FORCE_DISPLAY_BTN_QUIRKS, value);}
-
-    public boolean getForceDisplayBtnQuirks() {return getBoolean(FORCE_DISPLAY_BTN_QUIRKS);}
-
-    public void setForceDisplayBtnC3(boolean value) {store.setValue(FORCE_DISPLAY_BTN_C3, value);}
-
-    public boolean getForceDisplayBtnC3() {return getBoolean(FORCE_DISPLAY_BTN_C3);}
-
-    public void setForceDisplayBtnMisc(boolean value) {store.setValue(FORCE_DISPLAY_BTN_MISC, value);}
-
-    public boolean getForceDisplayBtnMisc() {return getBoolean(FORCE_DISPLAY_BTN_MISC);}
 
     // endregion Ruler Diagram
 }

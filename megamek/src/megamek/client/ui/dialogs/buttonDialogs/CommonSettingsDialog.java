@@ -461,14 +461,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     // Auto Display
     private JComboBox<String> unitDisplayAutoDisplayReportCombo;
     private JComboBox<String> unitDisplayAutoDisplayNonReportCombo;
-    private JComboBox<String> miniReportAutoDisplayReportCombo;
-    private JComboBox<String> miniReportAutoDisplayNonReportCombo;
-    private JComboBox<String> playerListAutoDisplayReportCombo;
-    private JComboBox<String> playerListAutoDisplayNonReportCombo;
-    private JComboBox<String> forceDisplayAutoDisplayReportCombo;
-    private JComboBox<String> forceDisplayAutoDisplayNonReportCombo;
-    private JComboBox<String> botCommandsAutoDisplayReportCombo;
-    private JComboBox<String> botCommandsAutoDisplayNonReportCombo;
     private JCheckBox displayMoveDisplayDuringMovePhases;
     private JCheckBox displayFireDisplayDuringFirePhases;
 
@@ -738,11 +730,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                                   path(CommonSettingsPane.SETTINGS_AUTODISPLAY),
                                   autoDisplay,
                                   section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".unit", 0),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".report", 1),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".players", 2),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".force", 3),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".bots", 4),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".tabs", 5)));
+                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".tabs", 1)));
 
         CommonSettingsPane.SectionedContent aiDisplay = sectionedContent(aiDisplayPanel(),
                                                                          CommonSettingsPane.SETTINGS_AIDISPLAY);
@@ -2906,14 +2894,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         unitDisplayAutoDisplayReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayReportPhase());
         unitDisplayAutoDisplayNonReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayNonReportPhase());
-        miniReportAutoDisplayReportCombo.setSelectedItem(GUIP.getMiniReportAutoDisplayReportPhase());
-        miniReportAutoDisplayNonReportCombo.setSelectedItem(GUIP.getMiniReportAutoDisplayNonReportPhase());
-        playerListAutoDisplayReportCombo.setSelectedItem(GUIP.getPlayerListAutoDisplayReportPhase());
-        playerListAutoDisplayNonReportCombo.setSelectedItem(GUIP.getPlayerListAutoDisplayNonReportPhase());
-        forceDisplayAutoDisplayReportCombo.setSelectedItem(GUIP.getForceDisplayAutoDisplayReportPhase());
-        forceDisplayAutoDisplayNonReportCombo.setSelectedItem(GUIP.getForceDisplayAutoDisplayNonReportPhase());
-        botCommandsAutoDisplayReportCombo.setSelectedItem(GUIP.getBotCommandsAutoDisplayReportPhase());
-        botCommandsAutoDisplayNonReportCombo.setSelectedItem(GUIP.getBotCommandsAutoDisplayNonReportPhase());
         displayMoveDisplayDuringMovePhases.setSelected(GUIP.getMoveDisplayTabDuringMovePhases());
         displayFireDisplayDuringFirePhases.setSelected(GUIP.getFireDisplayTabDuringFiringPhases());
 
@@ -3333,14 +3313,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         GUIP.setUnitDisplayAutoDisplayReportPhase(unitDisplayAutoDisplayReportCombo.getSelectedIndex());
         GUIP.setUnitDisplayAutoDisplayNonReportPhase(unitDisplayAutoDisplayNonReportCombo.getSelectedIndex());
-        GUIP.setMiniReportAutoDisplayReportPhase(miniReportAutoDisplayReportCombo.getSelectedIndex());
-        GUIP.setMiniReportAutoDisplayNonReportPhase(miniReportAutoDisplayNonReportCombo.getSelectedIndex());
-        GUIP.setPlayerListAutoDisplayReportPhase(playerListAutoDisplayReportCombo.getSelectedIndex());
-        GUIP.setPlayerListAutoDisplayNonReportPhase(playerListAutoDisplayNonReportCombo.getSelectedIndex());
-        GUIP.setForceDisplayAutoDisplayReportPhase(forceDisplayAutoDisplayReportCombo.getSelectedIndex());
-        GUIP.setForceDisplayAutoDisplayNonReportPhase(forceDisplayAutoDisplayNonReportCombo.getSelectedIndex());
-        GUIP.setBotCommandAutoDisplayReportPhase(botCommandsAutoDisplayReportCombo.getSelectedIndex());
-        GUIP.setBotCommandAutoDisplayNonReportPhase(botCommandsAutoDisplayNonReportCombo.getSelectedIndex());
         GUIP.setMoveDisplayTabDuringMovePhases(displayMoveDisplayDuringMovePhases.isSelected());
         GUIP.setFireDisplayTabDuringFiringPhases(displayFireDisplayDuringFirePhases.isSelected());
 
@@ -3752,46 +3724,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         comps.add(List.of(createAutoDisplayPhaseGrid("UnitDisplay",
               unitDisplayReportLabel, unitDisplayAutoDisplayReportCombo,
               unitDisplayNonReportLabel, unitDisplayAutoDisplayNonReportCombo)));
-
-        addLineSpacer(comps);
-
-        JLabel miniReportReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-        miniReportAutoDisplayReportCombo = createHideShowComboBox(GUIP.getMiniReportAutoDisplayReportPhase());
-        JLabel miniReportNonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-        miniReportAutoDisplayNonReportCombo = createHideShowComboBox(GUIP.getMiniReportAutoDisplayNonReportPhase());
-        comps.add(List.of(createAutoDisplayPhaseGrid("MiniReport",
-              miniReportReportLabel, miniReportAutoDisplayReportCombo,
-              miniReportNonReportLabel, miniReportAutoDisplayNonReportCombo)));
-
-        addLineSpacer(comps);
-
-        JLabel playerListReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-        playerListAutoDisplayReportCombo = createHideShowComboBox(GUIP.getPlayerListAutoDisplayReportPhase());
-        JLabel playerListNonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-        playerListAutoDisplayNonReportCombo = createHideShowComboBox(GUIP.getPlayerListAutoDisplayNonReportPhase());
-        comps.add(List.of(createAutoDisplayPhaseGrid("PlayerList",
-              playerListReportLabel, playerListAutoDisplayReportCombo,
-              playerListNonReportLabel, playerListAutoDisplayNonReportCombo)));
-
-        addLineSpacer(comps);
-
-        JLabel forceDisplayReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-        forceDisplayAutoDisplayReportCombo = createHideShowComboBox(GUIP.getForceDisplayAutoDisplayReportPhase());
-        JLabel forceDisplayNonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-        forceDisplayAutoDisplayNonReportCombo = createHideShowComboBox(GUIP.getForceDisplayAutoDisplayNonReportPhase());
-        comps.add(List.of(createAutoDisplayPhaseGrid("ForceDisplay",
-              forceDisplayReportLabel, forceDisplayAutoDisplayReportCombo,
-              forceDisplayNonReportLabel, forceDisplayAutoDisplayNonReportCombo)));
-
-        addLineSpacer(comps);
-
-        JLabel botCommandsReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-        botCommandsAutoDisplayReportCombo = createHideShowComboBox(GUIP.getBotCommandsAutoDisplayReportPhase());
-        JLabel botCommandsNonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-        botCommandsAutoDisplayNonReportCombo = createHideShowComboBox(GUIP.getBotCommandsAutoDisplayNonReportPhase());
-        comps.add(List.of(createAutoDisplayPhaseGrid("BotCommands",
-              botCommandsReportLabel, botCommandsAutoDisplayReportCombo,
-              botCommandsNonReportLabel, botCommandsAutoDisplayNonReportCombo)));
 
         addLineSpacer(comps);
 

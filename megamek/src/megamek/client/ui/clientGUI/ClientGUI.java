@@ -2206,7 +2206,7 @@ public class ClientGUI extends AbstractClientGUI
         DialogAnswer answer = askRows(null, Messages.getString("PlayerListDialog.title"), rows, false, List.of(),
               null, List.of(Messages.getString("Okay"), Messages.getString("Cancel")), 1);
         if (answer == null) {
-            PlayerListDialog dialog = new PlayerListDialog(frame, client, true);
+            PlayerListDialog dialog = new PlayerListDialog(frame, client);
             dialog.setVisible(true);
             return Optional.ofNullable(dialog.getSelected());
         }

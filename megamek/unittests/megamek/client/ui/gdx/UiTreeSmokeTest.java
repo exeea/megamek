@@ -81,8 +81,7 @@ class UiTreeSmokeTest {
               sidebar("overlays", "overlays.planetary", "overlays.toasts", "overlays.trace"),
               sidebar("buttonOrder", "buttonOrder.movement", "buttonOrder.deployment", "buttonOrder.firing",
                     "buttonOrder.physical", "buttonOrder.targeting"),
-              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.report",
-                    "autoDisplay.players", "autoDisplay.force", "autoDisplay.bots", "autoDisplay.tabs"),
+              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.tabs"),
               sidebar("aiDisplay", "aiDisplay.settings"),
               sidebar("advanced", "advanced.timing", "advanced.safety"));
     }

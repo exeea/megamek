@@ -68,20 +68,10 @@ class GpuSwingCutSmokeTest {
           GamePhase.PHYSICAL, GamePhase.PHYSICAL_REPORT, GamePhase.END_REPORT);
     /** The preferences that show the client's auxiliary windows, each switched on in every phase. */
     private static final List<String> WINDOWS = List.of(GUIPreferences.MINI_MAP_ENABLED,
-          GUIPreferences.PLAYER_LIST_ENABLED, GUIPreferences.ROUNDS_IN_AIR_ENABLED,
-          GUIPreferences.FORCE_DISPLAY_ENABLED, GUIPreferences.UNIT_DISPLAY_ENABLED,
-          GUIPreferences.MINI_REPORT_ENABLED, GUIPreferences.BOT_COMMANDS_ENABLED);
+          GUIPreferences.UNIT_DISPLAY_ENABLED);
     /** The phase rules' auto-display choices, set to show their windows in every phase. */
-    private static final List<String> SHOWN = List.of(GUIPreferences.PLAYER_LIST_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.PLAYER_LIST_AUTO_DISPLAY_NON_REPORT_PHASE,
-          GUIPreferences.FORCE_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.FORCE_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE,
-          GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE,
-          GUIPreferences.MINI_REPORT_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.MINI_REPORT_AUTO_DISPLAY_NON_REPORT_PHASE,
-          GUIPreferences.BOT_COMMANDS_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE);
+    private static final List<String> SHOWN = List.of(GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
+          GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE);
 
     /** The client's windows, real Swing dialogs owned by its Swing frame. */
     private record Client2d(JFrame frame, CommonMenuBar menus, UnitDisplayDialog unit) {
