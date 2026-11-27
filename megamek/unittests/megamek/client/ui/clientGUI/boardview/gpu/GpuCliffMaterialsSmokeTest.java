@@ -118,8 +118,10 @@ class GpuCliffMaterialsSmokeTest {
                     // This controlled normal-map probe needs its declared ambient fill in the PBR environment too.
                     // A black sky/horizon would leave self-shadowed folds lit only by weak ground bounce.
                     Color ambient = new Color(.23f, .25f, .28f, 1);
-                    terrain.setAtmosphere(new BoardAtmosphere.Lighting(light, new Color(.85f, .82f, .76f, 1),
-                          ambient, Color.BLACK, ambient, ambient, Color.WHITE, 1, 1, true));
+                    BoardAtmosphere.Lighting lighting = new BoardAtmosphere.Lighting(light,
+                          new Color(.85f, .82f, .76f, 1), ambient, Color.BLACK, ambient, ambient, Color.WHITE,
+                          1, 1, true);
+                    terrain.setAtmosphere(lighting);
                     terrain.renderShadows(camera, List.of());
                     terrain.setNormalMaps(false);
                     int[] flat = samples(surface, terrain, camera, a, b);
@@ -139,10 +141,15 @@ class GpuCliffMaterialsSmokeTest {
                         // Terrain Parallax moves the sculpted rock's maps, whether or not the normal maps shade them.
                         for (boolean normals : new boolean[] { true, false }) {
                             terrain.setNormalMaps(normals);
-                            int[] moved = samples(surface, terrain, camera, a, b);
-                            terrain.setTerrainParallax(false);
-                            int[] still = samples(surface, terrain, camera, a, b);
-                            terrain.setTerrainParallax(true);
+                            int[] moved = samples(surface, terrain, camera, a, b), still = moved;
+                            // A compiled switch: it reaches the programs with the light, and the terrain prepares them.
+                            for (boolean parallax : new boolean[] { false, true }) {
+                                terrain.setSwitches(terrain.switches().with(BoardSwitch.TERRAIN_PARALLAX, parallax));
+                                terrain.setAtmosphere(lighting);
+                                terrain.update(scene);
+                                if (parallax) { break; }
+                                still = samples(surface, terrain, camera, a, b);
+                            }
                             double parallax = difference(moved, still);
                             assertTrue(parallax > .5, "Terrain Parallax with normal maps " + normals + ": " + parallax);
                         }

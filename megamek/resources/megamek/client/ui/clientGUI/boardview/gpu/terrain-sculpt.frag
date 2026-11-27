@@ -34,7 +34,6 @@ uniform float u_metre;      // world units per metre
 // How deep the ground's visible grain (its height map) stands, in metres, for the shadow lookup (sculptShadow).
 const float RELIEF_METRES = .2;
 uniform float u_normalMaps;
-uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform vec4 u_materialCacheDebug; // draw-path tint; alpha is zero unless the session's Debug switch is on
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6

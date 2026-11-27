@@ -17,11 +17,11 @@ enum BoardSwitch {
     SPECULAR_ANTI_ALIASING("Specular anti-aliasing", 0, 1, 1, 0, 0, 1, Applies.DEFINE, "specularAntialiasingFlag",
           "Widens highlights where a surface's normals turn within a pixel, so fine relief does not sparkle. Switching "
                 + "it rebuilds the board's shaders."),
-    TERRAIN_PARALLAX("Terrain parallax", 0, 1, 1, 0, 0, 1, Applies.LIVE, null,
+    TERRAIN_PARALLAX("Terrain parallax", 0, 1, 1, 0, 0, 1, Applies.DEFINE, "terrainParallaxFlag",
           "Moves the sculpted terrain's materials with the view by their heightmaps, so stones, cracks and joints stand "
                 + "out of the ground as the camera turns. Independent of Normal maps; off is a little faster on rocky "
                 + "ground and cliffs. With Cheaper shading on, natural ground takes none; pavement, rubble and the rock "
-                + "kit still do."),
+                + "kit still do. Switching it rebuilds the board's shaders."),
     TESSELLATION("Tessellation", 0, 1, 1, 0, 0, 0, Applies.BUILD, null,
           "Rounds the sculpted banks and cliffs between their mesh points, so their outlines and the shadows they cast "
                 + "curve as the ground does. Up close it costs an integrated graphics chip a few milliseconds a frame. "

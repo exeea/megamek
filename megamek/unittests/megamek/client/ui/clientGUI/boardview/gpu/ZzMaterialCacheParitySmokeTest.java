@@ -162,9 +162,11 @@ class ZzMaterialCacheParitySmokeTest {
                             direct(terrain, frame, camera, scene, new File(output, base + "-direct.png"));
                             double directMs = frameMs(terrain, frame, camera, scene, 10);
                             if (truth && view.k() > 1) {
-                                terrain.setTerrainParallax(false);
+                                terrain.setSwitches(terrain.switches().with(BoardSwitch.TERRAIN_PARALLAX, false));
+                                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                                 direct(terrain, frame, camera, scene, new File(output, base + "-noparallax.png"));
-                                terrain.setTerrainParallax(true);
+                                terrain.setSwitches(terrain.switches().with(BoardSwitch.TERRAIN_PARALLAX, true));
+                                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                             }
                             report.append(base).append(' ')
                                   .append(transition(terrain, frame, camera, scene, output, base, waitSeconds))

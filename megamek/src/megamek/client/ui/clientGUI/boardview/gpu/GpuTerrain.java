@@ -406,7 +406,6 @@ final class GpuTerrain implements Disposable {
                 private final int baseAliases = families == null ? 0 : GpuFamilyPrograms.baseAliases(renderable.material);
                 private final boolean levelTops = families != null && GpuFamilyPrograms.isFlat(renderable.material);
                 private final int normalMapsUniform = register("u_normalMaps");
-                private final int terrainParallaxUniform = register("u_terrainParallax");
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
                 private final int magmaOceanUniform = register("u_magmaOcean");
@@ -572,7 +571,6 @@ final class GpuTerrain implements Disposable {
                     globalsPass = shadingPass;
                     if (groundTable) { bindGroundFamilies(); }
                     set(normalMapsUniform, normalMaps ? 1f : 0f);
-                    set(terrainParallaxUniform, terrainParallax ? 1f : 0f);
                     set(iceNormalsUniform, normalMaps ? 1f : 0f);
                     set(magmaTimeUniform, magmaClock);
                     set(magmaOceanScaleUniform, lavaOcean.texture() == null ? 0f : GpuOcean.lavaScale());
@@ -1396,7 +1394,6 @@ final class GpuTerrain implements Disposable {
     private int chunkRows;
     private float buildingOpacity = DEFAULT_BUILDING_OPACITY;
     private boolean normalMaps = true;
-    private boolean terrainParallax = true;
     private boolean grass = true;
     private float grassHeight = 1;
     private boolean waterEffects = true;
@@ -10924,12 +10921,6 @@ final class GpuTerrain implements Disposable {
         normalMaps = enabled;
     }
 
-    /** The sculpted terrain's heightmap parallax (terrain-materials.glsl), apart from the normal maps. */
-    void setTerrainParallax(boolean enabled) {
-        if (terrainParallax != enabled) { materialCache.invalidateAll(); }
-        terrainParallax = enabled;
-    }
-
     /**
      * The quality switches to draw with, the view's each frame before terrain preparation. The cache's fills take no
      * lighting; of the switches only the compact ground's rule switches change their material: a flip refills the pages.
@@ -10937,7 +10928,10 @@ final class GpuTerrain implements Disposable {
     void setSwitches(BoardSwitches next) {
         // Detail levels follow the detail scale (TerrainLod.select): a still camera selects again.
         if (switches.get(BoardSwitch.DETAIL_SCALE) != next.get(BoardSwitch.DETAIL_SCALE)) { detailPixelsPerUnit = Float.NaN; }
-        if (groundSwitches(switches::on) != groundSwitches(next::on)) { materialCache.invalidateAll(); }
+        if (groundSwitches(switches::on) != groundSwitches(next::on)
+              || switches.on(BoardSwitch.TERRAIN_PARALLAX) != next.on(BoardSwitch.TERRAIN_PARALLAX)) {
+            materialCache.invalidateAll();
+        }
         switches = next;
         assets.setTerrainAnisotropy(next.get(BoardSwitch.TERRAIN_ANISOTROPY));
     }

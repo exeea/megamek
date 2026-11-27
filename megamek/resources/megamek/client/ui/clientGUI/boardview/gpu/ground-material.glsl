@@ -270,10 +270,10 @@ void groundRead(GroundPixel px, float layer, float tile, float variation, bool t
 
 // Godot's heightmap parallax on the role read first (the old path's relievedProjection): its reads move against the
 // view, in each projection's frame, by its depth below the heightmap's white at its unmoved reads, one height read a
-// projection it reads. A move under half a pixel costs no read (planeReach), nor does the Terrain parallax switch off;
-// Cheaper shading takes none.
+// projection it reads. A move under half a pixel costs no read (planeReach); the Terrain parallax switch off, or
+// Cheaper shading on, compiles it out.
 GroundPixel groundRelieved(GroundPixel px, float layer, float tile, float variation, bool translated) {
-#ifndef mediumQualityFlag
+#if !defined(mediumQualityFlag) && defined(terrainParallaxFlag)
     tile = max(tile, 1e-4);
     float lying = groundLying(px);
     float side = smoothstep(.3, .7, px.side);
