@@ -804,7 +804,7 @@ final class GpuFireOrders implements AutoCloseable {
             WeaponMounted weapon = weapon(actor, eqNum);
             AmmoMounted bin = (weapon == null) ? null : bins(actor, weapon).stream().filter(choice::is).findFirst()
                   .orElse(null);
-            if ((bin == null) || (bin == GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo())) {
+            if ((bin == null) || (bin == loader(actor, weapon, bin).getLinkedAmmo())) {
                 return;
             }
             WeaponAttackAction attack = queued(fd.getAttacks(), actor, eqNum);
@@ -1017,7 +1017,8 @@ final class GpuFireOrders implements AutoCloseable {
           WeaponMounted weapon, Targetable target, @Nullable AmmoMounted bin, int aim) {
         Game game = source.currentView().game;
         List<EntityAction> before = fd.getAttacks();
-        AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
+        WeaponMounted loader = loader(actor, weapon, bin);
+        AmmoMounted loaded = loader.getLinkedAmmo();
         Map<TargetKey, Integer> serialsBefore = Map.copyOf(serials);
         TargetKey lead = lead(game, actor, before);
         // The canonical order with a stand-in for the new attack (never queued) at the attack's place
@@ -1035,7 +1036,7 @@ final class GpuFireOrders implements AutoCloseable {
             return true;
         }
         if (declared == null) {
-            if (GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo() != loaded) {
+            if (loader.getLinkedAmmo() != loaded) {
                 load(fd, actor, weapon, loaded);
             }
             fd.replaceAttacks(before);
@@ -1155,7 +1156,7 @@ final class GpuFireOrders implements AutoCloseable {
         if ((bin == null) || !bins(actor, weapon).contains(bin)) {
             return false;
         }
-        WeaponMounted member = GpuUnitRecord.ammoWeapon(weapon);
+        WeaponMounted member = loader(actor, weapon, bin);
         WeaponDisplayData.loadAmmo(((ClientGUI) fd.getClientGUI()).getClient(), actor, weapon, member, bin);
         weaponState(fd).updateForEntity(actor);
         fd.updateTarget();
@@ -1593,9 +1594,17 @@ final class GpuFireOrders implements AutoCloseable {
         return ((weapon != null) && (weapon.getEntity() == actor)) ? weapon : null;
     }
 
-    /** The bins the Unit Display's ammunition list offers for the weapon, in its order. */
+    /** The bins the weapon may load, in the ammunition list's order; a bay's by weapon type, its first type first. */
     private static List<AmmoMounted> bins(Entity actor, WeaponMounted weapon) {
-        return WeaponDisplayData.ammoChoices(actor, weapon, GpuUnitRecord.ammoWeapon(weapon)).ammo();
+        return GpuUnitRecord.ammoWeapons(weapon).stream()
+              .flatMap(member -> WeaponDisplayData.ammoChoices(actor, weapon, member).ammo().stream()).distinct()
+              .toList();
+    }
+
+    /** The weapon that loads the bin: the weapon itself, or the bay's first weapon of the type the bin is for. */
+    private static WeaponMounted loader(Entity actor, WeaponMounted weapon, @Nullable AmmoMounted bin) {
+        WeaponMounted member = (bin == null) ? null : GpuUnitRecord.ammoWeapon(actor, weapon, bin);
+        return (member == null) ? GpuUnitRecord.ammoWeapon(weapon) : member;
     }
 
     private static boolean canTwist(Entity actor, int direction) {

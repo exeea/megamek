@@ -1527,7 +1527,7 @@ final class GpuUnitSheetTabs implements Disposable {
             // A bay of several weapon types: each type loads its own bin
             for (GpuUnitRecord.BayLoad load : weapon.bayLoads()) {
                 int index = weapon.bayLoads().indexOf(load);
-                row.add(bayLoadRow(weapon, load, index, index == 0 && loads && inputs.firingActor())).left()
+                row.add(bayLoadRow(weapon, load, index, inputs.firingActor())).left()
                       .colspan(3).padBottom(4).row();
             }
             loads = false;
@@ -1560,8 +1560,8 @@ final class GpuUnitSheetTabs implements Disposable {
     }
 
     /**
-     * One weapon type of a bay with the bin its weapons load. The local firing actor's first type goes through the
-     * fire orders, as a single weapon's bin does; any other through the unit record.
+     * One weapon type of a bay with the bin its weapons load. The local firing actor's go through the fire orders, as a
+     * single weapon's bin does; any other unit's through the unit record.
      */
     private Table bayLoadRow(GpuUnitRecord.RecordWeapon weapon, GpuUnitRecord.BayLoad load, int index,
           boolean throughOrders) {

@@ -174,13 +174,6 @@ public final class UnitDisplayState {
         changed();
     }
 
-    public void selectBayWeapon(@Nullable WeaponMounted weapon) {
-        if (weapon == null || selectedWeapon == null || !selectedWeapon.getBayWeapons().contains(weapon)) { return; }
-        bayWeapon = weapon;
-        refreshAmmo();
-        changed();
-    }
-
     public WeaponDisplayData.AmmoChoices ammoChoices() {
         return selectedWeapon == null ? new WeaponDisplayData.AmmoChoices(WeaponDisplayData.AmmoChoices.Feed.NONE,
               List.of()) : WeaponDisplayData.ammoChoices(weaponEntity, selectedWeapon,

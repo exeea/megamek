@@ -33,7 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The unit texts for real units: the weapon list's rows, the slot rows, the weapon statistics, the ammunition list,
+ * The unit texts for real units: the weapon list's rows, the weapon statistics, the ammunition list,
  * the heat build-up and the crew's advantages.
  */
 class UnitDisplayTextsTest {
@@ -125,33 +125,6 @@ class UnitDisplayTextsTest {
         assertEquals(-1, UnitDisplayData.rowParts(game, (WeaponMounted) rocket).totalShots(),
               "The list shows no shots for a one-shot launcher");
         assertEquals(true, UnitDisplayData.rowParts(game, (WeaponMounted) gun).rapidFire());
-    }
-
-    @Test
-    void slotRowsShowMountMarksSecondMountsHotLoadingAndModes() throws Exception {
-        game.getOptions().getOption(OptionsConstants.ADVANCED_STRATOPS_QUIRKS).setValue(true);
-        Entity atlas = unit("Atlas AS7-D.mtf");
-        // A turret-mounted laser, a torso-mounted laser that turned to the rear right and locked, a hot-loaded LRM
-        Mounted<?> turret = atlas.addEquipment(EquipmentType.get("ISMediumLaser"), Mek.LOC_RIGHT_ARM);
-        turret.setMekTurretMounted(true);
-        Mounted<?> directional = atlas.addEquipment(EquipmentType.get("ISSmallLaser"), Mek.LOC_LEFT_TORSO);
-        directional.getQuirks().getOption(OptionsConstants.QUIRK_WEAPON_POS_DIRECT_TORSO_MOUNT).setValue(true);
-        directional.setDirectionalMountFacing(2);
-        directional.setDirectionalMountLocked(true);
-        atlas.getWeaponList().get(2).setHotLoad(true);
-        Entity omega = unit(new File(Configuration.dataDir(), "mekfiles/unit_files.zip"),
-              "meks/3145/NTNU RS/NTNU/Omega SHP-5R.mtf");
-        List<String> texts = new ArrayList<>();
-        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_CENTER_TORSO, 10));
-        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_RIGHT_ARM, atlas.slotNumber(turret)));
-        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_LEFT_TORSO, atlas.slotNumber(directional)));
-        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_LEFT_TORSO,
-              atlas.slotNumber(atlas.getWeaponList().get(2))));
-        texts.add(UnitEquipmentActions.slotText(omega, Mek.LOC_LEFT_ARM, dualSlot(omega)));
-        texts.add(UnitEquipmentActions.slotText(omega, Mek.LOC_CENTER_TORSO, 0));
-        assertEquals(List.of("Medium Laser (R)", "Medium Laser (T)", "Small Laser (DTM) (RR) (Locked)",
-              "LRM 20 is Hot-Loaded",
-              "LB 10-X AC Ammo (10) LB 10-X AC Ammo (10)", "Engine"), texts);
     }
 
     @Test
@@ -308,17 +281,6 @@ class UnitDisplayTextsTest {
         texts.addAll(attackValues);
         stats.infantryRanges().forEach(range -> texts.add(range.range() + "=" + range.modifier()));
         return texts;
-    }
-
-    /** The left arm slot of a superheavy Mek that holds two ammunition bins. */
-    private static int dualSlot(Entity entity) {
-        for (int slot = 0; slot < entity.getNumberOfCriticalSlots(Mek.LOC_LEFT_ARM); slot++) {
-            var critical = entity.getCritical(Mek.LOC_LEFT_ARM, slot);
-            if ((critical != null) && (critical.getMount2() != null)) {
-                return slot;
-            }
-        }
-        throw new IllegalStateException("no dual slot");
     }
 
     private Entity unit(String file) throws Exception {

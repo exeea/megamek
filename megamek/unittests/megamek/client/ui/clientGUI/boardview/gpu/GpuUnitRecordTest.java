@@ -684,6 +684,11 @@ class GpuUnitRecordTest {
             assertTrue(bay.bayLoads().get(0).name().startsWith("LRM 20"), bay.bayLoads().get(0).name());
             assertEquals(bay.ammoChoices(), bay.bayLoads().get(0).ammoChoices(),
                   "The first type is the bay's own list");
+            // The fire orders name the same weapons: one of each type, and the one whose type loads a bin
+            WeaponMounted first = added[0].getBayWeapon(0);
+            assertEquals(List.of(first, added[1]), GpuUnitRecord.ammoWeapons(added[0]));
+            assertSame(added[1], GpuUnitRecord.ammoWeapon(union, added[0], bins[1]));
+            assertSame(first, GpuUnitRecord.ammoWeapon(union, added[0], first.getLinkedAmmo()));
             GpuUnitRecord.BayLoad load = bay.bayLoads().get(1);
             assertEquals(List.of(launcherNum, "LRM 15", 0),
                   List.of(load.memberEqNum(), load.name(), load.loadedAmmo()));

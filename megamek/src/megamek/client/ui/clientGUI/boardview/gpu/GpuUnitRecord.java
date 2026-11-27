@@ -763,11 +763,7 @@ final class GpuUnitRecord {
             return loads;
         }
         List<WeaponMounted> members = bay.getBayWeapons();
-        for (WeaponMounted member : members) {
-            if (members.stream().takeWhile(other -> other != member)
-                  .anyMatch(other -> other.getType().equals(member.getType()))) {
-                continue;
-            }
+        for (WeaponMounted member : ammoWeapons(bay)) {
             List<AmmoMounted> bins = WeaponDisplayData.ammoChoices(entity, bay, member).ammo();
             if (!bins.isEmpty()) {
                 long count = members.stream().filter(other -> other.getType().equals(member.getType())).count();
@@ -787,6 +783,30 @@ final class GpuUnitRecord {
     static WeaponMounted ammoWeapon(WeaponMounted weapon) {
         return ((weapon.getType() instanceof BayWeapon) && !weapon.getBayWeapons().isEmpty())
               ? weapon.getBayWeapon(0) : weapon;
+    }
+
+    /**
+     * The weapons whose ammunition a listed weapon offers: the first weapon of each type a bay holds, in the bay's
+     * order; the weapon itself when it is no bay.
+     */
+    static List<WeaponMounted> ammoWeapons(WeaponMounted weapon) {
+        if (!(weapon.getType() instanceof BayWeapon) || weapon.getBayWeapons().isEmpty()) {
+            return List.of(weapon);
+        }
+        List<WeaponMounted> firsts = new ArrayList<>();
+        for (WeaponMounted member : weapon.getBayWeapons()) {
+            if (firsts.stream().noneMatch(first -> first.getType().equals(member.getType()))) {
+                firsts.add(member);
+            }
+        }
+        return firsts;
+    }
+
+    /** The one of {@link #ammoWeapons} whose ammunition list offers the bin; null when none does. */
+    static @Nullable WeaponMounted ammoWeapon(Entity entity, WeaponMounted weapon, AmmoMounted bin) {
+        return ammoWeapons(weapon).stream()
+              .filter(member -> WeaponDisplayData.ammoChoices(entity, weapon, member).ammo().contains(bin))
+              .findFirst().orElse(null);
     }
 
     /** Every piece of equipment the Systems tab lists with a mode list, as it offers it to the owner. */
