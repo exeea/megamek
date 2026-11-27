@@ -31,6 +31,13 @@ final class FieldBoard {
     private static final float FOLD = .1f;
     /** Squared distances closer than this are one distance (steps meeting at a corner sample). */
     private static final float TIE = 1e-6f;
+    /** How far above its foot a wall's rock relief eases in, metres (ChunkField.Wall). */
+    static final float FOOT_EASE = 1.5f;
+    /**
+     * How far a cliff's foot stands out from its rim's row, in rooms: today's cliff takes .6 of the room to each side
+     * of its edge (BoardRelief#room), its talus between the two (BoardRelief#transition).
+     */
+    private static final float TALUS_RUN = 1.2f;
     /** The banks' level-set grid's spacing, in metres. */
     private static final float GRID = 2;
     /**
@@ -69,7 +76,7 @@ final class FieldBoard {
     private final float[][][][] gaps;
     final float width, height, levelZ, metre, room, edge, taper, keep, recess, bankRadius, bankMix, cliffRadius, maxMove, farReach;
     /** BoardRelief#metres of the evaluator's fixed lengths (in the order they are used), read once. */
-    private final float probe, limit, settled, shoulder, talusReach, talusNoise;
+    private final float probe, limit, settled, shoulder;
     private final BoardRelief.StepOutline outline;
     /**
      * The moved samples per board column x + 1 (with a column of margin either side for edges and corners off the
@@ -140,8 +147,6 @@ final class FieldBoard {
         limit = BoardRelief.metres(4);
         settled = BoardRelief.metres(.02f);
         shoulder = BoardRelief.metres(35);
-        talusReach = BoardRelief.metres(6);
-        talusNoise = BoardRelief.metres(9);
         boolean incremental = previous != null && changed != null && previous.cols == cols && previous.rows == rows
               && previous.outline == outline && previous.width == width && previous.levelZ == levelZ;
         if (!incremental) {
@@ -538,7 +543,13 @@ final class FieldBoard {
     static Coords unpacked(int packed) { return packed < 0 ? null : new Coords(packed / 4096, packed % 4096); }
 
     record Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined,
-          boolean plated) {
+          boolean plated, Segment rim) {
+        /** A step whose rim stands on its own line ({@code rim} null); a wall's can stand off it (#canonicalEdge). */
+        Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined,
+              boolean plated) {
+            this(ax, ay, bx, by, low, high, cliff, top, joined, plated, null);
+        }
+
         float distance(float x, float y) { return (float) Math.sqrt(squared(x, y)); }
 
         float squared(float x, float y) {
@@ -1297,6 +1308,48 @@ final class FieldBoard {
         return new float[] { dx, dy, relief, share };
     }
 
+    /** The run of a cliff's talus, from its foot back to its face (#footPush; BoardRelief#rockPoint). */
+    static float talusRun() { return TALUS_RUN * BoardRelief.metres(BoardRelief.TRANSITION); }
+
+    /**
+     * How far a wall's foot stands out from its rim's row at (x, y) on it, as today's does: its talus's run
+     * ({@link #TALUS_RUN}) and today's rock relief at the foot, averaged along the wall over (sx, sy) either way as
+     * the rim's (#rimMove), beyond {@code relief}, the rim's, by {@code share}, the share of its relief the wall
+     * keeps there. The wall's rows come down to the foot along today's talus (ChunkField.Wall).
+     */
+    private float footPush(float x, float y, float sx, float sy, Coords upper, Coords lower, int family, float relief,
+          float share) {
+        float top = level(upper) * levelZ, bottom = level(lower) * levelZ;
+        float drop = Math.max(level(upper) - level(lower), 3) * levelZ;
+        float foot = .5f * BoardRelief.wallRelief(x, y, bottom, bottom, top, drop, family)
+              + .25f * BoardRelief.wallRelief(x - sx, y - sy, bottom, bottom, top, drop, family)
+              + .25f * BoardRelief.wallRelief(x + sx, y + sy, bottom, bottom, top, drop, family);
+        return TALUS_RUN * room + Math.clamp(foot - relief, -.5f * room, 1.5f * room) * share;
+    }
+
+    /**
+     * The share of a foot's push (ux, uy) from (x, y) that keeps the foot off the flat ground kept round a hex's
+     * centre and off the roads' ground: whole, or less by sixths.
+     */
+    private float footShare(float x, float y, float ux, float uy) {
+        for (int i = 6; i > 0; i--) {
+            float px = x + ux * i / 6, py = y + uy * i / 6;
+            Coords at = hexAt(px, py);
+            if (!inside(at) || Math.hypot(px - centerX(at), py - centerY(at)) >= keep && !roads.reserved(at, px, py)) {
+                return i / 6f;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * How much of a wall takes its corner's column {@code along} its edge from that corner (0 to 1), or, at a corner
+     * without one, how much of its relief has faded out there (ChunkField.Wall, #canonicalEdge's foot).
+     */
+    static float cornerShare(float along, boolean column) {
+        return 1 - BoardRelief.smooth(along / (column ? .3f : .15f));
+    }
+
     /** Whether a neighbour in direction d comes after the hex (a larger column, or the same column and a larger row). */
     private static boolean later(int d) { return d >= 1 && d <= 3; }
 
@@ -1392,15 +1445,42 @@ final class FieldBoard {
                 // by the hold at the rim's height, its share, and the hexes that take it, a bit each.
                 float top = Math.max(level(t[0]), Math.max(level(t[1]), level(t[2]))) * levelZ, rise = 1;
                 for (Coords c : t) { rise = Math.min(rise, relief(c, cornerX(h, k), cornerY(h, k), top)); }
-                boolean parts = rise > share;
-                for (int[] p : pairs) { parts &= side[p[0]] == side[p[1]] || leans(t[p[0]], t[p[1]]); }
-                if (parts) {
-                    result = new float[] { result[0], result[1], 0, move[2], result[4], move[0] * rise, move[1] * rise,
-                          move[3] * rise, (side[0] ? 1 : 0) | (side[1] ? 2 : 0) | (side[2] ? 4 : 0) };
+                boolean leaning = true, dry = true;
+                for (int[] p : pairs) { leaning &= side[p[0]] == side[p[1]] || leans(t[p[0]], t[p[1]]); }
+                for (Coords c : t) { dry &= shore.family(c) < 0 && !portal(c); }
+                boolean parts = leaning && rise > share;
+                // The foot's push (#footPush), which the hexes below take: along the corner's own direction, as the
+                // walls' columns there stand (ChunkField.Wall#cornerColumn: out of the one hex above or into the
+                // one below, the rock the first hex above's; they keep one where the two hexes on one side are level).
+                int ups = (side[0] ? 1 : 0) + (side[1] ? 1 : 0) + (side[2] ? 1 : 0), one = 0, first = -1, other = -1;
+                for (int i = 0; i < 3; i++) {
+                    if (side[i] == (ups == 1)) { one = i; } else { other = i; }
+                    if (side[i] && (first < 0 || before(t[i], t[first]))) { first = i; }
+                }
+                boolean column = level(t[3 - one - other]) == level(t[other]);
+                float ux = 0, uy = 0;
+                if (leaning && dry && !Float.isNaN(move[2])) {
+                    float dx = cornerX(h, k) - centerX(t[one]), dy = cornerY(h, k) - centerY(t[one]);
+                    float out = footPush(cornerX(h, k), cornerY(h, k), 0, 0, upperHex, lowerHex, family(t[first]),
+                          move[2], column ? move[3] : 0) * share / ((ups == 1 ? 1 : -1) * (float) Math.hypot(dx, dy));
+                    out *= footShare(cornerX(h, k) + result[0], cornerY(h, k) + result[1], dx * out, dy * out);
+                    ux = dx * out;
+                    uy = dy * out;
+                }
+                if (parts || ux != 0 || uy != 0) {
+                    float held = parts ? rise : share;
+                    result = new float[] { result[0] + ux, result[1] + uy, 0, move[2], result[4], move[0] * held,
+                          move[1] * held, move[3] * held, (side[0] ? 1 : 0) | (side[1] ? 2 : 0) | (side[2] ? 4 : 0),
+                          ux, uy, column ? 1 : 0 };
                 }
             }
         }
         return result;
+    }
+
+    /** Whether hex a comes before hex b: a smaller column, or the same column and a smaller row. */
+    private static boolean before(Coords a, Coords b) {
+        return a.getX() < b.getX() || a.getX() == b.getX() && a.getY() < b.getY();
     }
 
     /** Whether the step between u and v is a wall whose row the field moves (#canonicalEdge). */
@@ -1410,10 +1490,10 @@ final class FieldBoard {
         return wall(u, v) && !plate(u) && !plate(v) && level(u) != level(v);
     }
 
-    /** Whether the wall between u and v can lean (#latticeMove): a stream hex's step has no wall to (#stream). */
+    /** Whether the wall between u and v can part its rows (#latticeMove): a stream hex's step has none (#stream). */
     private boolean leans(Coords u, Coords v) { return rowWall(u, v) && !stream(u, v) && !stream(v, u); }
 
-    /** Corner k of hex h where h stands over a leaning wall there: the rim's move, as #corner's; else null. */
+    /** Corner k of hex h where h stands over a wall with two rows there: the rim's move, as #corner's; else null. */
     private float[] rimCorner(Coords h, int k) {
         float[] c = cornerMove(h, k);
         if (c.length <= 5) { return null; }
@@ -1428,9 +1508,10 @@ final class FieldBoard {
     }
 
     /**
-     * The moves hex h's own lattice takes along its edge e: the row's (#edgeMove), but for the hexes over a wall that
-     * leans round a ground portal. Its foot keeps the row, on the edge the portal's head is set into, as today's foot;
-     * the hexes above stand back with the rim, as today's rim does above the head (#canonicalEdge, #corner).
+     * The moves hex h's own lattice takes along its edge e: the row's (#edgeMove), but for the hexes over a wall with
+     * two rows. Its foot's row is the lower hex's: it stands out from the rim's by the talus's run and the rock's
+     * relief at the foot (#footPush) and, round a ground portal, on the edge the portal's head is set into, as
+     * today's foot; the hexes above stand back with the rim, as today's rim does (#canonicalEdge, #corner).
      */
     float[][] latticeMove(Coords h, int e) {
         float[][] moves = edgeMove(h, e);
@@ -1441,7 +1522,7 @@ final class FieldBoard {
         return rim;
     }
 
-    /** Whether hex h stands over a leaning wall on its edge e: its lattice's row there is the rim's (#latticeMove). */
+    /** Whether hex h stands over a wall with two rows on its edge e: its lattice takes the rim's (#latticeMove). */
     boolean leans(Coords h, int e) {
         Coords g = h.translated(BoardGeometry.edgeDirection(e));
         return rowWall(h, g) && level(h) > level(g) && edgeMove(h, e)[0].length > 4;
@@ -1497,6 +1578,16 @@ final class FieldBoard {
         ra = ra == null ? ca : ra;
         rb = rb == null ? cb : rb;
         float[][] rim = parted || leans(u, v) ? new float[FULL + 1][] : null;
+        // The foot's push at each sample (#footPush) and at the two corners (#corner), out of the upper hex.
+        float[][] push = rim == null ? null : new float[FULL + 1][2];
+        float[] pa = { ca.length > 9 ? ca[9] : 0, ca.length > 9 ? ca[10] : 0 };
+        float[] pb = { cb.length > 9 ? cb[9] : 0, cb.length > 9 ? cb[10] : 0 };
+        // None beside water (the wall runs down to the bed) nor onto a ground portal's road hex (its approach
+        // shapes that ground up to the hex edge, where the wall's foot stays, as today's).
+        boolean dry = taken(u) && taken(v) && shore.family(u) < 0 && shore.family(v) < 0 && !portal(u) && !portal(v);
+        float lowX = centerX(upper == u ? v : u) - centerX(upper), lowY = centerY(upper == u ? v : u) - centerY(upper);
+        float lowLength = (float) Math.hypot(lowX, lowY);
+        parted |= push != null && (pa[0] != 0 || pa[1] != 0 || pb[0] != 0 || pb[1] != 0);
         // A plate's slope: the lattice's edge stands at the slope's foot, a room out of the plate from its line, so the
         // plate's block holds the whole slope (its slab). Toward a corner that keeps its fitted place (#footCorner) it
         // comes back over half the edge, straight between the samples every detail keeps: a sample moved more than its
@@ -1531,6 +1622,8 @@ final class FieldBoard {
                 if (rim != null) {
                     rim[j] = new float[] { ra[0] + (rb[0] - ra[0]) * t, ra[1] + (rb[1] - ra[1]) * t,
                           carries ? (j == 0 ? ra : rb)[3] : Float.NaN, carries ? (j == 0 ? ra : rb)[4] : 1 };
+                    push[j][0] = pa[0] + (pb[0] - pa[0]) * t;
+                    push[j][1] = pa[1] + (pb[1] - pa[1]) * t;
                 }
                 continue;
             }
@@ -1555,13 +1648,38 @@ final class FieldBoard {
                       d[3] * w * rise };
             }
             w *= kept;
+            // The corners' line (mx, my) holds their pushes (lx, ly); without them the sample stands at (qx, qy).
+            float lx = pa[0] + (pb[0] - pa[0]) * t, ly = pa[1] + (pb[1] - pa[1]) * t;
+            float qx = mx + (d[0] - mx) * w - lx * (1 - w), qy = my + (d[1] - my) * w - ly * (1 - w);
+            if (push != null) {
+                // The foot stands out by its push, blended with the corners' as the wall blends its relief with their
+                // columns (ChunkField.Wall#column), and faded as the move.
+                float first = cornerShare(t, ca.length > 11 && ca[11] > 0);
+                float second = cornerShare(1 - t, cb.length > 11 && cb[11] > 0);
+                float own = !dry || Float.isNaN(d[2]) ? 0 : (1 - first - second) / lowLength
+                      * footPush(x + d[0], y + d[1], (bx - ax) / FULL, (by - ay) / FULL, upper, upper == u ? v : u,
+                            family(upper), d[2], d[3]);
+                float px = lx + (own * lowX + first * pa[0] + second * pb[0] - lx) * w;
+                float py = ly + (own * lowY + first * pa[1] + second * pb[1] - ly) * w;
+                float share = px == 0 && py == 0 ? 0 : footShare(x + qx, y + qy, px, py);
+                qx += push[j][0] = px * share;
+                qy += push[j][1] = py * share;
+                parted |= share != 0;
+            }
             // With the relief the rim carries there and the share of the move the fades left (#rimMove).
-            points[j] = new float[] { mx + (d[0] - mx) * w, my + (d[1] - my) * w, d[2], d[3] * w };
+            points[j] = new float[] { qx, qy, d[2], d[3] * w };
         }
         // A wall's rim flattens toward its corners' line until neither hex's lattice folds on it.
-        for (int left = FULL; wall && left > 0 && !(unfolded(u, e, points, false)
-              && unfolded(v, edgeIndex(v, u), points, true)); left--) {
-            flatten(points, ca, cb, left);
+        int whole = FULL;
+        for (; wall && whole > 0 && !(unfolded(u, e, points, false) && unfolded(v, edgeIndex(v, u), points, true));
+              whole--) {
+            flatten(points, ca, cb, whole);
+        }
+        // The pushes its samples keep flatten with them, toward the corners' own.
+        for (int j = 1; push != null && whole < FULL && j < FULL; j++) {
+            float t = j / (float) FULL, lx = pa[0] + (pb[0] - pa[0]) * t, ly = pa[1] + (pb[1] - pa[1]) * t;
+            push[j][0] = lx + (push[j][0] - lx) * whole / FULL;
+            push[j][1] = ly + (push[j][1] - ly) * whole / FULL;
         }
         if (!parted) { return points; }
         // The rim's row likewise, on the lattice of the hex above alone.
@@ -1570,7 +1688,7 @@ final class FieldBoard {
         }
         for (int j = 0; j <= FULL; j++) {
             float[] p = points[j];
-            points[j] = new float[] { p[0], p[1], p[2], p[3], rim[j][0], rim[j][1], rim[j][3] };
+            points[j] = new float[] { p[0], p[1], p[2], p[3], rim[j][0], rim[j][1], rim[j][3], push[j][0], push[j][1] };
         }
         return points;
     }
@@ -1646,7 +1764,7 @@ final class FieldBoard {
         // h's moved outline, at full detail.
         float[] ox = new float[6 * FULL + 1], oy = new float[6 * FULL + 1];
         for (int e = 0; e < 6; e++) {
-            float[][] d = edgeMove(h, e);
+            float[][] d = latticeMove(h, e);
             for (int j = 0; j < FULL; j++) {
                 float t = j / (float) FULL;
                 ox[e * FULL + j] = cornerX(h, e) + (cornerX(h, e + 1) - cornerX(h, e)) * t + d[j][0];
@@ -1667,7 +1785,7 @@ final class FieldBoard {
             }
         }
         for (Segment s : candidates) {
-            if (closer(s, ox, oy, reach)) { result.add(s); }
+            if (closer(s, ox, oy, reach) || s.rim() != null && closer(s.rim(), ox, oy, reach)) { result.add(s); }
         }
         return List.copyOf(result);
     }
@@ -1715,9 +1833,14 @@ final class FieldBoard {
         }
         for (int j = 0; j < FULL; j++) {
             float t0 = j / (float) FULL, t1 = (j + 1) / (float) FULL;
+            // A wall with two rows (#latticeMove): the hexes at its top measure from the rim's (#height).
+            Segment rim = d[j].length <= 4 ? null
+                  : new Segment(ax + (bx - ax) * t0 + d[j][4], ay + (by - ay) * t0 + d[j][5],
+                        ax + (bx - ax) * t1 + d[j + 1][4], ay + (by - ay) * t1 + d[j + 1][5], 0, 0, true, -1, false,
+                        false);
             into.add(new Segment(ax + (bx - ax) * t0 + d[j][0], ay + (by - ay) * t0 + d[j][1],
                   ax + (bx - ax) * t1 + d[j + 1][0], ay + (by - ay) * t1 + d[j + 1][1],
-                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v), plated));
+                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v), plated, rim));
         }
     }
 
@@ -1821,7 +1944,8 @@ final class FieldBoard {
         int nearLevels = 0, nearLow = own, nearTop = -1;
         for (int i = 0; i < d.length; i++) {
             Segment s = segments.get(i);
-            d[i] = s.squared(x, y);
+            // A wall with two rows stands on its rim's line for the hexes at its top, on its foot's for the others.
+            d[i] = s.rim() != null && own >= s.high() ? s.rim().squared(x, y) : s.squared(x, y);
             lowest = Math.min(lowest, s.low());
             highest = Math.max(highest, s.high());
             // A cliff's rim and foot are its row; a bank's are its band's edges (below).
@@ -1842,17 +1966,15 @@ final class FieldBoard {
         foot = (float) Math.sqrt(foot);
         float z = lowest * levelZ, role = 0, rock = 0, band = Float.POSITIVE_INFINITY;
         float bankRim = Float.POSITIVE_INFINITY, bankFoot = Float.POSITIVE_INFINITY;
-        // Per level set k above the lowest: its nearest step, bank and cliff (with the cliff's drop), squared, from one
+        // Per level set k above the lowest: its nearest step, bank and cliff, squared, from one
         // pass over the steps, each counting for the levels it spans, in the order they are listed.
         int span = highest - lowest;
         float[] nearestTo = new float[span], bankTo = new float[span], cliffTo = new float[span];
-        int[] drops = new int[span];
         Arrays.fill(nearestTo, Float.POSITIVE_INFINITY);
         Arrays.fill(bankTo, Float.POSITIVE_INFINITY);
         float[] joinedTo = new float[span];
         Arrays.fill(joinedTo, Float.POSITIVE_INFINITY);
         Arrays.fill(cliffTo, Float.POSITIVE_INFINITY);
-        Arrays.fill(drops, 3);
         // Per level set, the nearest step of a stream hex: the lower hex's ground there is its bank slope (#stream).
         float[] streamTo = new float[span];
         Arrays.fill(streamTo, Float.POSITIVE_INFINITY);
@@ -1877,12 +1999,10 @@ final class FieldBoard {
                 }
                 else if (d[i] < cliffTo[j] - TIE) {
                     cliffTo[j] = d[i];
-                    drops[j] = Math.max(3, s.high() - s.low());
                     plateFoot[j] = plateTop(s.top());
                 }
                 else if (d[i] <= cliffTo[j] + TIE) {
                     cliffTo[j] = Math.min(cliffTo[j], d[i]);
-                    drops[j] = Math.max(drops[j], s.high() - s.low());
                     plateFoot[j] &= plateTop(s.top());
                 }
             }
@@ -1892,7 +2012,6 @@ final class FieldBoard {
             float nearest = nearestTo[k - lowest - 1], bankD = bankTo[k - lowest - 1], cliffD = cliffTo[k - lowest - 1];
             // The nearest bank a step between joined waters: its foot keeps no shelf (the bed is today's, FieldShore).
             boolean joinedBank = joinedTo[k - lowest - 1] <= bankD + TIE;
-            int drop = drops[k - lowest - 1];
             // Under a stream hex's step the lower hex's ground is the bank's slope, whole at the shared edge.
             boolean streamStep = streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY && streamTo[k - lowest - 1] <= cliffD + TIE;
             boolean in = own >= k;
@@ -1915,16 +2034,11 @@ final class FieldBoard {
             float share = 0, footShelf = 0, easedStep = 0;
             boolean step = false;
             if (weight > 0) {
-                float a = Math.min(.3f, talusReach / (drop * levelZ))
-                      * (.7f + .6f * BoardRelief.noise(x / talusNoise - 3.3f, y / talusNoise + 6.6f));
-                // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
-                // Level within a centimetre of the wall's row: the square root there turns a last-digit difference of a
-                // shared corner's place into a centimetre of height between two hexes.
-                // A plate's poured wall stands on the lower ground as today's paved wall does: no apron, no step's
-                // face.
+                // A wall's talus is its own rock's, as today's (ChunkField.Wall): the ground at its foot lies level,
+                // but under a stream hex's step. A plate's poured wall stands on the lower ground as today's paved
+                // wall does: no step's face.
                 boolean poured = plateFoot[k - lowest - 1];
-                float talus = in || poured ? 0 : streamStep ? bankSlope(s, x, y)
-                      : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(Math.max(0, s - .01f * metre) / (2 * room)));
+                float talus = in || poured || !streamStep ? 0 : bankSlope(s, x, y);
                 // Beside a stream hex's step, under a wall that stands nearer: the bank's slope by its own distance to
                 // that step runs on under the wall (the higher of it and the wall's apron), so no scarp parts the two.
                 float streamD = streamTo[k - lowest - 1] == Float.POSITIVE_INFINITY ? Float.POSITIVE_INFINITY
@@ -1938,8 +2052,7 @@ final class FieldBoard {
                 }
                 share = weight * (in ? 1 : talus);
                 step = !in && !poured
-                      && (s < (streamStep ? bankFoot(x, y, metre, room) : 2 * room)
-                            || streamD < bankFoot(x, y, metre, room));
+                      && (streamStep && s < bankFoot(x, y, metre, room) || streamD < bankFoot(x, y, metre, room));
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).
@@ -1965,9 +2078,8 @@ final class FieldBoard {
                 // outline at the lower level (#banksOnto): by its exact distance to that step, which the pavement's
                 // fit can stand off the hexes' own outline the smoothed distance follows (FieldPlates#corner).
                 float platedD = platedTo[k - lowest - 1];
-                if (platedD != Float.POSITIVE_INFINITY && platedD <= bankTo[k - lowest - 1] + TIE) {
-                    sb = (in ? -2 : 2) * (float) Math.sqrt(platedD) + room;
-                }
+                boolean whole = platedD != Float.POSITIVE_INFINITY && platedD <= bankTo[k - lowest - 1] + TIE;
+                if (whole) { sb = (in ? -2 : 2) * (float) Math.sqrt(platedD) + room; }
                 // Beside a stream hex's step a bank's band stands a transition's width further out (its top on the
                 // outline, as the stream bank's): the two bank lines join in plan. Not a bank between joined waters.
                 if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
@@ -2002,7 +2114,8 @@ final class FieldBoard {
                 // A bank's face spans its band, as today's does; the top cover's rim and foot distances run from its edges.
                 step |= !pavedLine && Math.abs(sb) < .95f * room;
                 boolean slab = pavedLine && Math.abs(sb) < room;
-                if (in && !slab) { bankRim = Math.min(bankRim, Math.max(0, -sb - .95f * room)); }
+                // The lower half of a bank that lies whole on its own side is its foot's side, as the lower hex's.
+                if (in && !slab && !(whole && sb > 0)) { bankRim = Math.min(bankRim, Math.max(0, -sb - .95f * room)); }
                 else if (!slab) { bankFoot = Math.min(bankFoot, Math.max(0, sb - .95f * room)); }
             }
             // Below a step whose higher side is water the water pours in: a fall's foot keeps no shelf.

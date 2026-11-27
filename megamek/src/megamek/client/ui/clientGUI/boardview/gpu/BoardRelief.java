@@ -3068,7 +3068,7 @@ final class BoardRelief {
     }
 
     /** The deposit's height varies continuously along a cliff, in both its main slope and its rocky relief. */
-    private static float talusHeight(float drop, float x, float y) {
+    static float talusHeight(float drop, float x, float y) {
         float cell = metres(9);
         return Math.min(.3f * drop, metres(6)) * (.7f + .6f * noise(x / cell - 3.3f, y / cell + 6.6f));
     }
@@ -4289,8 +4289,8 @@ final class BoardRelief {
 
     /**
      * A rock's point on edge e at its parameter t and height z, as today's point on the wall's face at z: where the field
-     * draws, on its moved row, or where its talus has fallen to z out from the row toward the lower hex; never below the
-     * field's own ground there.
+     * draws, on its moved row (the rim's for the hex above, the foot's for the hex below), and from the foot back on
+     * the wall's talus where z stands above the ground there (ChunkField.Wall); never below the field's own ground.
      */
     private Vector3 rockPoint(Edge edge, int e, float t, float z, List<BoardSurface.Face> destination) {
         if (fieldRows == null) { return edgePoint(edge, t, z); }
@@ -4305,20 +4305,13 @@ final class BoardRelief {
         float f = at - i;
         float x = lerp(row[i][0], row[i + 1][0], f), y = lerp(row[i][1], row[i + 1][1], f);
         float ground = topHeight(destination, x, y);
-        if (Float.isFinite(ground) && ground > z) {
-            // The talus falls off within twice the transition's width of the row (FieldBoard#height's apron): halve
-            // toward where it reaches z.
-            float near = 0, far = 2 * metres(TRANSITION);
-            for (int k = 0; k < 10; k++) {
-                float s = (near + far) / 2, g = topHeight(destination, x + edge.nx * s, y + edge.ny * s);
-                if (Float.isFinite(g) && g > z) { near = s; } else { far = s; }
-            }
-            float g = topHeight(destination, x + edge.nx * far, y + edge.ny * far);
-            if (Float.isFinite(g)) {
-                x += edge.nx * far;
-                y += edge.ny * far;
-                ground = g;
-            }
+        if (edge.lower == self && !self.liquid() && Float.isFinite(ground) && z > ground) {
+            // The wall's talus above its foot: today's curve (#transition's cliff), back toward the face. A wall
+            // that stands in water keeps none.
+            float up = Math.clamp((z - ground) / talusHeight(edge.top() - ground, x, y), 0, 1);
+            float back = FieldBoard.talusRun() * (1 - (1 - up) * (1 - up));
+            x -= edge.nx * back;
+            y -= edge.ny * back;
         }
         return new Vector3(x, y, Float.isFinite(ground) ? Math.max(z, ground) : z);
     }

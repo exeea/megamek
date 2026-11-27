@@ -203,6 +203,8 @@ final class ChunkField {
         int wallParentCount;
         /** Each edge's wall samples, from {@code wallStart[e]} to before {@code wallEnd[e]}. */
         final int[] wallStart = new int[6], wallEnd = new int[6];
+        /** Each edge's wall's first and last columns' samples, their rims' included; null without a wall. */
+        final int[][][] wallEnds = new int[6][][];
         final boolean[] flat;
         /** The lattice samples some triangle of the hex has as a corner (#emit), for the merged triangles' edges. */
         final boolean[] used;
@@ -504,7 +506,7 @@ final class ChunkField {
          * chunk's, so no crack opens between chunks at different detail.
          */
         private int[] sides() {
-            int[] result = new int[size];
+            int[] result = new int[size], borders = new int[6];
             int chunkSize = TerrainLod.CHUNK_SIZE;
             for (int e = 0; e < 6; e++) {
                 Coords g = h.translated(BoardGeometry.edgeDirection(e));
@@ -518,6 +520,17 @@ final class ChunkField {
                     if (result[v] == 0) { result[v] = side; }
                 }
                 java.util.Arrays.fill(result, wallStart[e], wallEnd[e], side);
+                borders[e] = side;
+            }
+            // The walls beside a border edge end on its corners: their end columns there morph as that edge's samples
+            // do, so the column two walls share stays one line whatever its shape between the coarser rows.
+            for (int e = 0; e < 6; e++) {
+                for (int i = 0; borders[e] != 0 && i < 2; i++) {
+                    int[][] beside = wallEnds[(e + (i == 0 ? 5 : 1)) % 6];
+                    for (int v : beside == null ? new int[0] : beside[1 - i]) {
+                        if (result[v] == 0) { result[v] = borders[e]; }
+                    }
+                }
             }
             return result;
         }
@@ -696,11 +709,23 @@ final class ChunkField {
             /** The current column's place on the row, its top and foot, its rim's relief, its corners' shares. */
             float px, py, top, bottom, rimPush, share, first, second;
             /**
-             * A wall that leans round a ground portal (FieldBoard#latticeMove): its feet's places on the lower hex's
-             * row (null for a wall that stands on its own row), the hex across, the current column's foot, its point
-             * on the hex edge and the portal's hold there at its foot and its top.
+             * A wall with two rows (FieldBoard#latticeMove): its feet's places on the lower hex's row (null for a wall
+             * that stands on its own row) and the push in them (FieldBoard#footPush), the hex across, the current
+             * column's foot, push, the talus's run in it and the talus's height, its point on the hex edge and the
+             * portal's hold there at its foot and its top.
              */
             final float[] footX, footY;
+            float[] pushX, pushY;
+            float ux, uy, runX, runY, talus;
+            /**
+             * Per end of the edge: up to which height the corner's column runs straight from its foot (NaN: by the
+             * talus's curve as everywhere). The two walls through a corner share its column, so where their rows
+             * differ (the lower hexes there stand at two levels) or their morphs do (three chunks meet there), it is
+             * one straight line between heights both keep at every detail: its foot and a level above the higher
+             * of the lower hexes. The current column's share of that line and its upper height.
+             */
+            final float[] straight = { Float.NaN, Float.NaN };
+            float chord, knot;
             final Coords across;
             final int edge;
             float fx, fy, ex, ey, holdFoot, holdTop;
@@ -750,6 +775,16 @@ final class ChunkField {
                           Math.max(landform, tops[j] - base), family);
                 }
                 Coords g = h.translated(BoardGeometry.edgeDirection(e));
+                for (int i = 0; i < 2 && footX != null; i++) {
+                    Coords o = h.translated(BoardGeometry.edgeDirection((e + (i == 0 ? 5 : 1)) % 6));
+                    if (!b.inside(o)) { continue; }
+                    // Below the wall's middle, as FieldBoard#corner parts the hexes round it.
+                    boolean lower = b.level(o) < Math.floorDiv(own + b.level(g) + 1, 2) && b.level(o) != b.level(g);
+                    int ch = chunk(h), cg = chunk(g), co = chunk(o);
+                    if (lower || ch != cg && ch != co && cg != co) {
+                        straight[i] = (Math.max(b.level(g), lower ? b.level(o) : b.level(g)) + 1) * b.levelZ;
+                    }
+                }
                 if (own > b.level(g)) {
                     corners[0] = cornerColumn(e, g, h.translated(BoardGeometry.edgeDirection((e + 5) % 6)), tops[0], moves[0]);
                     corners[1] = cornerColumn(e + 1, g, h.translated(BoardGeometry.edgeDirection((e + 1) % 6)),
@@ -812,8 +847,9 @@ final class ChunkField {
                 float z0 = height(q0 * ROWS_A_LEVEL), z1 = height(q1 * ROWS_A_LEVEL);
                 // Round a ground portal by the hold at the two rows (FieldBoard#hold), so the line stays straight
                 // between them there too.
-                float e0 = share * BoardRelief.smooth((z0 - bottom) / (1.5f * b.metre)) * b.hold(h, across, ex, ey, z0);
-                float e1 = share * BoardRelief.smooth((z1 - bottom) / (1.5f * b.metre)) * b.hold(h, across, ex, ey, z1);
+                float ease = FieldBoard.FOOT_EASE * b.metre;
+                float e0 = share * BoardRelief.smooth((z0 - bottom) / ease) * b.hold(h, across, ex, ey, z0);
+                float e1 = share * BoardRelief.smooth((z1 - bottom) / ease) * b.hold(h, across, ex, ey, z1);
                 float t = z1 - z0 < 1e-6f ? 0 : Math.clamp((zr - z0) / (z1 - z0), 0, 1);
                 out[0] += lerp(corner[q0 * 2] * e0, corner[q1 * 2] * e1, t);
                 out[1] += lerp(corner[q0 * 2 + 1] * e0, corner[q1 * 2 + 1] * e1, t);
@@ -844,6 +880,17 @@ final class ChunkField {
                 if (footX != null) {
                     fx = footX[a] + (footX[d] - footX[a]) * f;
                     fy = footY[a] + (footY[d] - footY[a]) * f;
+                    ux = pushX[a] + (pushX[d] - pushX[a]) * f;
+                    uy = pushY[a] + (pushY[d] - pushY[a]) * f;
+                    float reach = (float) Math.hypot(ux, uy), run = Math.min(reach, FieldBoard.talusRun());
+                    runX = reach > 0 ? ux * run / reach : 0;
+                    runY = reach > 0 ? uy * run / reach : 0;
+                    talus = Math.max(BoardRelief.talusHeight(top - bottom, ex, ey), .01f * b.metre);
+                    // Toward a corner whose column runs straight, eased in over half the edge: no rib stands there.
+                    float near0 = Float.isNaN(straight[0]) ? 0 : 1 - BoardRelief.smooth(along * 2);
+                    float near1 = Float.isNaN(straight[1]) ? 0 : 1 - BoardRelief.smooth((1 - along) * 2);
+                    chord = Math.max(near0, near1);
+                    knot = near0 >= near1 ? straight[0] : straight[1];
                     holdFoot = b.hold(h, across, ex, ey, bottom);
                     holdTop = b.hold(h, across, ex, ey, top);
                 }
@@ -853,8 +900,8 @@ final class ChunkField {
                     int pool = BoardRelief.poolStepFamily(chunk.scene, h, px, py);
                     if (pool != BoardSurfaceBlend.family(tile)) { columnFamily = pool; }
                 }
-                first = 1 - BoardRelief.smooth(along / (corners[0] == null ? .15f : .3f));
-                second = 1 - BoardRelief.smooth((1 - along) / (corners[1] == null ? .15f : .3f));
+                first = FieldBoard.cornerShare(along, corners[0] != null);
+                second = FieldBoard.cornerShare(1 - along, corners[1] != null);
                 if (!Float.isNaN(quay)) {
                     surface = Math.clamp(b.shore.water(quayHex, px, py), bottom, quay - QUAY_BACK * b.metre);
                 }
@@ -876,7 +923,7 @@ final class ChunkField {
                 // A row over the rim is the rim's.
                 if (zr >= top) { r = rows - 1; }
                 // The relief eases to nothing at the foot row, which stands on the lower ground's own samples.
-                float ease = outside ? 0 : BoardRelief.smooth((zr - bottom) / (1.5f * b.metre));
+                float ease = outside ? 0 : BoardRelief.smooth((zr - bottom) / (FieldBoard.FOOT_EASE * b.metre));
                 float rest = 1 - first - second;
                 // A leaning wall's rows come from its foot's row to its rim's by the portal's hold at their heights:
                 // on the edge up to the head, back above it, as today's face.
@@ -887,8 +934,18 @@ final class ChunkField {
                     int q0 = r / ROWS_A_LEVEL, q1 = Math.min(q0 + 1, (rows - 1) / ROWS_A_LEVEL);
                     float z0 = height(q0 * ROWS_A_LEVEL), z1 = height(q1 * ROWS_A_LEVEL);
                     float s = lerp(lean(z0), lean(z1), z1 - z0 < 1e-6f ? 0 : Math.clamp((zr - z0) / (z1 - z0), 0, 1));
-                    sx = fx + (px - fx) * s;
-                    sy = fy + (py - fy) * s;
+                    // Above its foot the wall stands as today's: out by the talus's run, which leaves as the talus
+                    // rises (BoardRelief#transition's cliff: whole at the foot, none from the talus's top up), and by
+                    // its relief (below); both ease in from the foot's own place, which holds the relief at the foot.
+                    float u = Math.clamp((zr - bottom) / talus, 0, 1), left = (1 - u) * (1 - u) * ease, gone = ease;
+                    if (chord > 0) {
+                        // Toward a corner whose column runs straight (#straight): the push leaves evenly up to it.
+                        float t = Math.clamp((zr - bottom) / Math.max(knot - bottom, .001f * b.metre), 0, 1);
+                        gone += (t - ease) * chord;
+                        left *= 1 - chord;
+                    }
+                    sx = fx + (px - fx + ux) * s - ux * gone + runX * left;
+                    sy = fy + (py - fy + uy) * s - uy * gone + runY * left;
                 }
                 out[0] = sx; out[1] = sy; out[2] = zr;
                 if (ease > 0 && rest > 0) {
@@ -917,6 +974,12 @@ final class ChunkField {
                     out[0] -= onx * QUAY_BACK * b.metre;
                     out[1] -= ony * QUAY_BACK * b.metre;
                 }
+            }
+
+            /** A hex's chunk, as one number. */
+            private static int chunk(Coords c) {
+                int size = TerrainLod.CHUNK_SIZE;
+                return Math.floorDiv(c.getX(), size) * 4096 + Math.floorDiv(c.getY(), size);
             }
 
             /**
@@ -1101,10 +1164,11 @@ final class ChunkField {
             // The foot is the lower hex's ground as its own block takes it: stepped back beside a containment wall
             // (FieldStamps#stepBack) as that block's samples are, so the wall meets them.
             boolean lowerWalled = other != null && FieldStamps.nearWalls(b, g, chunk::shares);
-            // A wall that leans round a ground portal stands on the lower hex's row, not under this hex's own
-            // (FieldBoard#latticeMove): its feet's places.
+            // A wall with two rows stands on the lower hex's row, not under this hex's own (FieldBoard#latticeMove):
+            // its feet's places and the push in them.
             float[][] row = wall && b.leans(h, e) ? b.edgeMove(h, e) : null;
             float[] footX = row == null ? null : new float[n + 1], footY = row == null ? null : new float[n + 1];
+            float[] pushX = row == null ? null : new float[n + 1], pushY = row == null ? null : new float[n + 1];
             for (int j = 0; j <= n; j++) {
                 int v = j == n ? vertex((e + 1) % 6, n, 0) : vertex(e, n, j);
                 samples[j] = v;
@@ -1115,6 +1179,8 @@ final class ChunkField {
                     float[] move = row[j * FieldBoard.FULL / n];
                     fx = footX[j] = c0x + (c1x - c0x) * j / n + move[0];
                     fy = footY[j] = c0y + (c1y - c0y) * j / n + move[1];
+                    pushX[j] = move[7];
+                    pushY[j] = move[8];
                 }
                 if (other != null) {
                     b.height(g, other, chunk.shares(g), fx, fy, out);
@@ -1137,6 +1203,8 @@ final class ChunkField {
             }
             Wall w = new Wall(e, outside || cast, wall, landform, otherZ, onx, ony, samples, tops, feet, finest, footX,
                   footY);
+            w.pushX = pushX;
+            w.pushY = pushY;
             w.wet = other != null && b.shore.family(g) >= 0;
             if (quay != Integer.MIN_VALUE) {
                 w.quay = quay * b.levelZ;
@@ -1202,6 +1270,12 @@ final class ChunkField {
                     int[] a = columns[c - 1], d = columns[c];
                     lip(rims[c - 1], a[a.length - 1], rims[c], d[d.length - 1]);
                 }
+            }
+            wallEnds[e] = new int[2][];
+            for (int i = 0; i < 2; i++) {
+                int[] column = columns[i * n * split];
+                wallEnds[e][i] = java.util.Arrays.copyOf(column, column.length + 1);
+                wallEnds[e][i][column.length] = rims[i * n * split];
             }
             // The side the strips' triangles face: along the row x up, or against it.
             boolean flip = ey * onx - ex * ony < 0;
