@@ -299,8 +299,8 @@ final class FieldBoard {
                 walls[x][y] |= 1 << (STREAM + e);
             }
         }
-        // A plate stands on its fitted outline: every change of level at its edges is a wall, and so is its edge to
-        // water, a quay (FieldPlates).
+        // A plate stands on its fitted outline: a change of level at its edges is a wall, and so is its edge to water,
+        // a quay (FieldPlates); where today's step is a straight concrete slope it is that slope (#pavedSlope).
         if (taken[x][y] && !dryNatural(t) && bed < 0) {
             walls[x][y] |= PLATE;
             for (int e = 0; e < 6; e++) {
@@ -309,13 +309,15 @@ final class FieldBoard {
                 if (next == null) { continue; }
                 int nextLevel = next.groundLevel() - (next.liquid().present() && shore.family(n) < 0 ? Math.max(0, next.waterDepth()) : 0);
                 // Dry natural ground a bank's drop above the plate banks down onto it on its own side (#banksOnto).
-                if ((nextLevel != level[x][y] || next.liquid().present()) && !banksOnto(scene, next, t)) {
+                if ((nextLevel != level[x][y] || next.liquid().present()) && !banksOnto(scene, next, t)
+                      && !pavedSlope(scene, t, next)) {
                     walls[x][y] |= 1 << e;
                 }
             }
         } else {
             // A step between two other hexes that ends at a plate's corner is a wall too: a bank there would have to
-            // meet the plate's level and the lower hex's at one point.
+            // meet the plate's level and the lower hex's at one point. Not where the plate slopes down to the lower of
+            // them and stands level with the other (or slopes down to both): its slope meets the bank at the corner.
             for (int e = 0; e < 6; e++) {
                 BoardScene.Tile next = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
                 if (next == null || (walls[x][y] & 1 << e) != 0) { continue; }
@@ -327,10 +329,133 @@ final class FieldBoard {
                 if (banksOnto(scene, t, next)) { continue; }
                 for (int side : new int[] { (e + 5) % 6, (e + 1) % 6 }) {
                     BoardScene.Tile third = scene.tile(at.translated(BoardGeometry.edgeDirection(side)));
-                    if (third != null && FieldPlates.takes(scene, third)) { walls[x][y] |= 1 << e; }
+                    if (third != null && FieldPlates.takes(scene, third)
+                          && !(open(scene, third, t) && open(scene, third, next))) {
+                        walls[x][y] |= 1 << e;
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Whether the step between two hexes, the upper a plate, is today's straight concrete slope down to dry ground the
+     * field takes (BoardRelief#pavedSlope: BoardRelief#band's for a paved upper hex, where the step has room).
+     */
+    private static boolean pavedSlope(BoardScene scene, BoardScene.Tile a, BoardScene.Tile b) {
+        BoardScene.Tile upper = a.groundLevel() > b.groundLevel() ? a : b, lower = upper == a ? b : a;
+        return FieldPlates.takes(scene, upper) && (dryNatural(lower) || FieldPlates.takes(scene, lower))
+              && BoardRelief.pavedSlope(scene, upper, lower);
+    }
+
+    /** Whether a plate's edge to its neighbour has no wall: dry ground at its level, or its slope (#pavedSlope). */
+    private static boolean open(BoardScene scene, BoardScene.Tile plate, BoardScene.Tile next) {
+        return !next.liquid().present() && next.groundLevel() == plate.groundLevel() || pavedSlope(scene, plate, next);
+    }
+
+    /** Whether the step between u and v is a plate's slope: no wall (#hex), the upper hex a plate. */
+    private boolean slopes(Coords u, Coords v) {
+        return inside(u) && inside(v) && level(u) != level(v) && !cliff(u, v) && plate(level(u) > level(v) ? u : v);
+    }
+
+    /** Whether a step is a plate's slope (#slopes): a bank whose upper hex is a plate. */
+    private boolean paved(Segment s) {
+        int x = s.top() / 4096, y = s.top() % 4096;
+        return !s.cliff() && s.top() >= 0 && x < walls.length && y < walls[x].length && (walls[x][y] & PLATE) != 0;
+    }
+
+    /**
+     * The line a plate's slope between u and v runs on: the edge between its corners where the pavement's fit puts
+     * them, the upper hex on its left: {x0, y0, x1, y1}. The slope stands a room to each side of it (#height).
+     */
+    private float[] slopeLine(Coords u, Coords v) {
+        int e = edgeIndex(u, v);
+        float ax = cornerX(u, e), ay = cornerY(u, e), bx = cornerX(u, e + 1), by = cornerY(u, e + 1);
+        float[] fa = FieldPlates.corner(concrete, u, e, ax, ay);
+        float[] fb = FieldPlates.corner(concrete, u, (e + 1) % 6, bx, by);
+        float x0 = ax + fa[0], y0 = ay + fa[1], x1 = bx + fb[0], y1 = by + fb[1];
+        Coords upper = level(u) > level(v) ? u : v;
+        return (x1 - x0) * (centerY(upper) - y0) - (y1 - y0) * (centerX(upper) - x0) > 0
+              ? new float[] { x0, y0, x1, y1 } : new float[] { x1, y1, x0, y0 };
+    }
+
+    /**
+     * How far the corner of hexes t stands off its fitted place for the plates' slopes that meet at it (#slopes): where
+     * two do, on both slopes' feet, a room out from each line (a mitre; straight on where the two lines are one);
+     * otherwise where it is (a slope's foot that ends there comes back to it over half the edge, #canonicalEdge).
+     */
+    private float[] footCorner(Coords[] t) {
+        float[][] out = new float[2][];
+        int count = 0;
+        for (int[] p : new int[][] { { 0, 1 }, { 0, 2 }, { 1, 2 } }) {
+            if (!slopes(t[p[0]], t[p[1]])) { continue; }
+            if (count == 2) { return new float[] { 0, 0 }; }
+            float[] line = slopeLine(t[p[0]], t[p[1]]);
+            float length = (float) Math.hypot(line[2] - line[0], line[3] - line[1]);
+            // Out of the plate: to the line's right.
+            out[count++] = new float[] { (line[3] - line[1]) / length, -(line[2] - line[0]) / length };
+        }
+        // No mitre past a right angle between the two lines (the pavement's fit can fold an outline back on itself):
+        // the corner keeps its place and the feet come back to it.
+        float spread = count < 2 ? 0 : 1 + out[0][0] * out[1][0] + out[0][1] * out[1][1];
+        return spread < 1 ? new float[] { 0, 0 }
+              : new float[] { room * (out[0][0] + out[1][0]) / spread, room * (out[0][1] + out[1][1]) / spread };
+    }
+
+    /** Whether a plate's slope stands at (x, y): within the step's room of its line (FieldRoads#walls asks). */
+    private boolean slopeAt(float x, float y) {
+        Coords here = hexAt(x, y);
+        if (!inside(here)) { return false; }
+        for (Segment s : segments(here)) {
+            if (paved(s) && s.squared(x, y) < room * room) { return true; }
+        }
+        return false;
+    }
+
+    /** Whether (x, y) lies within a plate's slope's reach: twice the step's room (its foot, a mitred corner's too). */
+    private boolean pavedNear(List<Segment> segments, float x, float y) {
+        for (Segment s : segments) {
+            if (paved(s) && s.squared(x, y) < 4 * room * room) { return true; }
+        }
+        return false;
+    }
+
+    /**
+     * The lower hex whose ground (x, y) is, for hex h at a plate's level: where the point lies past the line of a slope
+     * that comes down from that level, out of the plate (the plate's block reaches to the slope's foot,
+     * #canonicalEdge), its foot on the line within the slope or at a mitre of two such slopes. The point's place alone
+     * decides, a centimetre clear of the line and of the slope's ends, so the hexes at that level sharing a sample give
+     * it one answer; a slope that ends alone leaves the ground beyond its end to the hexes there. Null elsewhere.
+     */
+    private Coords pavedBelow(Coords h, List<Segment> segments, float x, float y) {
+        float clear = .01f * metre, best = 4 * room * room;
+        Segment line = null;
+        for (Segment s : segments) {
+            float d = s.high() == level(h) && paved(s) && s.right(x, y) > clear ? s.squared(x, y) : best;
+            if (d < best) {
+                best = d;
+                line = s;
+            }
+        }
+        if (line == null) { return null; }
+        float length = (float) Math.hypot(line.bx() - line.ax(), line.by() - line.ay());
+        float along = line.along(x, y) * length;
+        boolean within = along > clear && along < length - clear;
+        for (Segment s : segments) {
+            within |= s != line && s.high() == level(h) && paved(s) && s.squared(x, y) <= 1.01f * best + 1e-2f
+                  && s.right(x, y) > clear;
+        }
+        Coords top = within ? unpacked(line.top()) : null, below = null;
+        float near = Float.POSITIVE_INFINITY;
+        for (int e = 0; top != null && e < 6; e++) {
+            Coords g = top.translated(BoardGeometry.edgeDirection(e));
+            float dx = x - centerX(g), dy = y - centerY(g);
+            if (dx * dx + dy * dy < near && inside(g) && level(g) < level(top) && slopes(top, g)) {
+                near = dx * dx + dy * dy;
+                below = g;
+            }
+        }
+        return below;
     }
 
     private static java.util.Set<Coords> rings(java.util.Set<Coords> hexes, int rings) {
@@ -421,6 +546,18 @@ final class FieldBoard {
             float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
             float px = ax + t * dx - x, py = ay + t * dy - y;
             return px * px + py * py;
+        }
+
+        /** Where along the step's line the foot of (x, y) on it lies: 0 at a, 1 at b, past them too. */
+        float along(float x, float y) {
+            float dx = bx - ax, dy = by - ay;
+            return ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy);
+        }
+
+        /** How far (x, y) lies to the right of the step's line from a to b (negative: to its left). */
+        float right(float x, float y) {
+            float dx = bx - ax, dy = by - ay;
+            return ((x - ax) * dy - (y - ay) * dx) / (float) Math.sqrt(dx * dx + dy * dy);
         }
     }
 
@@ -919,7 +1056,7 @@ final class FieldBoard {
                 height(at, segments, share, x, y, out);
                 return out[0];
             };
-        }).places();
+        }, this::slopeAt).places();
     }
 
     /** The panels hex h's block was cut along (#walls), to draw. */
@@ -1205,7 +1342,10 @@ final class FieldBoard {
         Coords[] t = { h, h.translated(BoardGeometry.edgeDirection((k + 5) % 6)), h.translated(BoardGeometry.edgeDirection(k)) };
         float[] result = { 0, 0, 0 };
         // A corner a plate touches stands where the pavement's fit puts it; no rim moves it (FieldPlates).
-        if (plate(t[0]) || plate(t[1]) || plate(t[2])) { return FieldPlates.corner(concrete, h, k, cornerX(h, k), cornerY(h, k)); }
+        if (plate(t[0]) || plate(t[1]) || plate(t[2])) {
+            float[] fitted = FieldPlates.corner(concrete, h, k, cornerX(h, k), cornerY(h, k)), foot = footCorner(t);
+            return new float[] { fitted[0] + foot[0], fitted[1] + foot[1], fitted[2] };
+        }
         int k0 = 0;
         Coords upperHex = null, lowerHex = null;
         boolean[] side = null;
@@ -1357,9 +1497,26 @@ final class FieldBoard {
         ra = ra == null ? ca : ra;
         rb = rb == null ? cb : rb;
         float[][] rim = parted || leans(u, v) ? new float[FULL + 1][] : null;
+        // A plate's slope: the lattice's edge stands at the slope's foot, a room out of the plate from its line, so the
+        // plate's block holds the whole slope (its slab). Toward a corner that keeps its fitted place (#footCorner) it
+        // comes back over half the edge, straight between the samples every detail keeps: a sample moved more than its
+        // ring's depth would fold the lattice, and a bend between a coarser detail's samples would part the morph.
+        float[] line = slopes(u, v) ? slopeLine(u, v) : null;
+        float[] fa = line == null ? null : FieldPlates.corner(concrete, u, e, ax, ay);
+        float[] fb = line == null ? null : FieldPlates.corner(concrete, u, (e + 1) % 6, bx, by);
         for (int j = 0; j <= FULL; j++) {
             float t = j / (float) FULL;
             float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
+            if (line != null && j > 0 && j < FULL) {
+                float length = (float) Math.hypot(line[2] - line[0], line[3] - line[1]);
+                float outX = (line[3] - line[1]) / length, outY = -(line[2] - line[0]) / length;
+                float atA = Math.clamp(((ca[0] - fa[0]) * outX + (ca[1] - fa[1]) * outY) / room, 0, 1);
+                float atB = Math.clamp(((cb[0] - fb[0]) * outX + (cb[1] - fb[1]) * outY) / room, 0, 1);
+                float out = room * Math.min(1, Math.min(atA + j / (FULL / 2f), atB + (FULL - j) / (FULL / 2f)));
+                points[j] = new float[] { fa[0] + (fb[0] - fa[0]) * t + out * outX,
+                      fa[1] + (fb[1] - fa[1]) * t + out * outY, Float.NaN, 1 };
+                continue;
+            }
             if (j == 0 || j == FULL || !wall) {
                 // A wall's corner the field moved says what its move carries, as the row's samples do (#corner).
                 float[] corner = j == 0 ? ca : cb;
@@ -1537,6 +1694,13 @@ final class FieldBoard {
         boolean cliff = cliff(u, v), plated = plated(u, v, cliff);
         float ax = cornerX(u, e), ay = cornerY(u, e), bx = cornerX(u, e + 1), by = cornerY(u, e + 1);
         float[][] d = edgeMove(u, e);
+        if (slopes(u, v)) {
+            // A plate's slope steps on its fitted line, not on the lattice's edge at its foot (#canonicalEdge).
+            float[] line = slopeLine(u, v);
+            into.add(new Segment(line[0], line[1], line[2], line[3], Math.min(lu, lv), Math.max(lu, lv), cliff, top,
+                  joinedWater(u, v), plated));
+            return;
+        }
         if (!wall(u, v)) {
             // Its samples lie on the straight line between its moved corners: one segment.
             into.add(new Segment(ax + d[0][0], ay + d[0][1], bx + d[FULL][0], by + d[FULL][1], Math.min(lu, lv), Math.max(lu, lv),
@@ -1619,11 +1783,21 @@ final class FieldBoard {
         int own = level(h), lowest = own, highest = own;
         // A plate is level, and so is natural ground on a plate's fitted outline at its level (FieldPlates).
         if (plate(h) || onPlate(h, x, y)) {
-            FieldPlates.level(own * levelZ, own, out);
             // Reserved ground on a plate is its road's surface, ramped where today's ramps.
             float road = roads.surface(h, x, y);
-            if (!Float.isNaN(road)) { out[0] = road; }
-            return;
+            // Within a plate's slope's reach the ground is the bank's below, as every hex has it there.
+            if (!Float.isNaN(road) || !pavedNear(segments, x, y)) {
+                FieldPlates.level(own * levelZ, own, out);
+                if (!Float.isNaN(road)) { out[0] = road; }
+                return;
+            }
+            // The plate's block reaches to its slopes' feet (#canonicalEdge): past a slope's line the ground is the
+            // lower hex's, as that hex gives it, so the samples the two share have one height.
+            Coords below = pavedBelow(h, segments, x, y);
+            if (below != null) {
+                height(below, segments(below), shares, x, y, out);
+                return;
+            }
         }
         // The centres a bank keeps off: h's and its neighbours' near the point, each with its level.
         float[] centres = new float[14];
@@ -1679,6 +1853,9 @@ final class FieldBoard {
         // Per level set, the nearest bank onto ground that keeps its outline (Segment#plated).
         float[] platedTo = new float[span];
         Arrays.fill(platedTo, Float.POSITIVE_INFINITY);
+        // Per level set, the nearest plate's slope (#paved): its bank is the plate's straight slope.
+        float[] pavedTo = new float[span];
+        Arrays.fill(pavedTo, Float.POSITIVE_INFINITY);
         // Per level set, whether its nearest cliff is a plate's cast wall (FieldPlates): poured, it keeps no apron.
         boolean[] plateFoot = new boolean[span];
         for (int i = 0; i < d.length; i++) {
@@ -1689,6 +1866,7 @@ final class FieldBoard {
                 if (!s.cliff()) {
                     bankTo[j] = Math.min(bankTo[j], d[i]);
                     if (s.plated()) { platedTo[j] = Math.min(platedTo[j], d[i]); }
+                    if (paved(s)) { pavedTo[j] = Math.min(pavedTo[j], d[i]); }
                     if (s.joined()) { joinedTo[j] = Math.min(joinedTo[j], d[i]); }
                 }
                 else if (d[i] < cliffTo[j] - TIE) {
@@ -1798,15 +1976,28 @@ final class FieldBoard {
                     float beside = 1 - far((float) Math.sqrt(streamTo[k - lowest - 1]));
                     banked += (straight((sb + room) / (2 * room * (1 + .25f * beside))) - banked) * beside;
                 }
+                // Under a plate that slopes the bank is the plate's straight slope (BoardRelief#band's concrete step:
+                // from the step's room inside its line to the room outside, half the step on the line), by the exact
+                // distance to that line; whole where that step is the nearest bank and eased out over a metre beyond.
+                // No step's face: the plate's top, as today's slope is its slab, with no rim or foot on it.
+                boolean pavedLine = false;
+                if (pavedTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
+                    float pavedD = (float) Math.sqrt(pavedTo[k - lowest - 1]);
+                    float paved = 1 - BoardRelief.smooth((pavedD - bankD) / metre);
+                    banked += ((1 - Math.clamp((in ? -pavedD : pavedD) / room, -1, 1)) / 2 - banked) * paved;
+                    pavedLine = paved > .5f;
+                    if (pavedLine) { sb = in ? -pavedD : pavedD; }
+                }
                 share += (1 - weight) * banked;
                 // Faded out as the step's weight is (far), so two hexes' step lists give a shared sample one height.
                 footShelf += (joinedBank ? 0 : 1) * (1 - weight) * (1 - far(bankD))
                       * (in ? 1 - BoardRelief.smooth(Math.max(0, -sb - .95f * room) / room)
                             : 1 - BoardRelief.smooth(Math.max(0, sb - .95f * room) / run));
                 // A bank's face spans its band, as today's does; the top cover's rim and foot distances run from its edges.
-                step |= Math.abs(sb) < .95f * room;
-                if (in) { bankRim = Math.min(bankRim, Math.max(0, -sb - .95f * room)); }
-                else { bankFoot = Math.min(bankFoot, Math.max(0, sb - .95f * room)); }
+                step |= !pavedLine && Math.abs(sb) < .95f * room;
+                boolean slab = pavedLine && Math.abs(sb) < room;
+                if (in && !slab) { bankRim = Math.min(bankRim, Math.max(0, -sb - .95f * room)); }
+                else if (!slab) { bankFoot = Math.min(bankFoot, Math.max(0, sb - .95f * room)); }
             }
             // Below a step whose higher side is water the water pours in: a fall's foot keeps no shelf.
             shelf = Math.max(shelf, footShelf * (footShelf > 0 ? 1 - shore.upper(x, y, k) : 1));

@@ -2913,6 +2913,17 @@ final class BoardRelief {
     }
 
     /**
+     * Whether a paved hex's step down to dry ground is the straight concrete slope ({@link #band}): the step has room.
+     * The height field asks, so its plates slope where these steps do (FieldBoard#hex).
+     */
+    static boolean pavedSlope(BoardScene scene, BoardScene.Tile upper, BoardScene.Tile lower) {
+        Site high = site(scene, upper, BoardSurface.ramps(scene, upper));
+        Site low = site(scene, lower, BoardSurface.ramps(scene, lower));
+        return high.family() == CONCRETE && !high.liquid() && !low.liquid() && high.level() > low.level()
+              && room(high, low) > 0;
+    }
+
+    /**
      * Whether this hex is a canal: water among paving that stands above some of it. It is lined in concrete round a
      * channel of one width (BoardSurface#canalField) and walled on its edges down to the lower paving ({@link #canal}).
      */

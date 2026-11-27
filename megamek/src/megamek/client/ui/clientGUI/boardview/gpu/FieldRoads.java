@@ -44,6 +44,11 @@ final class FieldRoads {
         static final Walls NONE = new Walls(List.of(), List.of());
     }
 
+    /** Whether a plate's slope stands at a point (FieldBoard#slopeAt). */
+    interface Slopes {
+        boolean at(float x, float y);
+    }
+
     /** Every panel today's rule gives a hex (#found), and the hex's own of them (#walls), each on the first ask. */
     private final Map<Coords, List<BoardRoadCut.Panel>> found = new ConcurrentHashMap<>();
     private final Map<Coords, Walls> walls = new ConcurrentHashMap<>();
@@ -190,15 +195,20 @@ final class FieldRoads {
      * The containment walls beside the roads round hex h as today's rule places them (BoardRoadCut#containmentWalls),
      * over a hex's own height ({@code ground}; null for a hex without one). The rule runs a wall a panel on past its
      * end, into the next hex too: where that hex has a panel of its own beside it, the panel is that hex's, so a wall
-     * through a hex border is not built twice. The same at every detail.
+     * through a hex border is not built twice. No panel where a plate's slope stands just behind it ({@code slopes}).
+     * The same at every detail.
      */
-    Walls walls(Coords h, Function<Coords, BoardRelief.Ground> ground) {
+    Walls walls(Coords h, Function<Coords, BoardRelief.Ground> ground, Slopes slopes) {
         return walls.computeIfAbsent(h, at -> {
             Walls kept = new Walls(new ArrayList<>(), new ArrayList<>());
             for (BoardRoadCut.Panel panel : found(at, ground)) {
                 float[] p = panel.place();
                 float x = (p[0] + p[2]) / 2, y = (p[1] + p[3]) / 2;
                 if (!BoardGeometry.contains(at, x, y) && claimed(at, x, y, ground)) { continue; }
+                // A plate's slope comes down to the road as its slab, as today's does: no panel retains it (today's
+                // ground under that slab is level, so the rule gives none there).
+                float back = BoardRelief.metres(.1f);
+                if (slopes.at(x - p[4] * back, y - p[5] * back)) { continue; }
                 float[] place = Arrays.copyOf(p, 13);
                 place[9] = behind(at, p[0], p[1], p[4], p[5], ground);
                 place[10] = behind(at, p[2], p[3], p[4], p[5], ground);
