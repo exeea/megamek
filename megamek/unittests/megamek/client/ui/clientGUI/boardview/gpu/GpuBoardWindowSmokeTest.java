@@ -324,8 +324,15 @@ class GpuBoardWindowSmokeTest {
             original.getInputProcessor().touchUp(x + 80, y + 35, 0, button);
             assertEquals(orbit, !direction.epsilonEquals(camera.camera.direction, 0.001f),
                   "Orbit changes the viewing angle; pan preserves it");
-            assertEquals(!orbit, !focus.epsilonEquals(camera.focus, 0.001f),
-                  "Pan moves the focus; orbit preserves it");
+            // An orbit keeps the visible centre: its pivot may move to the terrain there, along the line of sight
+            // (BoardCamera.anchorOrbit), and nowhere else. A pan moves the focus across it.
+            Vector3 moved = camera.focus.cpy().sub(focus);
+            float across = moved.cpy().crs(direction).len();
+            if (orbit) {
+                assertTrue(across <= 0.001f * (1 + moved.len()), "Orbit keeps the line of sight's pivot: " + moved);
+            } else {
+                assertTrue(across > 0.001f, "Pan moves the focus across the line of sight: " + moved);
+            }
         } finally {
             Gdx.input = original;
         }
