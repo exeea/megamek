@@ -361,7 +361,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         }
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
 
         setupButtonPanel();
@@ -822,7 +821,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         }
 
         if (clientgui.getClient().isMyTurn() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             clientgui.centerOnUnit(currentEntity());
         }
     }
@@ -849,7 +847,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
                 selectEntity(selectedUnit.getId());
             }
         } else {
-            clientgui.maybeShowUnitDisplay();
             clientgui.getUnitDisplayState().displayEntity(selectedUnit);
             if (selectedUnit.isDeployed()) {
                 clientgui.centerOnUnit(selectedUnit);

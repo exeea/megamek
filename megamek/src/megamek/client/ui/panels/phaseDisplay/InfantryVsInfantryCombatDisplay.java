@@ -505,7 +505,6 @@ public class InfantryVsInfantryCombatDisplay extends AttackPhaseDisplay {
      * Called when the player's turn begins
      */
     private void beginMyTurn() {
-        clientgui.maybeShowUnitDisplay();
         setTarget(null);
 
         // Auto-select first entity

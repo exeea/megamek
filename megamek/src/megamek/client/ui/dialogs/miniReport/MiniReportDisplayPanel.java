@@ -607,7 +607,6 @@ public class MiniReportDisplayPanel extends JPanel implements ActionListener, Hy
                 if (optionalEntity.isPresent() && optionalEntity.get() instanceof Entity entity) {
                     if (currentClientGUI instanceof IHasUnitDisplay) {
                         ((IHasUnitDisplay) currentClientGUI).getUnitDisplayState().displayEntity(entity);
-                        GUIP.setUnitDisplayEnabled(true);
                         if (entity.isDeployed() && !entity.isOffBoard() && entity.getPosition() != null) {
                             if (currentClientGUI instanceof megamek.client.ui.clientGUI.AbstractClientGUI gui) {
                                 var board = gui.getBoardState(entity);

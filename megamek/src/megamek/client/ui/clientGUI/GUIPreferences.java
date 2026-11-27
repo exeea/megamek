@@ -174,9 +174,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_UNIMPLEMENTED_QUIRKS = "ShowUnimplementedQuirks";
 
 
-    public static final String UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE = "UnitDisplayAutoDisplayReportPhase";
-    public static final String UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE = "UnitDisplayAutoDisplayNonReportPhase";
-    public static final String UNIT_DISPLAY_ENABLED = "UnitDisplayEnabled";
     public static final String UNIT_DISPLAY_HEAT_COLOR_1 = "UnitDisplayHeatColor1";
     public static final String UNIT_DISPLAY_HEAT_COLOR_2 = "UnitDisplayHeatColor2";
     public static final String UNIT_DISPLAY_HEAT_COLOR_3 = "UnitDisplayHeatColor3";
@@ -505,9 +502,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     protected static GUIPreferences instance = new GUIPreferences();
 
-    public static final int HIDE = 0;
-    public static final int SHOW = 1;
-    public static final int MANUAL = 2;
 
     public static GUIPreferences getInstance() {
         return instance;
@@ -665,9 +659,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(BOT_COMMANDS_PAUSE_AT_START, true);
 
-        store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, 0);
-        store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
-        store.setDefault(UNIT_DISPLAY_ENABLED, true);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_1, DEFAULT_HEAT_1_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_2, DEFAULT_HEAT_2_COLOR);
         setDefault(UNIT_DISPLAY_HEAT_COLOR_3, DEFAULT_HEAT_3_COLOR);
@@ -951,18 +942,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     /** @return whether the quirks list also shows the quirks MegaMek will not act on */
     public boolean getShowUnimplementedQuirks() {
         return store.getBoolean(SHOW_UNIMPLEMENTED_QUIRKS);
-    }
-
-    public int getUnitDisplayAutoDisplayReportPhase() {
-        return store.getInt(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE);
-    }
-
-    public int getUnitDisplayAutoDisplayNonReportPhase() {
-        return store.getInt(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE);
-    }
-
-    public boolean getUnitDisplayEnabled() {
-        return store.getBoolean(UNIT_DISPLAY_ENABLED);
     }
 
     public Color getUnitDisplayHeatLevel1() {
@@ -1808,22 +1787,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setShowUnimplementedQuirks(boolean state) {
         store.setValue(SHOW_UNIMPLEMENTED_QUIRKS, state);
-    }
-
-    public void setUnitDisplayAutoDisplayReportPhase(int i) {
-        store.setValue(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, i);
-    }
-
-    public void setUnitDisplayAutoDisplayNonReportPhase(int i) {
-        store.setValue(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, i);
-    }
-
-    public void toggleUnitDisplay() {
-        store.setValue(UNIT_DISPLAY_ENABLED, !getBoolean(UNIT_DISPLAY_ENABLED));
-    }
-
-    public void setUnitDisplayEnabled(boolean b) {
-        store.setValue(UNIT_DISPLAY_ENABLED, b);
     }
 
     public void setUnitDisplayHeatColorLevel1(Color c) {

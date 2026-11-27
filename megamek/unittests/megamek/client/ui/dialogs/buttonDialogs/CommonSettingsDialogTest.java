@@ -985,42 +985,6 @@ class CommonSettingsDialogTest {
     }
 
     @Test
-    void laysOutAutoDisplayAsBalancedPhaseRows() {
-        List<SettingsFormPanel> phaseGrids = new ArrayList<>();
-        List<List<Component>> phaseControls = new ArrayList<>();
-        List<JPanel> sections = new ArrayList<>();
-        for (String name : List.of("UnitDisplay")) {
-            JLabel reportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-            JComboBox<String> reportControl = new JComboBox<>(new String[] { "Hide", "Show", "Manual" });
-            JLabel nonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-            JComboBox<String> nonReportControl = new JComboBox<>(new String[] { "Hide", "Show", "Manual" });
-            SettingsFormPanel grid = CommonSettingsDialog.createAutoDisplayPhaseGrid(
-                                        name, reportLabel, reportControl, nonReportLabel, nonReportControl);
-
-            assertSame(reportControl, reportLabel.getLabelFor());
-            assertSame(nonReportControl, nonReportLabel.getLabelFor());
-            assertEquals(4, grid.getComponentCount());
-            phaseGrids.add(grid);
-            phaseControls.add(List.of(reportLabel, reportControl, nonReportLabel, nonReportControl));
-            sections.add(settingsGroup(List.of(row(grid))));
-        }
-
-        CommonSettingsPane pane = createSettingsPane(
-                                    "autoDisplay", sections.toArray(JComponent[]::new));
-
-        assertAtConstrainedStandardAndWideWidths(pane, sections, laidOutPane -> {
-            int expectedWidth = phaseGrids.getFirst().getWidth();
-            for (int index = 0; index < phaseGrids.size(); index++) {
-                SettingsFormPanel grid = phaseGrids.get(index);
-                List<Component> controls = phaseControls.get(index);
-                                    assertAlignedBalancedRows(grid, List.of(
-                                            controls.subList(0, 2), controls.subList(2, 4)));
-                assertEquals(expectedWidth, grid.getWidth());
-            }
-        });
-    }
-
-    @Test
     void laysOutAiSettingsAsOneBalancedGridWithoutRedundantLabels() {
         JCheckBox autoResolve = new JCheckBox(
             Messages.getString("CommonSettingsDialog.showAutoResolvePanel"));

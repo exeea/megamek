@@ -1940,7 +1940,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         updateMoreButton();
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
 
         if (GUIP.getAutoSelectNextUnit()) {
@@ -1967,7 +1966,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
             && (next != null)
             && (currentlySelectedEntity != null)
             && (next.getOwnerId() != currentlySelectedEntity.getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         clearFlightPath();
@@ -8728,7 +8726,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
             return;
         }
         if (hasMovementControl() && (currentEntity != null)) {
-            clientgui.maybeShowUnitDisplay();
             clientgui.centerOnUnit(currentEntity);
         }
     }
@@ -8753,7 +8750,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 selectEntity(entity.getId());
             }
         } else {
-            clientgui.maybeShowUnitDisplay();
             clientgui.getUnitDisplayState().displayEntity(entity);
             if (entity.isDeployed()) {
                 clientgui.centerOnUnit(entity);

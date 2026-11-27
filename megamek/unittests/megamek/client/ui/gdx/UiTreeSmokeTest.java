@@ -81,13 +81,12 @@ class UiTreeSmokeTest {
               sidebar("overlays", "overlays.planetary", "overlays.toasts", "overlays.trace"),
               sidebar("buttonOrder", "buttonOrder.movement", "buttonOrder.deployment", "buttonOrder.firing",
                     "buttonOrder.physical", "buttonOrder.targeting"),
-              sidebar("autoDisplay", "autoDisplay.unit"),
               sidebar("aiDisplay", "aiDisplay.settings"),
               sidebar("advanced", "advanced.timing", "advanced.safety"));
     }
 
     private static final List<String> TOP = List.of("main", "audio", "keyBinds", "gameBoard", "unitDisplay", "miniMap",
-          "report", "overlays", "buttonOrder", "autoDisplay", "aiDisplay", "advanced");
+          "report", "overlays", "buttonOrder", "aiDisplay", "advanced");
 
     @Test
     void theClientSettingsSidebarFiltersToMatchesWithTheirParentsAndRestoresItsExpansion() {
@@ -99,7 +98,7 @@ class UiTreeSmokeTest {
             List<String> all = new ArrayList<>(List.of("main", "main.application", "main.colours", "main.behavior",
                   "audio", "keyBinds", "gameBoard", "gameBoard.general", "gameBoard.appearance", "gameBoard.fov",
                   "unitDisplay", "unitDisplay.tooltips", "unitDisplay.interface", "miniMap", "report", "overlays",
-                  "buttonOrder", "autoDisplay", "aiDisplay", "advanced"));
+                  "buttonOrder", "aiDisplay", "advanced"));
             assertEquals(all, tree.shown(), "Every node starts expanded, in the sidebar's order");
             assertEquals("Field of View", ((UiButton) tree.findActor("gameBoard.fov")).getText().toString());
 
@@ -118,7 +117,7 @@ class UiTreeSmokeTest {
             // Nothing of "Unit Display" says "view" (the Swing dialog's own search does not list it either).
             assertEquals(List.of("gameBoard", "gameBoard.fov"), tree.shown());
             search.setText("display");
-            assertTrue(tree.shown().containsAll(List.of("unitDisplay", "unitDisplay.interface", "autoDisplay")),
+            assertTrue(tree.shown().containsAll(List.of("unitDisplay", "unitDisplay.interface")),
                   "Unit Display under its parent: " + tree.shown());
             assertFalse(tree.shown().contains("main.application"), tree.shown().toString());
 

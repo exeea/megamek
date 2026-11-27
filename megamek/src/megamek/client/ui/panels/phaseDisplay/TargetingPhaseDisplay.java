@@ -463,7 +463,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         target = null;
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
@@ -521,7 +520,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         if ((phase == game.getPhase())
             && (next != null) && (currentEntity() != null)
               && (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         target(null);
@@ -1692,7 +1690,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         }
 
         if (clientgui.getClient().isMyTurn() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             var bv = clientgui.getBoardState(currentEntity());
             if (bv != null) {
                 bv.centerOn(currentEntity());
@@ -1714,7 +1711,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
                     selectEntity(entity.getId());
                 }
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(entity);
                 if (entity.isDeployed()) {
                     clientgui.getBoardState(entity).centerOn(entity);

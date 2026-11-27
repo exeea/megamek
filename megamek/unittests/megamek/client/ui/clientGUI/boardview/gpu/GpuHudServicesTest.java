@@ -239,7 +239,6 @@ class GpuHudServicesTest {
     void menuCommandsCarryTheItemsAcceleratorAndToggleState() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean minimap = preferences.getMinimapEnabled();
-        boolean unitDisplay = preferences.getUnitDisplayEnabled();
         ClientGUI gui = mock(ClientGUI.class);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardClientState view = spy(fixture.view);
@@ -268,7 +267,6 @@ class GpuHudServicesTest {
                 SwingUtilities.invokeAndWait(() -> {
                     menus.die();
                     preferences.setMinimapEnabled(minimap);
-                    preferences.setUnitDisplayEnabled(unitDisplay);
                 });
             }
         }

@@ -22,7 +22,6 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
@@ -63,11 +62,7 @@ class GpuSwingCutSmokeTest {
           GamePhase.MOVEMENT, GamePhase.MOVEMENT_REPORT, GamePhase.FIRING, GamePhase.FIRING_REPORT,
           GamePhase.PHYSICAL, GamePhase.PHYSICAL_REPORT, GamePhase.END_REPORT);
     /** The preferences that show the client's auxiliary windows, each switched on in every phase. */
-    private static final List<String> WINDOWS = List.of(GUIPreferences.MINI_MAP_ENABLED,
-          GUIPreferences.UNIT_DISPLAY_ENABLED);
-    /** The phase rules' auto-display choices, set to show their windows in every phase. */
-    private static final List<String> SHOWN = List.of(GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
-          GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE);
+    private static final List<String> WINDOWS = List.of(GUIPreferences.MINI_MAP_ENABLED);
 
     /** The client's Swing frame and its menus. */
     private record Client2d(JFrame frame, CommonMenuBar menus) {
@@ -83,7 +78,7 @@ class GpuSwingCutSmokeTest {
     void aScriptedBattleShowsNoSwingWindowOverTheNativeWindow() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         Map<String, String> saved = new LinkedHashMap<>();
-        for (String key : Stream.of(WINDOWS, SHOWN).flatMap(List::stream).toList()) {
+        for (String key : WINDOWS) {
             saved.put(key, preferences.getString(key));
         }
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -114,10 +109,6 @@ class GpuSwingCutSmokeTest {
                 }
 
                 // Every window wanted in every phase, and a measurement: only the native window.
-                onSwing(() -> {
-                    SHOWN.forEach(key -> preferences.setValue(key, GUIPreferences.SHOW));
-                    return null;
-                });
                 Coords from = fixture.entity.getPosition();
                 Coords to = new Coords(from.getX(), from.getY() - 3);
                 for (GamePhase phase : ROUND) {
@@ -178,15 +169,13 @@ class GpuSwingCutSmokeTest {
     }
 
     /**
-     * EDT: the phase begins as on the client: its phase display's rules and the Unit Display's presentation run
-     * (ClientGUI.switchPanel); then the native window draws it.
+     * EDT: the phase begins as on the client; then the native window draws it.
      */
     private static void enter(GpuBoardFixture fixture, Client2d client, ClientGUI gui, GamePhase phase)
           throws Exception {
         onSwing(() -> {
             fixture.game.setPhase(phase);
             client.menus().setPhase(phase);
-            gui.maybeShowUnitDisplay();
             return null;
         });
         settle();
@@ -204,8 +193,7 @@ class GpuSwingCutSmokeTest {
      */
     private static ClientGUI client(GpuBoardFixture fixture) throws Exception {
         fixture.source.close();
-        Set<String> real = Set.of("setUnitDisplayVisible", "maybeShowUnitDisplay", "preferenceChange",
-              "closeRuler");
+        Set<String> real = Set.of("preferenceChange", "closeRuler");
         ClientGUI gui = mock(ClientGUI.class, invocation -> real.contains(invocation.getMethod().getName())
               ? invocation.callRealMethod() : org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation));
         Client client = mock(Client.class);

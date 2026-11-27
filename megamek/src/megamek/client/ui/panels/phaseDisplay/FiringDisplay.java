@@ -609,7 +609,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
         target = null;
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
@@ -665,7 +664,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
         Entity next = game.getNextEntity(game.getTurnIndex());
         if (game.getPhase().isFiring() && (next != null) && (currentEntity() != null)
               && (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
 
         }
         currentEntity = Entity.NONE;
@@ -2921,7 +2919,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
         }
 
         if (isMyTurn() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             clientgui.centerOnUnit(currentEntity());
         }
     }
@@ -2939,7 +2936,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
                     selectEntity(entity.getId());
                 }
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(entity);
                 if (entity.isDeployed()) {
                     clientgui.centerOnUnit(entity);

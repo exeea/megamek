@@ -379,7 +379,6 @@ public class PointblankShotDisplay extends FiringDisplay {
      */
     @Override
     public void beginMyTurn() {
-        clientgui.maybeShowUnitDisplay();
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
 
@@ -400,7 +399,6 @@ public class PointblankShotDisplay extends FiringDisplay {
         Entity next = game.getNextEntity(game.getTurnIndex());
         if (game.getPhase().isFiring() && (next != null) && (currentEntity() != null)
               && (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         target(null);
@@ -966,7 +964,6 @@ public class PointblankShotDisplay extends FiringDisplay {
         }
 
         if (clientgui.isProcessingPointblankShot() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             clientgui.centerOnUnit(currentEntity());
         }
     }
@@ -983,7 +980,6 @@ public class PointblankShotDisplay extends FiringDisplay {
             if (clientgui.getPointblankEID() == entity.getId()) {
                 selectEntity(entity.getId());
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(entity);
                 if (entity.isDeployed()) {
                     clientgui.centerOnUnit(entity);

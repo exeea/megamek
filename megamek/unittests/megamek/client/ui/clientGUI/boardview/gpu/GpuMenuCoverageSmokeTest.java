@@ -114,7 +114,7 @@ class GpuMenuCoverageSmokeTest {
                         }
                     }
                 }
-                assertTrue(items > 50, "the captured menu bar's " + items + " items");
+                assertTrue(items >= 50, "the captured menu bar's " + items + " items");
                 assertEquals(List.of(), missing, "every menu bar item but those the HUD does itself has a button");
                 assertEquals(List.of(Messages.getString("CommonMenuBar.viewRenderer")), nested,
                       "the View menu's renderer choice, of a Swing board, is left out");
@@ -287,7 +287,7 @@ class GpuMenuCoverageSmokeTest {
     private static final Set<String> LEFT_OUT = Set.of(ClientGUI.FILE_GAME_LOAD, ClientGUI.FILE_GAME_QUICK_LOAD,
           ClientGUI.GAME_REQUEST_GAME_MASTER, ClientGUI.GAME_GIVE_UP_GAME_MASTER, ClientGUI.FILE_REFRESH_CACHE,
           ClientGUI.FILE_REBUILD_CACHE,
-          ClientGUI.VIEW_UNIT_DISPLAY, ClientGUI.VIEW_MINI_MAP,
+          ClientGUI.VIEW_MINI_MAP,
           ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY,
           ClientGUI.VIEW_RESET_WINDOW_POSITIONS, ClientGUI.VIEW_ZOOM_IN,
           ClientGUI.VIEW_ZOOM_OUT, ClientGUI.VIEW_ZOOM_RESET, ClientGUI.VIEW_ZOOM_OVERVIEW_TOGGLE,

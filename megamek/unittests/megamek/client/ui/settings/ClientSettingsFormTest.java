@@ -420,7 +420,6 @@ class ClientSettingsFormTest {
         }
         assertEquals(ClientSettingsForm.REPORTS, form.pageOf(CommonSettingsPane.SETTINGS_REPORT));
         assertEquals(ClientSettingsForm.LOGS, form.pageOf(CommonSettingsPane.SETTINGS_ADVANCED));
-        assertEquals(ClientSettingsForm.AUTOMATION, form.pageOf(CommonSettingsPane.SETTINGS_AUTODISPLAY));
     }
 
     @Test

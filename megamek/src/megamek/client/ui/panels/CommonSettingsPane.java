@@ -71,7 +71,6 @@ public class CommonSettingsPane extends JPanel {
     public static final String SETTINGS_REPORT = "report";
     public static final String SETTINGS_OVERLAYS = "overlays";
     public static final String SETTINGS_BUTTONORDER = "buttonOrder";
-    public static final String SETTINGS_AUTODISPLAY = "autoDisplay";
     public static final String SETTINGS_AIDISPLAY = "aiDisplay";
     public static final String SETTINGS_ADVANCED = "advanced";
     private static final int START_HEIGHT = 800;
@@ -93,7 +92,6 @@ public class CommonSettingsPane extends JPanel {
             Map.entry(SETTINGS_REPORT, "logo_clan_ghost_bear.png"),
             Map.entry(SETTINGS_OVERLAYS, "logo_clan_smoke_jaguar.png"),
             Map.entry(SETTINGS_BUTTONORDER, "logo_free_worlds_league.png"),
-            Map.entry(SETTINGS_AUTODISPLAY, "logo_outworld_alliance.png"),
             Map.entry(SETTINGS_AIDISPLAY, "logo_clan_nova_cat.png"),
             Map.entry(SETTINGS_ADVANCED, "logo_republic_of_the_sphere.png"));
     private static final Map<String, Icon> PAGE_HEADER_ICONS = new LinkedHashMap<>();

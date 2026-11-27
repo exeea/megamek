@@ -572,7 +572,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
      * Does turn start stuff
      */
     private void beginMyTurn() {
-        clientgui.maybeShowUnitDisplay();
         GameTurn turn = clientgui.getClient().getMyTurn();
         // There's special processing for countering break grapple.
         if (turn instanceof CounterGrappleTurn) {
@@ -611,7 +610,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
             (next != null) &&
             (currentEntity() != null) &&
               (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         target(null);
@@ -2480,7 +2478,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
                     selectEntity(e.getId());
                 }
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(e);
                 clientgui.centerOnUnit(e);
             }

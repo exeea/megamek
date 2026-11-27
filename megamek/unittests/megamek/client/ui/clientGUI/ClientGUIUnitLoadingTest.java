@@ -71,7 +71,6 @@ class ClientGUIUnitLoadingTest {
                     gui.switchPanel(GamePhase.LOUNGE);
                     lobbyWindow.verify(() -> GpuLobbyWindow.open(gui), atLeastOnce());
                     boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), never());
-                    gui.setUnitDisplayVisible(true);
                     assertTrue(Arrays.stream(gui.getFrame().getOwnedWindows())
                           .noneMatch(window -> window instanceof RandomArmyDialog));
                     verify(cache, never()).getAllMeks();

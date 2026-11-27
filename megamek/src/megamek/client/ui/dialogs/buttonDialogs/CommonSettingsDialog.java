@@ -454,8 +454,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JSpinner unitDisplayMekArmorSmallFontSizeSpinner;
     private JSpinner unitDisplayMekLargeFontSizeSpinner;
     // Auto Display
-    private JComboBox<String> unitDisplayAutoDisplayReportCombo;
-    private JComboBox<String> unitDisplayAutoDisplayNonReportCombo;
 
     // Report
     private final JCheckBox chkReportShowPlayers = new JCheckBox(Messages.getString(
@@ -713,14 +711,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                                   section(CommonSettingsPane.SETTINGS_OVERLAYS + ".toasts", 1),
                                   section(CommonSettingsPane.SETTINGS_OVERLAYS + ".trace", 2)));
         pages.add(optionPage("buttonOrder", path("buttonOrder"), getButtonOrderSections()));
-
-        CommonSettingsPane.SectionedContent autoDisplay = sectionedContent(getPhasePanel(),
-                                                                           CommonSettingsPane.SETTINGS_AUTODISPLAY);
-        addMappedPages(pages, CommonSettingsPane.SETTINGS_AUTODISPLAY, autoDisplay,
-                       optionPage(CommonSettingsPane.SETTINGS_AUTODISPLAY,
-                                  path(CommonSettingsPane.SETTINGS_AUTODISPLAY),
-                                  autoDisplay,
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".unit", 0)));
 
         CommonSettingsPane.SectionedContent aiDisplay = sectionedContent(aiDisplayPanel(),
                                                                          CommonSettingsPane.SETTINGS_AIDISPLAY);
@@ -2841,8 +2831,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         loadSensorPreferenceOrder(sensorPreferenceOrder, GUIP.getSensorPreferenceOrder());
 
-        unitDisplayAutoDisplayReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayReportPhase());
-        unitDisplayAutoDisplayNonReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayNonReportPhase());
 
         csbUnitDisplayHeatLevel1.setColour(GUIP.getUnitDisplayHeatLevel1());
         csbUnitDisplayHeatLevel2.setColour(GUIP.getUnitDisplayHeatLevel2());
@@ -3239,8 +3227,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             clientgui.updateButtonPanel(GamePhase.TARGETING);
         }
 
-        GUIP.setUnitDisplayAutoDisplayReportPhase(unitDisplayAutoDisplayReportCombo.getSelectedIndex());
-        GUIP.setUnitDisplayAutoDisplayNonReportPhase(unitDisplayAutoDisplayNonReportCombo.getSelectedIndex());
 
         GUIP.setUnitDisplayHeatColorLevel1(csbUnitDisplayHeatLevel1.getColour());
         GUIP.setUnitDisplayHeatColorLevel2(csbUnitDisplayHeatLevel2.getColour());
@@ -3590,17 +3576,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         return content;
     }
 
-    private JComboBox<String> createHideShowComboBox(int i) {
-        JComboBox<String> cb = new JComboBox<>();
-        cb.addItem(Messages.getString("ClientGUI.Hide"));
-        cb.addItem(Messages.getString("ClientGUI.Show"));
-        cb.addItem(Messages.getString("ClientGUI.Manual"));
-        cb.setMaximumSize(new Dimension(150, 40));
-        cb.setSelectedIndex(i);
-
-        return cb;
-    }
-
     private JPanel aiDisplayPanel() {
         List<List<Component>> comps = new ArrayList<>();
         configureCheckBox(showAutoResolvePanel,
@@ -3636,32 +3611,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         grid.addEqualWidthComponentGrid(2, autoResolve, experimental);
         favoriteBehaviorLabel.setLabelFor(favoriteBehaviorControl);
         grid.addEqualWidthComponentGrid(2, favoriteBehaviorLabel, favoriteBehaviorControl);
-        return grid;
-    }
-
-    private JPanel getPhasePanel() {
-        List<List<Component>> comps = new ArrayList<>();
-
-        JLabel unitDisplayReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
-        unitDisplayAutoDisplayReportCombo = createHideShowComboBox(GUIP.getUnitDisplayAutoDisplayReportPhase());
-        JLabel unitDisplayNonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
-        unitDisplayAutoDisplayNonReportCombo = createHideShowComboBox(GUIP.getUnitDisplayAutoDisplayNonReportPhase());
-        comps.add(List.of(createAutoDisplayPhaseGrid("UnitDisplay",
-              unitDisplayReportLabel, unitDisplayAutoDisplayReportCombo,
-              unitDisplayNonReportLabel, unitDisplayAutoDisplayNonReportCombo)));
-
-        return createSettingsPanel(comps);
-    }
-
-    static SettingsFormPanel createAutoDisplayPhaseGrid(String name,
-        JLabel reportLabel, JComponent reportControl,
-        JLabel nonReportLabel, JComponent nonReportControl) {
-        SettingsFormPanel grid = new SettingsFormPanel(
-              "CommonSettingsAutoDisplay" + name + "Grid", SettingsFormPanel.DEFAULT_LABEL_WIDTH, 0);
-        reportLabel.setLabelFor(reportControl);
-        nonReportLabel.setLabelFor(nonReportControl);
-        grid.addEqualWidthComponentGrid(2,
-              reportLabel, reportControl, nonReportLabel, nonReportControl);
         return grid;
     }
 

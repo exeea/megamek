@@ -134,7 +134,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
 
     // The View menu
     private final JCheckBoxMenuItem viewMinimap = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMinimap"));
-    private final JCheckBoxMenuItem viewMekDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMekDisplay"));
     private final JMenuItem viewNovaNetworks = new JMenuItem(getString("CommonMenuBar.viewNovaNetworks"));
     private final JMenu helpUiLibrary = new JMenu(getString("CommonMenuBar.helpUiLibrary"));
     private final JCheckBoxMenuItem viewPlanetaryConditionsOverlay = new JCheckBoxMenuItem(getString(
@@ -279,8 +278,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(viewDecGUIScale, menu, VIEW_DEC_GUI_SCALE);
         menu.addSeparator();
 
-        GUIP.setUnitDisplayEnabled(false);
-        initMenuItem(viewMekDisplay, menu, VIEW_UNIT_DISPLAY, VK_D, GUIP.getUnitDisplayEnabled());
         GUIP.setMinimapEnabled(false);
         initMenuItem(viewMinimap, menu, VIEW_MINI_MAP, VK_M, GUIP.getMinimapEnabled());
         initMenuItem(viewNovaNetworks, menu, VIEW_NOVA_NETWORKS);
@@ -400,7 +397,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewMovModEnvelope.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.MOD_ENVELOPE));
         viewPlanetaryConditionsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.PLANETARY_CONDITIONS));
         viewTurnDetailsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.TURN_DETAILS));
-        viewMekDisplay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.UNIT_DISPLAY));
         viewLOSSetting.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.LOS_SETTING));
         viewIncGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.INC_GUI_SCALE));
         viewDecGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DEC_GUI_SCALE));
@@ -542,7 +538,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewMovementEnvelope.setEnabled(isInGameBoardView);
         viewTurnDetailsOverlay.setEnabled(isInGameBoardView);
         viewMovModEnvelope.setEnabled(isInGameBoardView);
-        viewMekDisplay.setEnabled(isInGame);
         fireSaveWeaponOrder.setEnabled(isInGameBoardView);
     }
 
@@ -608,7 +603,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.SHOW_COORDS -> toggleHexCoords.setSelected(GUIP.getCoordsEnabled());
             case GUIPreferences.SHOW_HEX_TYPES -> toggleHexTypes.setSelected(GUIP.getHexTypesEnabled());
             case KeyBindParser.KEYBINDS_CHANGED -> setKeyBinds();
-            case GUIPreferences.UNIT_DISPLAY_ENABLED -> viewMekDisplay.setSelected(GUIP.getUnitDisplayEnabled());
             case GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
         }
     }

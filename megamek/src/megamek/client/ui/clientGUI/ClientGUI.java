@@ -215,7 +215,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_INC_GUI_SCALE = "viewIncGUIScale";
     public static final String VIEW_DEC_GUI_SCALE = "viewDecGUIScale";
     public static final String VIEW_NOVA_NETWORKS = "viewNovaNetworks";
-    public static final String VIEW_UNIT_DISPLAY = "viewMekDisplay";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
     public static final String VIEW_MINI_MAP = "viewMinimap";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
@@ -1306,9 +1305,6 @@ public class ClientGUI extends AbstractClientGUI
                     logger.warn("No battle window to show the player settings over");
                 }
                 break;
-            case VIEW_UNIT_DISPLAY:
-                GUIP.toggleUnitDisplay();
-                break;
             case VIEW_NOVA_NETWORKS:
                 showNovaNetworkViewDialog();
                 break;
@@ -1601,7 +1597,7 @@ public class ClientGUI extends AbstractClientGUI
 
         showDefaultBoard(mainNames.get(name));
         maybeShowCommandBar();
-        maybeShowUnitDisplay();
+        ensureCurrentUnit();
 
         cardsMain.show(panMain, mainNames.get(name));
         String secondaryToShow = secondaryNames.get(name);
@@ -1889,15 +1885,6 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /**
-     * Switches the Minimap and the UnitDisplay an and off together. If the UnitDisplay is active, both will be hidden,
-     * else both will be shown.
-     */
-    public void toggleMMUDDisplays() {
-        GUIP.toggleUnitDisplay();
-        GUIP.setMinimapEnabled(GUIP.getUnitDisplayEnabled());
-    }
-
-    /**
      * Shows the command bar during the phases that are played on the board and hides it everywhere else. Unlike the bot
      * commands panel it has no on/off setting: the Commands button it carries is the only way to reach the game
      * commands, so it is present whenever there is a game to issue them in.
@@ -1914,36 +1901,13 @@ public class ClientGUI extends AbstractClientGUI
         logger.debug("[GameCommands] command bar visible={} in phase {}", phaseAllowsCommandBar, phase);
     }
 
-    /** Shows or hides the Unit Display based on the current menu setting. */
-    public void maybeShowUnitDisplay() {
+    /** A board phase other than a report begins while no unit is current: the game's first unit becomes it. */
+    private void ensureCurrentUnit() {
         GamePhase phase = getClient().getGame().getPhase();
-
-        if (phase.isReport()) {
-            int action = GUIP.getUnitDisplayAutoDisplayReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setUnitDisplayEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setUnitDisplayEnabled(false);
-            }
-        } else if (phase.isOnMap()) {
-            int action = GUIP.getUnitDisplayAutoDisplayNonReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setUnitDisplayEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setUnitDisplayEnabled(false);
-            }
-        } else {
-            GUIP.setUnitDisplayEnabled(false);
-        }
-    }
-
-    /** The Unit Display switch changed: switched on while no unit is current, the game's first unit becomes it. */
-    public void setUnitDisplayVisible(boolean visible) {
-        if (visible && (getUnitDisplayState().getCurrentEntity() == null) && (getClient() != null) && (getClient().getGame()
-              != null)) {
-            List<Entity> es = getClient().getGame().getEntitiesVector();
-            if (!es.isEmpty()) {
-                getUnitDisplayState().displayEntity(es.getFirst());
+        if (phase.isOnMap() && !phase.isReport() && (getUnitDisplayState().getCurrentEntity() == null)) {
+            List<Entity> units = getClient().getGame().getEntitiesVector();
+            if (!units.isEmpty()) {
+                getUnitDisplayState().displayEntity(units.getFirst());
             }
         }
     }
@@ -3955,7 +3919,6 @@ public class ClientGUI extends AbstractClientGUI
               && !EntityVisibilityUtils.onlyDetectedBySensors(viewer, entity)) {
             getUnitDisplayState().displayEntity(entity);
             setSelectedEntityNum(entity.getId());
-            maybeShowUnitDisplay();
         }
     }
 
@@ -4078,8 +4041,6 @@ public class ClientGUI extends AbstractClientGUI
         switch (e.getName()) {
             case GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS -> getClient().sendArtilleryRevealPreference(
                   GUIP.getBoolean(GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS));
-            case GUIPreferences.UNIT_DISPLAY_ENABLED ->
-                  setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
             case GUIPreferences.DEFAULT_WEAPON_SORT_ORDER -> {
                 setWeaponOrderPrefs(true);
                 getUnitDisplayState().displayEntity(getUnitDisplayState().getCurrentEntity());

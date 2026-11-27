@@ -47,8 +47,6 @@ class ClientGUIBoardLifecycleTest {
                   var session = Session.create(phase)) {
                 Game game = session.game();
                 ClientGUI gui = session.gui();
-                // Startup preferences and phase rules may switch the Unit Display on before the native window exists.
-                gui.setUnitDisplayVisible(true);
                 game.receiveBoard(0, Board.createEmptyBoard(8, 8));
                 BoardClientState first = gui.getBoardState();
                 assertNotNull(first);
