@@ -24,7 +24,6 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -41,13 +40,7 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
-import megamek.client.ui.dialogs.PlayerListDialog;
-import megamek.client.ui.dialogs.RoundsInAirDialog;
-import megamek.client.ui.dialogs.forceDisplay.ForceDisplayDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.common.Player;
@@ -91,11 +84,9 @@ class GpuSwingCutSmokeTest {
           GUIPreferences.BOT_COMMANDS_AUTO_DISPLAY_NON_REPORT_PHASE);
 
     /** The client's windows, real Swing dialogs owned by its Swing frame. */
-    private record Client2d(JFrame frame, CommonMenuBar menus, PlayerListDialog players,
-          RoundsInAirDialog rounds, ForceDisplayDialog forces, BotCommandsDialog bots, UnitDisplayDialog unit,
-          MiniReportDisplayDialog report) {
+    private record Client2d(JFrame frame, CommonMenuBar menus, UnitDisplayDialog unit) {
         List<Window> windows() {
-            return List.of(players, rounds, forces, bots, unit, report);
+            return List.of(unit);
         }
     }
 
@@ -205,8 +196,8 @@ class GpuSwingCutSmokeTest {
     }
 
     /**
-     * EDT: the phase begins as on the client: its phase display's rules and the auxiliary windows' presentation run
-     * (ClientGUI.switchPanel and refreshAuxiliaryWindows); then the native window draws it.
+     * EDT: the phase begins as on the client: its phase display's rules and the Unit Display's presentation run
+     * (ClientGUI.switchPanel); then the native window draws it.
      */
     private static void enter(GpuBoardFixture fixture, Client2d client, ClientGUI gui, GamePhase phase)
           throws Exception {
@@ -214,19 +205,14 @@ class GpuSwingCutSmokeTest {
             fixture.game.setPhase(phase);
             client.menus().setPhase(phase);
             gui.maybeShowUnitDisplay();
-            gui.maybeShowForceDisplay();
-            gui.refreshAuxiliaryWindows();
             return null;
         });
         settle();
     }
 
-    /** The client's windows that show, its Swing frame included. */
+    /** Every AWT window that shows, the client's Swing frame included (the native window is not one). */
     private static List<Window> shown(Client2d client) throws Exception {
-        Set<Window> own = Stream.concat(client.windows().stream(), Stream.of(client.frame()))
-              .collect(Collectors.toSet());
-        return onSwing(() -> Arrays.stream(Window.getWindows()).filter(Window::isShowing).filter(own::contains)
-              .toList());
+        return onSwing(() -> Arrays.stream(Window.getWindows()).filter(Window::isShowing).toList());
     }
 
     /**
@@ -236,9 +222,8 @@ class GpuSwingCutSmokeTest {
      */
     private static ClientGUI client(GpuBoardFixture fixture) throws Exception {
         fixture.source.close();
-        Set<String> real = Set.of("refreshAuxiliaryWindows", "setPlayerListVisible", "showPlayerList",
-              "setRoundsInAirVisible", "setForceDisplayVisible", "setBotCommandsLocation", "setUnitDisplayVisible",
-              "maybeShowUnitDisplay", "maybeShowForceDisplay", "preferenceChange", "closeRuler");
+        Set<String> real = Set.of("setUnitDisplayVisible", "maybeShowUnitDisplay", "preferenceChange",
+              "closeRuler");
         ClientGUI gui = mock(ClientGUI.class, invocation -> real.contains(invocation.getMethod().getName())
               ? invocation.callRealMethod() : org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation));
         Client client = mock(Client.class);
@@ -263,8 +248,8 @@ class GpuSwingCutSmokeTest {
     }
 
     /**
-     * The client's real windows over its Swing frame, as ClientGUI builds them; the Unit Display and the report
-     * observe a request outside the native window on their dialogs (this client has no Swing split panes).
+     * The client's Swing frame and its Unit Display, as ClientGUI builds them; the Unit Display observes a request
+     * outside the native window on its dialog.
      */
     private static Client2d windows(ClientGUI gui, GpuBoardFixture fixture) {
         JFrame frame = new JFrame("MegaMek - Swing cut test");
@@ -273,14 +258,6 @@ class GpuSwingCutSmokeTest {
         frame.setJMenuBar(menus);
         when(gui.getFrame()).thenReturn(frame);
         when(gui.getMenuBar()).thenReturn(menus);
-        PlayerListDialog players = new PlayerListDialog(frame, gui.getClient(), false);
-        when(gui.getPlayerListDialog()).thenReturn(players);
-        RoundsInAirDialog rounds = new RoundsInAirDialog(frame, gui.getClient());
-        when(gui.getRoundsInAirDialog()).thenReturn(rounds);
-        ForceDisplayDialog forces = new ForceDisplayDialog(frame, gui);
-        when(gui.getForceDisplayDialog()).thenReturn(forces);
-        BotCommandsDialog bots = new BotCommandsDialog(frame, gui);
-        when(gui.getBotCommandsDialog()).thenReturn(bots);
         CommandBarPanel bar = new CommandBarPanel(gui);
         JPanel top = new JPanel(new BorderLayout());
         top.add(bar, BorderLayout.NORTH);
@@ -293,14 +270,9 @@ class GpuSwingCutSmokeTest {
         when(gui.getUnitDisplay()).thenReturn(unitPanel);
         when(gui.getUnitDisplayDialog()).thenReturn(unit);
         unitPanel.displayEntity(fixture.entity);
-        MiniReportDisplayDialog report = new MiniReportDisplayDialog(frame, gui);
-        when(gui.getMiniReportDisplayDialog()).thenReturn(report);
-        when(gui.getMiniReportDisplay()).thenReturn(mock(MiniReportDisplayPanel.class));
         doAnswer(invocation -> placementOrDialog(gui, invocation, unit)).when(gui).setUnitDisplayLocation(anyBoolean());
-        doAnswer(invocation -> placementOrDialog(gui, invocation, report)).when(gui)
-              .setMiniReportLocation(anyBoolean());
         frame.setVisible(true);
-        return new Client2d(frame, menus, players, rounds, forces, bots, unit, report);
+        return new Client2d(frame, menus, unit);
     }
 
     /** ClientGUI's own placement over the native window; without it the request shows on the dialog. */

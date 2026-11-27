@@ -30,27 +30,13 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.dialogs;
+package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.io.Serial;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.List;
-import javax.swing.JDialog;
-import javax.swing.JFrame;
-import javax.swing.JScrollPane;
-import javax.swing.JTable;
-import javax.swing.ListSelectionModel;
-import javax.swing.table.DefaultTableModel;
-
-import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Player;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EnemyArtilleryInbound;
@@ -61,83 +47,12 @@ import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
 
 /**
- * A small, non-modal View-menu window listing every artillery round currently in the air that the local player is
- * entitled to see: who fired it, how many turns until it lands, the target hex, and the warhead type. The list is
- * sourced from {@link Game#getArtilleryAttacks()}, which the server has already filtered to the local player's team
- * (the sole exception being a GameMaster / observer, who sees all) - so the window respects double-blind without any
- * extra visibility logic here.
- *
- * @author HammerGS
+ * The artillery rounds in the air the local player may see, as the 3D log lists them: who fired each, the turns until
+ * it lands, its target hex and warhead. Sourced from {@link Game#getArtilleryAttacks()}, which the server has already
+ * filtered to the local player's team (a Game Master or observer sees all).
  */
-public class RoundsInAirDialog extends JDialog {
-
-    @Serial
-    private static final long serialVersionUID = 1L;
-
-    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-
-    private final Client client;
-    private final DefaultTableModel tableModel;
-
-    public RoundsInAirDialog(JFrame parent, Client client) {
-        super(parent, "", false);
-        this.client = client;
-        setTitle(Messages.getString("RoundsInAirDialog.title"));
-
-        tableModel = new DefaultTableModel(columnNames(), 0) {
-            @Serial
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        JTable table = new JTable(tableModel);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setAutoCreateRowSorter(true);
-        add(new JScrollPane(table), BorderLayout.CENTER);
-
-        // Closing the window unticks the View-menu item so the menu state stays in sync.
-        addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosing(WindowEvent event) {
-                GUIP.setRoundsInAirEnabled(false);
-            }
-        });
-
-        refresh();
-        setMinimumSize(new Dimension(520, 220));
-        pack();
-        setLocation(GUIP.getRoundsInAirPosX(), GUIP.getRoundsInAirPosY());
-    }
-
-    private static String[] columnNames() {
-        return new String[] {
-              Messages.getString("RoundsInAirDialog.col.team"),
-              Messages.getString("RoundsInAirDialog.col.player"),
-              Messages.getString("RoundsInAirDialog.col.firedBy"),
-              Messages.getString("RoundsInAirDialog.col.landsIn"),
-              Messages.getString("RoundsInAirDialog.col.targetHex"),
-              Messages.getString("RoundsInAirDialog.col.warhead")
-        };
-    }
-
-    /**
-     * Rebuilds the table from the current in-flight artillery ({@link #rows(Game)}). Safe to call repeatedly (e.g. on
-     * phase change).
-     */
-    public void refresh() {
-        // if we're not actually showing this control, there's no need to actually do a refresh
-        if (!isVisible()) {
-            return;
-        }
-        tableModel.setRowCount(0);
-        for (Row row : rows(client.getGame())) {
-            tableModel.addRow(new Object[] {
-                  row.team(), row.player(), row.firedBy(), row.landsIn(), row.targetHex(), row.warhead()
-            });
-        }
+final class RoundsInAir {
+    private RoundsInAir() {
     }
 
     /**
@@ -260,18 +175,5 @@ public class RoundsInAirDialog extends JDialog {
             return Messages.getString("RoundsInAirDialog.warhead.ada");
         }
         return Messages.getString("RoundsInAirDialog.warhead.standard");
-    }
-
-    public void saveSettings() {
-        GUIP.setRoundsInAirPosX(getLocation().x);
-        GUIP.setRoundsInAirPosY(getLocation().y);
-    }
-
-    @Override
-    protected void processWindowEvent(WindowEvent event) {
-        super.processWindowEvent(event);
-        if ((event.getID() == WindowEvent.WINDOW_DEACTIVATED) || (event.getID() == WindowEvent.WINDOW_CLOSING)) {
-            saveSettings();
-        }
     }
 }

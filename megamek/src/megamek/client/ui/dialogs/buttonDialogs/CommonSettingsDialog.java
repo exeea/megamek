@@ -3413,9 +3413,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setMiniReportShowUnits(chkReportShowUnits.isSelected());
         GUIP.setMiniReportShowKeywords(chkReportShowKeywords.isSelected());
         GUIP.setMiniReportShowFilter(chkReportShowFilter.isSelected());
-        if ((clientgui != null) && (clientgui.getMiniReportDisplay() != null)) {
-            clientgui.getMiniReportDisplay().refreshSearchPanel();
-        }
 
 
         GUIP.setPlanetaryConditionsColorText(csbPlanetaryConditionsColorText.getColour());

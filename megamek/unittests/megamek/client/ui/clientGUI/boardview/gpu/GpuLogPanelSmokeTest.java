@@ -42,7 +42,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Clipboard;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
@@ -331,7 +330,7 @@ class GpuLogPanelSmokeTest {
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
             Round round = scripted();
-            RoundsInAirDialog.Row inbound = new RoundsInAirDialog.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle",
+            RoundsInAir.Row inbound = new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle",
                   "1 turn(s)", "0607", "Standard");
             GpuReportLog.Snapshot log = new GpuReportLog.Snapshot(4, GamePhase.END_REPORT, round.log().entries(),
                   Map.of(), round.log().combat(), round.log().psr(), round.log().moves(), List.of(inbound));

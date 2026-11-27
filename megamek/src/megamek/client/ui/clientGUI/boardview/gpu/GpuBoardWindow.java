@@ -572,9 +572,6 @@ public final class GpuBoardWindow {
         // the board ends and nothing else takes its place
         try {
             active = window;
-            if (window.gui instanceof ClientGUI gui) {
-                gui.setMiniReportLocation(false);
-            }
             Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
                   AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK | AWTEvent.WINDOW_FOCUS_EVENT_MASK
                         | AWTEvent.KEY_EVENT_MASK | AWTEvent.MOUSE_EVENT_MASK);
@@ -797,9 +794,6 @@ public final class GpuBoardWindow {
                     raise(dialog);
                 }
             }
-        }
-        if (gui instanceof ClientGUI client) {
-            client.refreshAuxiliaryWindows();
         }
         // A source captured during native startup must publish the now-measured tools inset before camera fitting.
         if (editor != null && source != null) { source.refresh(); }

@@ -65,8 +65,6 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
@@ -1014,55 +1012,29 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void swingReportStaysHiddenOverTheNativeBoard() throws Exception {
+    void aReportPhaseOpensTheNativeLog() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean enabled = preferences.getMiniReportEnabled();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = GpuTestSupport.onSwing(() -> createClientWindow(fixture));
             ClientGUI gui = ui.view().getClientgui();
-            MiniReportDisplayDialog report = GpuTestSupport.onSwing(() -> {
-                MiniReportDisplayDialog dialog = new MiniReportDisplayDialog(ui.frame(), gui);
-                when(gui.getMiniReportDisplayDialog()).thenReturn(dialog);
-                when(gui.getMiniReportDisplay()).thenReturn(mock(MiniReportDisplayPanel.class));
-                doAnswer(invocation -> {
-                    if (GpuBoardWindow.isActiveFor(gui)) {
-                        invocation.callRealMethod();
-                    } else {
-                        // The fixture has no Swing split panes. Observe the visibility request instead.
-                        dialog.setVisible(invocation.getArgument(0));
-                    }
-                    return null;
-                }).when(gui).setMiniReportLocation(anyBoolean());
-                preferences.setMiniReportEnabled(true);
-                dialog.setVisible(true);
-                return dialog;
-            });
             try {
                 openNative(ui);
                 await(() -> GpuTestSupport.onSwing(() -> !ui.frame().isVisible()));
                 GpuTestSupport.onSwing(() -> {
                     assertTrue(GpuBoardWindow.isActiveFor(gui));
-                    assertFalse(report.isVisible(), "Hide an already open Swing report during the handoff");
                     fixture.game.setPhase(GamePhase.FIRING_REPORT);
                     fixture.game.setAllReports(List.of(List.of(new Report(3000),
                           new Report(6065).addDesc(fixture.entity).add(10).add("Left Torso"))));
-                    gui.setMiniReportLocation(true);
-                    assertFalse(report.isVisible(), "Phase and preference updates must not reopen the legacy dialog");
-                    assertTrue(preferences.getMiniReportEnabled(),
-                          "Suppressing the old window preserves its preferences");
                     return null;
                 });
-                // The report phase opens the HUD's log, which stands for the Swing report.
+                // The report phase opens the HUD's log, the client's only report window.
                 await(() -> onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("log-panel"))));
-                assertFalse(GpuTestSupport.onSwing(report::isVisible), "The native log must not revive the old report");
             } finally {
                 GpuTestSupport.onSwing(() -> {
                     GpuBoardWindow.closeFor(ui.view());
-                    report.dispose();
                     ui.frame().dispose();
                     ui.view().close();
                     preferences.removePreferenceChangeListener(ui.menus());
-                    preferences.setMiniReportEnabled(enabled);
                     return null;
                 });
             }
@@ -1234,11 +1206,7 @@ class GpuBoardWindowSmokeTest {
 
     private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean frameShown) throws Exception {
         fixture.source.close();
-        ClientGUI gui = mock(ClientGUI.class, invocation -> switch (invocation.getMethod().getName()) {
-            case "refreshAuxiliaryWindows", "setBotCommandsLocation",
-                 "setPlayerListVisible", "setRoundsInAirVisible" -> invocation.callRealMethod();
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
-        });
+        ClientGUI gui = mock(ClientGUI.class);
         BoardViewsContainer container = mock(BoardViewsContainer.class);
         setField(AbstractClientGUI.class, gui, "boardViewsContainer", container);
         Client client = mock(Client.class);

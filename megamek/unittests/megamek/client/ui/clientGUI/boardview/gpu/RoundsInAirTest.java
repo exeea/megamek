@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.dialogs;
+package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -20,20 +20,20 @@ import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.Test;
 
-class RoundsInAirDialogTest {
+class RoundsInAirTest {
     /** The rows the window and the GPU battle log list (K13): own rounds in full, enemy rounds without their aim. */
     @Test
     void rowsListOwnRoundsInFullAndEnemyRoundsWithoutTheirAimSoonestFirst() {
         assertEquals(List.of(
-                    new RoundsInAirDialog.Row(0, "Team 1", "Raven's Nest", "Sniper Artillery Vehicle", "This turn",
+                    new RoundsInAir.Row(0, "Team 1", "Raven's Nest", "Sniper Artillery Vehicle", "This turn",
                           "Counter-battery (off-board)", "Standard (HE)"),
-                    new RoundsInAirDialog.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
+                    new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
                           "Unknown", "Unknown"),
-                    new RoundsInAirDialog.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
+                    new RoundsInAir.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
                           "0607", "Homing"),
-                    new RoundsInAirDialog.Row(3, "Team 2", "OpFor", "(unknown unit)", "3 turn(s)", "Unknown",
+                    new RoundsInAir.Row(3, "Team 2", "OpFor", "(unknown unit)", "3 turn(s)", "Unknown",
                           "Unknown")),
-              RoundsInAirDialog.rows(game()));
+              RoundsInAir.rows(game()));
     }
 
     /**

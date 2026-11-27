@@ -97,7 +97,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JMenuItem gameQSave = new JMenuItem(getString("CommonMenuBar.fileGameQuickSave"));
     private final JMenuItem gameQLoad = new JMenuItem(getString("CommonMenuBar.fileGameQuickLoad"));
     private final JMenuItem gameSaveServer = new JMenuItem(getString("CommonMenuBar.fileGameSaveServer"));
-    private final JCheckBoxMenuItem gameRoundReport = new JCheckBoxMenuItem(getString("CommonMenuBar.viewRoundReport"));
     private final JMenuItem gameEditBots = new JMenuItem(getString("CommonMenuBar.editBots"));
     /** Asks for the Game Master role; only shown while nobody holds it and the game allows one. */
     private final JMenuItem gameRequestGameMaster = new JMenuItem(getString("CommonMenuBar.gameRequestGameMaster"));
@@ -122,9 +121,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private boolean burstMgAvailable = false;
     /** Whether the hot-loading game option is on, which offers the all-units LRM entries in the lobby. */
     private boolean hotLoadAvailable = false;
-    private final JCheckBoxMenuItem gamePlayerList = new JCheckBoxMenuItem(getString("CommonMenuBar.viewPlayerList"));
-    private final JCheckBoxMenuItem gameRoundsInAir =
-          new JCheckBoxMenuItem(getString("CommonMenuBar.viewRoundsInAir"));
     private final JMenuItem gameGameOptions = new JMenuItem(getString("CommonMenuBar.viewGameOptions"));
     private final JMenuItem gamePlayerSettings = new JMenuItem(getString("CommonMenuBar.viewPlayerSettings"));
     private final JMenuItem gameNetworkInformation = new JMenuItem(getString("CommonMenuBar.viewNetworkInformation"));
@@ -139,7 +135,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     // The View menu
     private final JCheckBoxMenuItem viewMinimap = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMinimap"));
     private final JCheckBoxMenuItem viewMekDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMekDisplay"));
-    private final JCheckBoxMenuItem viewForceDisplay = new JCheckBoxMenuItem(getString("CommonMenuBar.viewForceDisplay"));
     private final JMenuItem viewNovaNetworks = new JMenuItem(getString("CommonMenuBar.viewNovaNetworks"));
     private final JMenu helpUiLibrary = new JMenu(getString("CommonMenuBar.helpUiLibrary"));
     private final JCheckBoxMenuItem viewPlanetaryConditionsOverlay = new JCheckBoxMenuItem(getString(
@@ -154,12 +149,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JMenuItem viewZoomReset = new JMenuItem(getString("CommonMenuBar.viewZoomReset"));
     private final JMenuItem viewZoomOverviewToggle = new JMenuItem(getString("CommonMenuBar.viewZoomOverviewToggle"));
     private final JMenuItem viewLabels = new JMenuItem(getString("CommonMenuBar.viewLabels"));
-    // Bot Commands is a submenu offering three mutually exclusive display modes (Off / Float / Dock).
-    private final JMenu viewBotCommands = new JMenu(getString("CommonMenuBar.viewBotCommands"));
-    private final JRadioButtonMenuItem viewBotCommandsOff =
-          new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsOff"));
-    private final JRadioButtonMenuItem viewBotCommandsFloat =
-          new JRadioButtonMenuItem(getString("CommonMenuBar.viewBotCommandsFloat"));
     private final JMenuItem toggleTactical = new JMenuItem(getString("GpuBoard.hud.util.tactical"));
     private final JCheckBoxMenuItem toggleHexCoords = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleHexCoords"));
@@ -294,17 +283,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(viewMekDisplay, menu, VIEW_UNIT_DISPLAY, VK_D, GUIP.getUnitDisplayEnabled());
         GUIP.setMinimapEnabled(false);
         initMenuItem(viewMinimap, menu, VIEW_MINI_MAP, VK_M, GUIP.getMinimapEnabled());
-        GUIP.setMiniReportEnabled(false);
-        initMenuItem(gameRoundReport, menu, VIEW_ROUND_REPORT, GUIP.getMiniReportEnabled());
-        GUIP.setPlayerListEnabled(false);
-        initMenuItem(gamePlayerList, menu, VIEW_PLAYER_LIST, GUIP.getPlayerListEnabled());
-        GUIP.setRoundsInAirEnabled(false);
-        initMenuItem(gameRoundsInAir, menu, VIEW_ROUNDS_IN_AIR, GUIP.getRoundsInAirEnabled());
-        GUIP.setForceDisplayEnabled(false);
-        initMenuItem(viewForceDisplay, menu, VIEW_FORCE_DISPLAY, GUIP.getForceDisplayEnabled());
         initMenuItem(viewNovaNetworks, menu, VIEW_NOVA_NETWORKS);
-        // Do not force the bot commands panel off at startup - its Off/Float/Dock choice is a persistent setting.
-        initBotCommandsMenu(menu);
         menu.addSeparator();
 
         initMenuItem(viewPlanetaryConditionsOverlay,
@@ -421,13 +400,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewMovModEnvelope.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.MOD_ENVELOPE));
         viewPlanetaryConditionsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.PLANETARY_CONDITIONS));
         viewTurnDetailsOverlay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.TURN_DETAILS));
-        viewForceDisplay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.FORCE_DISPLAY));
         viewMekDisplay.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.UNIT_DISPLAY));
         viewLOSSetting.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.LOS_SETTING));
         viewIncGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.INC_GUI_SCALE));
         viewDecGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DEC_GUI_SCALE));
         viewClientSettings.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.CLIENT_SETTINGS));
-        gameRoundReport.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ROUND_REPORT));
         viewZoomIn.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ZOOM_IN));
         viewZoomOut.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ZOOM_OUT));
         viewZoomOverviewToggle.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ZOOM_OVERVIEW_TOGGLE));
@@ -536,8 +513,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         fileUnitsReinforceRAT.setEnabled(isNotVictory
               && (isLobby || (isInGame && localPlayerHoldsGameMasterRole)));
         fileUnitsSave.setEnabled(isLobby || (isInGame && canSave));
-        gamePlayerList.setEnabled(isInGame);
-        gameRoundsInAir.setEnabled(isInGame);
         viewLabels.setEnabled(isInGameBoardView);
 
         gameGameOptions.setEnabled(isInGame || isLobby);
@@ -567,11 +542,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewMovementEnvelope.setEnabled(isInGameBoardView);
         viewTurnDetailsOverlay.setEnabled(isInGameBoardView);
         viewMovModEnvelope.setEnabled(isInGameBoardView);
-        gameRoundReport.setEnabled(isInGame);
         viewMekDisplay.setEnabled(isInGame);
-        viewForceDisplay.setEnabled(isInGame);
         fireSaveWeaponOrder.setEnabled(isInGameBoardView);
-        viewBotCommands.setEnabled(isInGame);
     }
 
     /**
@@ -637,12 +609,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.SHOW_HEX_TYPES -> toggleHexTypes.setSelected(GUIP.getHexTypesEnabled());
             case KeyBindParser.KEYBINDS_CHANGED -> setKeyBinds();
             case GUIPreferences.UNIT_DISPLAY_ENABLED -> viewMekDisplay.setSelected(GUIP.getUnitDisplayEnabled());
-            case GUIPreferences.FORCE_DISPLAY_ENABLED -> viewForceDisplay.setSelected(GUIP.getForceDisplayEnabled());
-            case GUIPreferences.MINI_REPORT_ENABLED -> gameRoundReport.setSelected(GUIP.getMiniReportEnabled());
-            case GUIPreferences.PLAYER_LIST_ENABLED -> gamePlayerList.setSelected(GUIP.getPlayerListEnabled());
-            case GUIPreferences.ROUNDS_IN_AIR_ENABLED -> gameRoundsInAir.setSelected(GUIP.getRoundsInAirEnabled());
-            case GUIPreferences.BOT_COMMANDS_ENABLED ->
-                  updateBotCommandsSelection();
             case GUIPreferences.BOARD_GRAPHICS -> updateRendererSelection();
         }
     }
@@ -674,35 +640,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(item, menu, command);
         item.setMnemonic(mnemonic);
         item.setSelected(selected);
-    }
-
-    /**
-     * Builds the Bot Commands submenu, two mutually exclusive radio items (Off / Float), and adds it to the given
-     * parent View menu.
-     *
-     * @param parentMenu the View menu the submenu is added to
-     */
-    private void initBotCommandsMenu(JMenu parentMenu) {
-        viewBotCommands.setMnemonic(VK_G);
-        initMenuItem(viewBotCommandsOff, viewBotCommands, ClientGUI.VIEW_BOT_COMMANDS_OFF);
-        initMenuItem(viewBotCommandsFloat, viewBotCommands, ClientGUI.VIEW_BOT_COMMANDS_FLOAT);
-        ButtonGroup botCommandsGroup = new ButtonGroup();
-        botCommandsGroup.add(viewBotCommandsOff);
-        botCommandsGroup.add(viewBotCommandsFloat);
-        parentMenu.add(viewBotCommands);
-        updateBotCommandsSelection();
-    }
-
-    /**
-     * Selects the Bot Commands radio item that matches the enabled preference: Off when the panel is disabled,
-     * otherwise Float.
-     */
-    private void updateBotCommandsSelection() {
-        if (!GUIP.getBotCommandsEnabled()) {
-            viewBotCommandsOff.setSelected(true);
-        } else {
-            viewBotCommandsFloat.setSelected(true);
-        }
     }
 
     /**

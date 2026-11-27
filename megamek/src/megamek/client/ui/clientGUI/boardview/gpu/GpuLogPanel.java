@@ -29,7 +29,6 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPlaybackHistory.Step;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuReportLog.Entry;
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
@@ -598,7 +597,7 @@ final class GpuLogPanel implements GpuHud.Component {
     }
 
     /** An artillery round in the air (K13, as the Rounds in the Air window lists it): its turns left in the disc. */
-    private Card card(RoundsInAirDialog.Row row) {
+    private Card card(RoundsInAir.Row row) {
         return new Card(row, String.valueOf(row.turnsTilHit()), false, false, row.firedBy(),
               List.of(GpuEventLine.Part.plain(row.targetHex() + SEPARATOR + row.warhead())),
               row.landsIn() + SEPARATOR + row.player(), List.of(), "", List.of(), Entity.NONE, false,
@@ -722,7 +721,7 @@ final class GpuLogPanel implements GpuHud.Component {
             opened = null;
             history.reviewTo(card.steps().contains(history.current()) ? history.current() : card.steps().getFirst());
             openedAt = history.current();
-        } else if (!(card.source() instanceof RoundsInAirDialog.Row)) {
+        } else if (!(card.source() instanceof RoundsInAir.Row)) {
             opened = card.source().equals(opened) ? null : card.source();
         }
     }

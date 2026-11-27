@@ -18,7 +18,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.common.Report;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -223,7 +222,7 @@ final class GpuReportLog {
      */
     record Snapshot(int round, GamePhase phase, List<Entry> entries, Map<Integer, BoardScene.Pixels> icons,
           List<CombatEvent> combat, List<PsrItem> psr, List<MoveEvent> moves,
-          List<RoundsInAirDialog.Row> inFlight, List<CritItem> crits) {
+          List<RoundsInAir.Row> inFlight, List<CritItem> crits) {
         static final Snapshot EMPTY = new Snapshot(0, GamePhase.UNKNOWN, List.of(), Map.of(), List.of(), List.of(),
               List.of(), List.of());
 
@@ -240,7 +239,7 @@ final class GpuReportLog {
         /** A log without critical hits. */
         Snapshot(int round, GamePhase phase, List<Entry> entries, Map<Integer, BoardScene.Pixels> icons,
               List<CombatEvent> combat, List<PsrItem> psr, List<MoveEvent> moves,
-              List<RoundsInAirDialog.Row> inFlight) {
+              List<RoundsInAir.Row> inFlight) {
             this(round, phase, entries, icons, combat, psr, moves, inFlight, List.of());
         }
 
@@ -374,7 +373,7 @@ final class GpuReportLog {
      * entries and events carry the round the player sees; the start-of-game deployment is logged with round 1, as
      * GameReports stores it.
      */
-    Snapshot capture(List<List<Report>> history, int round, GamePhase phase, List<RoundsInAirDialog.Row> inFlight,
+    Snapshot capture(List<List<Report>> history, int round, GamePhase phase, List<RoundsInAir.Row> inFlight,
           IntFunction<BoardScene.Pixels> icon) {
         List<Report> first = history.isEmpty() ? List.of() : history.getFirst();
         int shown = displayRound(round, first);

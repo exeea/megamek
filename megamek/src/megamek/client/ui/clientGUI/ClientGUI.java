@@ -103,19 +103,14 @@ import megamek.client.ui.clientGUI.boardview.spriteHandler.*;
 import megamek.client.ui.clientGUI.unitDisplay.IHasUnitDisplay;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.*;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.EditBotsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
-import megamek.client.ui.dialogs.forceDisplay.ForceDisplayDialog;
-import megamek.client.ui.dialogs.forceDisplay.ForceDisplayPanel;
 import megamek.client.ui.dialogs.helpDialogs.AbstractHelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionWarning;
 import megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
@@ -155,7 +150,6 @@ import megamek.common.equipment.Mounted;
 import megamek.common.equipment.SensorFamily;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.event.*;
-import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.event.entity.GameEntityNewEvent;
@@ -222,7 +216,6 @@ public class ClientGUI extends AbstractClientGUI
     // region view menu
     public static final String VIEW_INC_GUI_SCALE = "viewIncGUIScale";
     public static final String VIEW_DEC_GUI_SCALE = "viewDecGUIScale";
-    public static final String VIEW_FORCE_DISPLAY = "viewForceDisplay";
     public static final String VIEW_NOVA_NETWORKS = "viewNovaNetworks";
     public static final String VIEW_UNIT_DISPLAY = "viewMekDisplay";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
@@ -251,7 +244,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_MOVE_ENV = "viewMovementEnvelope";
     public static final String VIEW_TURN_DETAILS_OVERLAY = "viewTurnDetailsOverlay";
     public static final String VIEW_MOVE_MOD_ENV = "viewMovModEnvelope";
-    public static final String VIEW_ROUND_REPORT = "viewRoundReport";
     public static final String VIEW_GAME_OPTIONS = "viewGameOptions";
     public static final String GAME_GIVE_UP_GAME_MASTER = "gameGiveUpGameMaster";
     public static final String GAME_REQUEST_GAME_MASTER = "gameRequestGameMaster";
@@ -263,12 +255,7 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_CLIENT_SETTINGS = "viewClientSettings";
     public static final String VIEW_LOS_SETTING = "viewLOSSetting";
     public static final String VIEW_PLAYER_SETTINGS = "viewPlayerSettings";
-    public static final String VIEW_PLAYER_LIST = "viewPlayerList";
-    public static final String VIEW_ROUNDS_IN_AIR = "viewRoundsInAir";
     public static final String VIEW_RESET_WINDOW_POSITIONS = "viewResetWindowPos";
-    public static final String VIEW_BOT_COMMANDS = "viewBotCommands";
-    public static final String VIEW_BOT_COMMANDS_OFF = "viewBotCommandsOff";
-    public static final String VIEW_BOT_COMMANDS_FLOAT = "viewBotCommandsFloat";
     // endregion view menu
 
 
@@ -347,12 +334,9 @@ public class ClientGUI extends AbstractClientGUI
     private final UnitDisplayState unitDisplayState;
     private UnitDisplayDialog unitDisplayDialog;
 
-    private BotCommandsDialog botCommandsDialog;
     private BotCommandsPanel botCommandsPanel;
     private CommandBarPanel commandBarPanel;
 
-    public ForceDisplayPanel forceDisplayPanel;
-    private ForceDisplayDialog forceDisplayDialog;
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
@@ -372,8 +356,6 @@ public class ClientGUI extends AbstractClientGUI
     // some dialogs...
     private GameOptionsDialog gameOptionsDialog;
     private NetworkInformationDialog networkInformationDialog;
-    private PlayerListDialog playerListDialog;
-    private RoundsInAirDialog roundsInAirDialog;
     private RandomArmyDialog randomArmyDialog;
     /** The poll a running Game Master vote is taken in; open only while a vote runs. */
     /**
@@ -404,9 +386,6 @@ public class ClientGUI extends AbstractClientGUI
      * Map each phase to the name of the card for the main display area.
      */
     private final Map<String, String> mainNames = new HashMap<>();
-
-    private MiniReportDisplayPanel miniReportDisplayPanel;
-    private MiniReportDisplayDialog miniReportDisplayDialog;
 
     /**
      * Boolean indicating whether client should be disconnected without a pop-up warning
@@ -695,68 +674,8 @@ public class ClientGUI extends AbstractClientGUI
         this.unitDisplayDialog.setFocusableWindowState(false);
     }
 
-    public ForceDisplayPanel getForceDisplayPanel() {
-        return forceDisplayPanel;
-    }
-
-    public void setForceDisplayPanel(final ForceDisplayPanel forceDisplayPanel) {
-        this.forceDisplayPanel = forceDisplayPanel;
-    }
-
-    public ForceDisplayDialog getForceDisplayDialog() {
-        return forceDisplayDialog;
-    }
-
-    public void setForceDisplayDialog(final ForceDisplayDialog forceDisplayDialog) {
-        this.forceDisplayDialog = forceDisplayDialog;
-        this.forceDisplayDialog.setFocusableWindowState(false);
-    }
-
-    public BotCommandsDialog getBotCommandsDialog() {
-        return botCommandsDialog;
-    }
-
-    public void setBotCommandsDialog(BotCommandsDialog botCommandsDialog) {
-        this.botCommandsDialog = botCommandsDialog;
-    }
-
     public BotCommandsPanel getBotCommandsPanel() {
         return botCommandsPanel;
-    }
-
-    public MiniReportDisplayPanel getMiniReportDisplay() {
-        return miniReportDisplayPanel;
-    }
-
-    public void setMiniReportDisplay(final MiniReportDisplayPanel miniReportDisplayPanel) {
-        this.miniReportDisplayPanel = miniReportDisplayPanel;
-    }
-
-    public MiniReportDisplayDialog getMiniReportDisplayDialog() {
-        return miniReportDisplayDialog;
-    }
-
-    public void setMiniReportDisplayDialog(final MiniReportDisplayDialog miniReportDisplayDialog) {
-        this.miniReportDisplayDialog = miniReportDisplayDialog;
-        this.miniReportDisplayDialog.setFocusableWindowState(false);
-    }
-
-    public PlayerListDialog getPlayerListDialog() {
-        return playerListDialog;
-    }
-
-    public void setPlayerListDialog(final PlayerListDialog playerListDialog) {
-        this.playerListDialog = playerListDialog;
-        this.playerListDialog.setFocusableWindowState(false);
-    }
-
-    public RoundsInAirDialog getRoundsInAirDialog() {
-        return roundsInAirDialog;
-    }
-
-    public void setRoundsInAirDialog(final RoundsInAirDialog roundsInAirDialog) {
-        this.roundsInAirDialog = roundsInAirDialog;
-        this.roundsInAirDialog.setFocusableWindowState(false);
     }
 
     @Override
@@ -976,32 +895,13 @@ public class ClientGUI extends AbstractClientGUI
         updateGameMasterMenuItems();
         updateLobbyEquipmentMenuItems();
 
-        setForceDisplayPanel(new ForceDisplayPanel(this));
-        setForceDisplayDialog(new ForceDisplayDialog(getFrame(), this));
-        getForceDisplayDialog().add(getForceDisplayPanel(), BorderLayout.CENTER);
-        getForceDisplayDialog().setVisible(false);
-
-        setMiniReportDisplay(new MiniReportDisplayPanel(this));
-        setMiniReportDisplayDialog(new MiniReportDisplayDialog(getFrame(), this));
-        getMiniReportDisplayDialog().setVisible(false);
-        setMiniReportVisible(GUIP.getMiniReportEnabled());
-
-        setPlayerListDialog(new PlayerListDialog(frame, client, false));
-        setRoundsInAirDialog(new RoundsInAirDialog(frame, client));
-
-        setBotCommandsDialog(new BotCommandsDialog(frame, this));
+        // The 3D board's Players panel uses this panel's actions (GpuBoardActions); no window shows it
         botCommandsPanel = new BotCommandsPanel(getClient(), audioService, controller, this);
         // The command bar holds the Commands button and is the strip the bot commands panel docks into, so it is put
         // in place first; it stays even when the bot commands panel is off or floating.
         commandBarPanel = new CommandBarPanel(this);
         panTop.add(commandBarPanel, BorderLayout.NORTH);
         maybeShowCommandBar();
-        // The panel waits in its hidden dialog; the 3D board's Players panel uses its actions.
-        setBotCommandsLocation(GUIP.getBotCommandsEnabled());
-        // The Bot Commands submenu can no longer carry a working menu accelerator, so wire the show/hide hotkey here.
-        if (controller != null) {
-            controller.registerCommandAction(KeyCommandBind.BOT_COMMANDS.cmd, GUIP::toggleBotCommandsEnabled);
-        }
 
         // The scene follows the server's first phase: the lobby for the lounge, the board for a scenario or a running
         // game. Until then whatever holds the window stays, so a scenario never flashes the lobby on its way in
@@ -1232,24 +1132,6 @@ public class ClientGUI extends AbstractClientGUI
         psd.setVisible(true);
     }
 
-    /**
-     * Called when the user selects the "View->Player List" menu item.
-     */
-    public void showPlayerList() {
-        if (getPlayerListDialog() == null) {
-            setPlayerListDialog(new PlayerListDialog(frame, client, false));
-        }
-        getPlayerListDialog().setVisible(true);
-    }
-
-    public void miniReportDisplayAddReportPages() {
-        ignoreHotKeys = true;
-        if (getMiniReportDisplay() != null) {
-            getMiniReportDisplay().addReportPages(client.getGame().getPhase());
-        }
-        ignoreHotKeys = false;
-    }
-
     public void reportDisplayResetDone() {
         if ((reportDisplay != null) && (!getClient().getLocalPlayer().isDone())) {
             reportDisplay.setDoneEnabled(true);
@@ -1271,15 +1153,6 @@ public class ClientGUI extends AbstractClientGUI
         if (getUnitDisplayDialog() != null) {
             getUnitDisplayDialog().setLocation(0, 0);
         }
-        if (getForceDisplayDialog() != null) {
-            getForceDisplayDialog().setLocation(0, 0);
-        }
-        if (getRoundsInAirDialog() != null) {
-            getRoundsInAirDialog().setBounds(0,
-                                             0,
-                                             getRoundsInAirDialog().getWidth(),
-                                             getRoundsInAirDialog().getHeight());
-        }
         if (getGameOptionsDialog() != null) {
             getGameOptionsDialog().setBounds(0,
                                              0,
@@ -1292,15 +1165,6 @@ public class ClientGUI extends AbstractClientGUI
                                                     getNetworkInformationDialog().getWidth(),
                                                     getNetworkInformationDialog().getHeight());
         }
-        if (getMiniReportDisplayDialog() != null) {
-            getMiniReportDisplayDialog().setBounds(0,
-                  0,
-                  getMiniReportDisplayDialog().getWidth(),
-                  getMiniReportDisplayDialog().getHeight());
-        }
-        if (getPlayerListDialog() != null) {
-            getPlayerListDialog().setBounds(0, 0, getPlayerListDialog().getWidth(), getPlayerListDialog().getHeight());
-        }
         if (gameOptionsDialog != null) {
             gameOptionsDialog.setBounds(0, 0, gameOptionsDialog.getWidth(), gameOptionsDialog.getHeight());
         }
@@ -1312,9 +1176,6 @@ public class ClientGUI extends AbstractClientGUI
         }
         if (commonSettingsDialog != null) {
             commonSettingsDialog.setBounds(0, 0, commonSettingsDialog.getWidth(), commonSettingsDialog.getHeight());
-        }
-        if (getBotCommandsDialog() != null) {
-            getBotCommandsDialog().setLocation(0, 0);
         }
         if (getRandomArmyDialog() != null) {
             getRandomArmyDialog().setBounds(0, 0, getRandomArmyDialog().getWidth(), getRandomArmyDialog().getHeight());
@@ -1473,32 +1334,14 @@ public class ClientGUI extends AbstractClientGUI
                     logger.warn("No battle window to show the player settings over");
                 }
                 break;
-            case VIEW_PLAYER_LIST:
-                GUIP.togglePlayerListEnabled();
-                break;
-            case VIEW_ROUNDS_IN_AIR:
-                GUIP.toggleRoundsInAirEnabled();
-                break;
-            case VIEW_ROUND_REPORT:
-                GUIP.toggleRoundReportEnabled();
-                break;
             case VIEW_UNIT_DISPLAY:
                 GUIP.toggleUnitDisplay();
-                break;
-            case VIEW_FORCE_DISPLAY:
-                GUIP.toggleForceDisplay();
                 break;
             case VIEW_NOVA_NETWORKS:
                 showNovaNetworkViewDialog();
                 break;
             case VIEW_MINI_MAP:
                 GUIP.toggleMinimapEnabled();
-                break;
-            case VIEW_BOT_COMMANDS_OFF:
-                GUIP.setBotCommandsEnabled(false);
-                break;
-            case VIEW_BOT_COMMANDS_FLOAT:
-                GUIP.setBotCommandsEnabled(true);
                 break;
             case VIEW_TOGGLE_HEX_COORDS:
                 GUIP.toggleCoords();
@@ -1664,31 +1507,6 @@ public class ClientGUI extends AbstractClientGUI
         if (getUnitDisplayDialog() != null) {
             getUnitDisplayDialog().saveSettings();
         }
-
-        // Force Display Dialog
-        if (getForceDisplayDialog() != null) {
-            getForceDisplayDialog().saveSettings();
-        }
-
-        // Mini Report Dialog
-        if (getMiniReportDisplayDialog() != null) {
-            getMiniReportDisplayDialog().saveSettings();
-        }
-
-        // Player List Dialog
-        if (getPlayerListDialog() != null) {
-            getPlayerListDialog().saveSettings();
-        }
-
-        // Rounds in Air Dialog
-        if (getRoundsInAirDialog() != null) {
-            getRoundsInAirDialog().saveSettings();
-        }
-
-        // BotCommands Dialog
-        if (getBotCommandsDialog() != null) {
-            getBotCommandsDialog().saveSettings();
-        }
     }
 
     @Override
@@ -1826,11 +1644,7 @@ public class ClientGUI extends AbstractClientGUI
 
         showDefaultBoard(mainNames.get(name));
         maybeShowCommandBar();
-        maybeShowBotCommands();
         maybeShowUnitDisplay();
-        maybeShowForceDisplay();
-        maybeShowMiniReport();
-        maybeShowPlayerList();
 
         cardsMain.show(panMain, mainNames.get(name));
         String secondaryToShow = secondaryNames.get(name);
@@ -1884,16 +1698,6 @@ public class ClientGUI extends AbstractClientGUI
     private void openGpuBoard() {
         boardViewChosen = true;
         GpuBoardWindow.open(this, () -> curPanel);
-    }
-
-    /** Reapply auxiliary window presentation after changing board windows, without changing saved docking choices. */
-    public void refreshAuxiliaryWindows() {
-        setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
-        setForceDisplayVisible(GUIP.getForceDisplayEnabled());
-        setMiniReportLocation(GUIP.getMiniReportEnabled());
-        setPlayerListVisible(GUIP.getPlayerListEnabled());
-        setRoundsInAirVisible(GUIP.getRoundsInAirEnabled());
-        maybeShowBotCommands();
     }
 
     public void updateButtonPanel(GamePhase phase) {
@@ -2153,117 +1957,6 @@ public class ClientGUI extends AbstractClientGUI
         logger.debug("[GameCommands] command bar visible={} in phase {}", phaseAllowsCommandBar, phase);
     }
 
-    private void maybeShowBotCommands() {
-        GamePhase phase = getClient().getGame().getPhase();
-        boolean phaseAllowsPanel;
-        if (phase.isReport()) {
-            phaseAllowsPanel = GUIP.getBotCommandsAutoDisplayReportPhase() != GUIPreferences.HIDE;
-        } else if (phase.isOnMap()) {
-            phaseAllowsPanel = GUIP.getBotCommandsAutoDisplayNonReportPhase() != GUIPreferences.HIDE;
-        } else {
-            // Lounge and other non-board phases never show the panel, but the player's on/off choice is kept.
-            phaseAllowsPanel = false;
-        }
-        // BOT_COMMANDS_ENABLED is the persistent user choice (Off/Float/Dock); honor it here, never overwrite it,
-        // so the chosen mode is remembered across phases and across sessions.
-        setBotCommandsLocation(GUIP.getBotCommandsEnabled() && phaseAllowsPanel && gameHasBots());
-    }
-
-    /**
-     * @return {@code true} if any player in the game is a bot. Without one there is nobody the bot commands panel could
-     *       give orders to, so it stays hidden - leaving the command bar with only the Commands button - until a bot
-     *       joins (e.g. when a player is replaced by one).
-     */
-    private boolean gameHasBots() {
-        for (Player player : getClient().getGame().getPlayersList()) {
-            if (player.isBot()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void maybeShowMiniReport() {
-        if (GpuBoardWindow.isActiveFor(this)) {
-            setMiniReportVisible(false);
-            return;
-        }
-        GamePhase phase = getClient().getGame().getPhase();
-
-        if (phase.isReport()) {
-            int action = GUIP.getMiniReportAutoDisplayReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setMiniReportEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setMiniReportEnabled(false);
-            }
-        } else if (phase.isOnMap()) {
-            int action = GUIP.getMiniReportAutoDisplayNonReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setMiniReportEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setMiniReportEnabled(false);
-            }
-        } else {
-            GUIP.setMiniReportEnabled(false);
-        }
-    }
-
-    private void maybeShowPlayerList() {
-        GamePhase phase = getClient().getGame().getPhase();
-
-        if (phase.isReport()) {
-            int action = GUIP.getPlayerListAutoDisplayReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setPlayerListEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setPlayerListEnabled(false);
-            }
-        } else if (phase.isOnMap()) {
-            int action = GUIP.getPlayerListAutoDisplayNonReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setPlayerListEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setPlayerListEnabled(false);
-            }
-        } else {
-            GUIP.setPlayerListEnabled(false);
-        }
-    }
-
-    void setMiniReportVisible(boolean visible) {
-        if (getMiniReportDisplayDialog() != null) {
-            setMiniReportLocation(visible);
-        }
-    }
-
-    void setPlayerListVisible(boolean visible) {
-        // The native battle window's HUD lists the players (Menu > Players); the Swing list stays hidden there.
-        if (visible && GpuBoardWindow.isActiveFor(this)) { setPlayerListVisible(false); return; }
-        if (visible) {
-            showPlayerList();
-        } else if (getPlayerListDialog() != null) {
-            getPlayerListDialog().setVisible(false);
-        }
-    }
-
-    void setRoundsInAirVisible(boolean visible) {
-        // The native battle window's log lists the rounds in the air; the Swing window stays hidden there.
-        if (visible && GpuBoardWindow.isActiveFor(this)) { setRoundsInAirVisible(false); return; }
-        if (getRoundsInAirDialog() != null) {
-            if (visible) {
-                // Push the current "reveal all artillery" preference to the server on open. The preference change
-                // listener only fires the push when the toggle CHANGES, so a value already set to true at game start
-                // would otherwise never reach the server and enemy rounds would stay hidden. The server's reply
-                // refreshes the list.
-                getClient().sendArtilleryRevealPreference(
-                      GUIP.getBoolean(GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS));
-                getRoundsInAirDialog().refresh();
-            }
-            getRoundsInAirDialog().setVisible(visible);
-        }
-    }
-
     /** Shows or hides the Unit Display based on the current menu setting. */
     public void maybeShowUnitDisplay() {
         GamePhase phase = getClient().getGame().getPhase();
@@ -2287,29 +1980,6 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Shows or hides the Unit Display based on the current menu setting. */
-    public void maybeShowForceDisplay() {
-        GamePhase phase = getClient().getGame().getPhase();
-
-        if (phase.isReport()) {
-            int action = GUIP.getForceDisplayAutoDisplayReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setForceDisplayEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setForceDisplayEnabled(false);
-            }
-        } else if (phase.isOnMap()) {
-            int action = GUIP.getForceDisplayAutoDisplayNonReportPhase();
-            if (action == GUIPreferences.SHOW) {
-                GUIP.setForceDisplayEnabled(true);
-            } else if (action == GUIPreferences.HIDE) {
-                GUIP.setForceDisplayEnabled(false);
-            }
-        } else {
-            GUIP.setForceDisplayEnabled(false);
-        }
-    }
-
     /**
      * Shows or hides the Unit Display based on the given visible. This works independently of the current menu setting,
      * so it should be used only when the Unit Display is to be shown or hidden without regard for the user setting,
@@ -2329,43 +1999,9 @@ public class ClientGUI extends AbstractClientGUI
         setUnitDisplayLocation(visible);
     }
 
-    /**
-     * Keeps the bot commands panel in its Swing dialog, which stays hidden whatever {@code visible} asks: the 3D
-     * board's Players panel holds the bot commands and uses this panel's actions ({@code GpuBoardActions}).
-     *
-     * @param visible ignored; there is no Swing window to show the panel in
-     */
-    void setBotCommandsLocation(boolean visible) {
-        if ((botCommandsPanel == null) || (getBotCommandsDialog() == null)) {
-            return;
-        }
-        getBotCommandsDialog().add(botCommandsPanel);
-        botCommandsPanel.setVisible(true);
-        getBotCommandsDialog().setVisible(false);
-    }
-
-    public void setForceDisplayVisible(boolean visible) {
-        // The native battle window's force overview stands for it; its window (and its Unit Display) stays hidden.
-        if (visible && GpuBoardWindow.isActiveFor(this)) { setForceDisplayVisible(false); return; }
-        if (getForceDisplayDialog() != null) {
-            getForceDisplayDialog().setVisible(visible);
-        }
-    }
-
     /** The 3D board's HUD shows the unit record; the Swing unit display stays hidden. */
     public void setUnitDisplayLocation(boolean visible) {
         if (getUnitDisplayDialog() != null) { getUnitDisplayDialog().setVisible(false); }
-    }
-
-    /**
-     * Keeps the Swing report window hidden whatever {@code visible} asks: the 3D board's log shows the reports, and
-     * over the 3D lobby the Swing window was a leftover.
-     *
-     * @param visible ignored; the report window stays hidden
-     */
-    public void setMiniReportLocation(boolean visible) {
-        getMiniReportDisplayDialog().setVisible(false);
-        getMiniReportDisplay().setVisible(false);
     }
 
     /**
@@ -3555,16 +3191,6 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         @Override
-        public void gameBoardChanged(GameBoardChangeEvent e) {
-            // Keep the Rounds in the Air window current the moment in-flight artillery changes. The artillery packet
-            // arrives after the phase-change event, so a phase-change-only refresh would lag a phase (and miss
-            // off-board counter-battery rounds entirely until the next phase).
-            if (roundsInAirDialog != null) {
-                roundsInAirDialog.refresh();
-            }
-        }
-
-        @Override
         public void gameBoardNew(GameBoardNewEvent e) {
             int boardId = e.getBoardId();
             BoardClientState oldState = boardStates.remove(boardId);
@@ -3588,16 +3214,9 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gamePlayerChange(GamePlayerChangeEvent evt) {
-            if (playerListDialog != null) {
-                playerListDialog.refreshPlayerList();
-
-                if (currPhaseDisplay != null) {
-                    currPhaseDisplay.setStatusBarWithNotDonePlayers();
-                }
+            if (currPhaseDisplay != null) {
+                currPhaseDisplay.setStatusBarWithNotDonePlayers();
             }
-            // The bot commands panel is hidden while the game has no bots; a player change can be a bot joining
-            // (e.g. replacing a dropped player) or the last bot leaving, so re-evaluate the panel.
-            maybeShowBotCommands();
             // the Game Master role may have changed hands, so keep the title's marker and the Game menu's
             // Game Master entries in step
             updateFrameTitle();
@@ -3648,11 +3267,6 @@ public class ClientGUI extends AbstractClientGUI
             // Swap to this phase's panel.
             GamePhase phase = getClient().getGame().getPhase();
             switchPanel(phase);
-
-            // Keep the Rounds in the Air list current as rounds are declared, fly, and land each phase.
-            if (roundsInAirDialog != null) {
-                roundsInAirDialog.refresh();
-            }
 
             // Special-report packets replay the whole phase report each time they are sent, so the "already toasted"
             // history only has to span a single phase. Clearing it here also lets a line that genuinely recurs in a
@@ -3716,7 +3330,6 @@ public class ClientGUI extends AbstractClientGUI
             // currently Tactical Genius reroll requests and when
             // a player wishes to continue moving after a fall.
             if (getClient().getGame().getPhase().isInitiativeReport()) {
-                miniReportDisplayAddReportPages();
                 reportDisplayResetDone();
                 // Check if the player deserves an active reroll button
                 // (possible, if he gets one which he didn't use, and his
@@ -4519,18 +4132,10 @@ public class ClientGUI extends AbstractClientGUI
     @Override
     public void preferenceChange(PreferenceChangeEvent e) {
         switch (e.getName()) {
-            case GUIPreferences.PLAYER_LIST_ENABLED -> setPlayerListVisible(GUIP.getPlayerListEnabled());
-            case GUIPreferences.ROUNDS_IN_AIR_ENABLED -> setRoundsInAirVisible(GUIP.getRoundsInAirEnabled());
-            case GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS -> {
-                getClient().sendArtilleryRevealPreference(GUIP.getBoolean(GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS));
-                if (roundsInAirDialog != null) {
-                    roundsInAirDialog.refresh();
-                }
-            }
+            case GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS -> getClient().sendArtilleryRevealPreference(
+                  GUIP.getBoolean(GUIPreferences.REVEAL_ALL_ARTILLERY_ROUNDS));
             case GUIPreferences.UNIT_DISPLAY_ENABLED ->
                   setUnitDisplayVisible(GUIP.getUnitDisplayEnabled());
-            case GUIPreferences.FORCE_DISPLAY_ENABLED -> setForceDisplayVisible(GUIP.getForceDisplayEnabled());
-            case GUIPreferences.MINI_REPORT_ENABLED -> setMiniReportVisible(GUIP.getMiniReportEnabled());
             case GUIPreferences.DEFAULT_WEAPON_SORT_ORDER -> {
                 setWeaponOrderPrefs(true);
                 getUnitDisplayState().displayEntity(getUnitDisplayState().getCurrentEntity());
@@ -4544,10 +4149,6 @@ public class ClientGUI extends AbstractClientGUI
                  GUIPreferences.SOUND_BING_FILENAME_OTHERS_TURN,
                  GUIPreferences.SOUND_BING_FILENAME_PING -> audioService.loadSoundFiles();
             case GUIPreferences.MASTER_VOLUME -> audioService.setVolume();
-            case GUIPreferences.BOT_COMMANDS_ENABLED ->
-                // Route through maybeShowBotCommands() so the phase rules (non-board phases never show the panel)
-                // are enforced consistently, whether the change came from the menu, the hotkey, or a phase change.
-                  maybeShowBotCommands();
         }
     }
 
