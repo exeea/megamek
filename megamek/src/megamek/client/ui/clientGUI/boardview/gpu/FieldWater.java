@@ -93,13 +93,34 @@ final class FieldWater {
         surface.fieldWater(line, mouths);
         surface.outline.addAll(List.of(line));
         surface.water.addAll(List.of(pool));
-        float[] plane = surface(board, h, lips);
+        // A pool of molten rock that stands alone (no mouth, no fall) takes today's sheet, which ends on today's lava
+        // line: an opaque plane ends where it meets the lattice's bank, short of that line and angular. Joined pools
+        // keep the plane, whose points along a mouth both hexes share.
+        List<BoardSurface.Face> melt = today == null && mouths == 0 ? board.shore.melt(h) : null;
+        float[] plane = melt == null ? surface(board, h, lips) : new float[0];
         for (int i = 0; i < plane.length; i += 9) {
             surface.waterFaces.add(new BoardSurface.Face(new Vector3(plane[i], plane[i + 1], plane[i + 2]),
                   new Vector3(plane[i + 3], plane[i + 4], plane[i + 5]), new Vector3(plane[i + 6], plane[i + 7], plane[i + 8]),
                   BoardSurface.Finish.TOP));
         }
+        for (BoardSurface.Face face : melt == null ? List.<BoardSurface.Face>of() : melt) {
+            surface.waterFaces.add(new BoardSurface.Face(laid(surface, face.a()), laid(surface, face.b()),
+                  laid(surface, face.c()), BoardSurface.Finish.TOP));
+        }
         if (board.shore.graded(h)) { surface.fieldGrade(); }
+    }
+
+    /** How far over the block's ground a molten sheet's point lies where that ground stands above the sheet, metres. */
+    private static final float MELT_LIFT = .05f;
+
+    /**
+     * A point of today's molten sheet, on the field hex's ground where that stands above it: the lattice's bank is
+     * coarser than today's lava line, and the sheet reaches that line over it.
+     */
+    private static Vector3 laid(BoardSurface surface, Vector3 p) {
+        float ground = surface.height(p.x, p.y);
+        float lift = BoardRelief.metres(MELT_LIFT);
+        return new Vector3(p.x, p.y, Float.isFinite(ground) ? Math.max(p.z, ground + lift) : p.z);
     }
 
     /** The rings a descending stream's plane has between its outline and its centre, so it can follow its surface. */

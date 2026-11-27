@@ -96,6 +96,8 @@ final class FieldShore {
     private final Map<Coords, Bed> beds = new ConcurrentHashMap<>();
     /** Today's surface (BoardSurface) of each descending (graded) water hex whose ring was asked for: its graded water. */
     private final Map<Coords, BoardSurface> grades = new ConcurrentHashMap<>();
+    /** Today's sheet of each molten hex, inside its lava line (#melt); filled with its ring (#ring). */
+    private final Map<Coords, List<BoardSurface.Face>> melts = new ConcurrentHashMap<>();
     private final Map<Coords, Line> lines = new ConcurrentHashMap<>();
     /**
      * Each shaped water hex's edges to water the operator does not shape at its surface (#seam): x0, y0, x1, y1 and
@@ -868,6 +870,15 @@ final class FieldShore {
         return false;
     }
 
+    /**
+     * Today's sheet of molten hex h, the triangles inside its lava line; null for any other hex. Molten rock is opaque,
+     * so its sheet ends on that line itself (FieldWater#fill), where water's plane fades out over its bed.
+     */
+    List<BoardSurface.Face> melt(Coords h) {
+        ring(h);
+        return melts.get(h);
+    }
+
     /** Today's waterline of water hex h (BoardSurface's) as a ring of x, y; empty for a dry hex or off the board. */
     private float[] ring(Coords h) {
         float[] known = rings.get(h);
@@ -880,6 +891,7 @@ final class FieldShore {
             Vector3[] line = today.waterline();
             boolean graded = today.graded() && !tile.frozen();
             if (graded) { grades.putIfAbsent(h, surface); }
+            if (tile.liquid().molten()) { melts.putIfAbsent(h, today.waterFaces()); }
             List<BoardSurface.Face> bed = tile.frozen() || tile.waterDepth() != 0 && !graded && !plunged(tile) ? List.of()
                   : today.faces().stream().filter(face -> face.finish() == BoardSurface.Finish.BED).toList();
             beds.putIfAbsent(h, bed.isEmpty() ? NO_BED : new Bed(new GpuBiomeVegetation.Support(bed)));
