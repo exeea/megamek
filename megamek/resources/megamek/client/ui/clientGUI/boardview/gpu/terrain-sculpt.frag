@@ -933,6 +933,16 @@ void main() {
     surface.emission = finish.emission;
     surface.regolith = lunar * (1.0 - volcanic);
     vec3 result = shadeSurface(surface, caustic, submerged);
+#ifdef fieldMorphFlag
+    // Moon dust has no sky: a step face in shade is lit by the sunlit ground alone, which an imported environment
+    // image's lower half leaves out, so a flat field face reads as one black plate. It takes the lit ground's light at
+    // its foot, fading up the face over about half a level: the gradient today's rounded bank shows.
+    if (rocky && lunar > 0.0) {
+        float aboveFoot = max(shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y, 0.0);
+        float nearFoot = exp(-aboveFoot / (1.0 * u_levelHeight / u_metre));
+        result += albedo * environmentGround(bounce) * (1.0 * lunar * nearFoot * occlusion);
+    }
+#endif
 #else
     vec3 result = albedo + finish.emission;
 #endif
