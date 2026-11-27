@@ -1513,8 +1513,14 @@ final class FieldBoard {
                 float atA = Math.clamp(((ca[0] - fa[0]) * outX + (ca[1] - fa[1]) * outY) / room, 0, 1);
                 float atB = Math.clamp(((cb[0] - fb[0]) * outX + (cb[1] - fb[1]) * outY) / room, 0, 1);
                 float out = room * Math.min(1, Math.min(atA + j / (FULL / 2f), atB + (FULL - j) / (FULL / 2f)));
-                points[j] = new float[] { fa[0] + (fb[0] - fa[0]) * t + out * outX,
-                      fa[1] + (fb[1] - fa[1]) * t + out * outY, Float.NaN, 1 };
+                // Evenly between the two corners' places along the fitted edge: a mitre shortens the foot at a corner
+                // the outline turns in at, and a sample set by the fitted corners would stand past it (a fold).
+                float alongX = (bx + fb[0] - ax - fa[0]) / length, alongY = (by + fb[1] - ay - fa[1]) / length;
+                float fromA = (ca[0] - fa[0]) * alongX + (ca[1] - fa[1]) * alongY;
+                float toB = length + (cb[0] - fb[0]) * alongX + (cb[1] - fb[1]) * alongY;
+                float along = fromA + (toB - fromA) * t;
+                points[j] = new float[] { fa[0] + alongX * along + out * outX - (bx - ax) * t,
+                      fa[1] + alongY * along + out * outY - (by - ay) * t, Float.NaN, 1 };
                 continue;
             }
             if (j == 0 || j == FULL || !wall) {
