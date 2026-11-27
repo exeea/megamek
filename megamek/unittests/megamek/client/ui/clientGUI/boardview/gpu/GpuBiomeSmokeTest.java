@@ -324,8 +324,9 @@ class GpuBiomeSmokeTest {
         frame.render(terrain, camera, scene);
     }
 
+    /** Each biome's ground is a board of its own (BoardScenes#scene): a marsh's reeds are planted for its board. */
     private static BoardScene scene(BoardScene.Biome kind) {
-        return BoardScenes.scene(c -> BoardScenes.tile(c,
+        return BoardScenes.scene(1 + kind.ordinal(), c -> BoardScenes.tile(c,
               c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5 ? kind : BoardScene.Biome.NONE, 0));
     }
 

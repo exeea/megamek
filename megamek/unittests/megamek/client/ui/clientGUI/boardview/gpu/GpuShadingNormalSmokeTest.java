@@ -158,11 +158,12 @@ class GpuShadingNormalSmokeTest {
                 boolean bank = kind.equals("bank"), grass = kind.equals("grass");
                 // A field's plants and a bank rim's are blades of the grass program, as the grass is.
                 boolean blades = grass || bank || kind.equals("crop");
+                // Each specimen ground is a board of its own (BoardScenes#scene), by its kind's first letter.
                 BoardScene scene;
                 camera.camera.zoom = BoardGeometry.width() * dpi / 560;
                 camera.center(BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0));
                 if (grass || bank) {
-                    scene = BoardScenes.scene(c -> BoardScenes.tile(c,
+                    scene = BoardScenes.scene(kind.charAt(0), c -> BoardScenes.tile(c,
                           BoardScene.Surface.GRASS, bank ? (c.getX() < 4 ? 3 : 1) : 0, -1, 0));
                     if (bank) {
                         var center = BoardGeometry.center(new megamek.common.board.Coords(3, 4), 3);
@@ -176,7 +177,7 @@ class GpuShadingNormalSmokeTest {
                     }
                 } else {
                     var biome = kind.equals("crop") ? BoardScene.Biome.FIELD : BoardScene.Biome.MARSH;
-                    scene = BoardScenes.scene(c -> BoardScenes.tile(c,
+                    scene = BoardScenes.scene(kind.charAt(0), c -> BoardScenes.tile(c,
                           c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
                                 ? biome : BoardScene.Biome.MUD, 0));
                 }
@@ -1252,7 +1253,9 @@ class GpuShadingNormalSmokeTest {
               + "#ifdef biomeVegetationFlag\n"
               + "reviewProxy=true; reviewFrame=normal;\n#endif\n"
               : "#ifdef impostorFlag\nreviewProxy=true;\n#else\nreviewProxy=u_foliageProxy>.5;\n#endif\n"
-              + "if(reviewProxy) reviewFrame=normalize(v_normal);\n";
+              // The represented frame is the program's own (terrain-foliage.frag's baseNormal): a leaf card's vertex
+              // normal, and since the view-frame impostors an impostor's decoded normal, not its card's.
+              + "if(reviewProxy) reviewFrame=baseNormal;\n";
         source = source.substring(0, at) + "    vec3 reviewOriginal = " + (tuft ? "normal" : "face") + ";\n"
               + virtual + "if(dot(reviewFrame,-viewDirection())<0.0) reviewFrame=-reviewFrame;\n" + source.substring(at);
         source = source.replace("void main() {", "uniform int u_grazingReview;\nvoid main() {\n"
