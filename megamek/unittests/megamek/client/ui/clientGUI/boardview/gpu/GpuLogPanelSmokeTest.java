@@ -331,7 +331,7 @@ class GpuLogPanelSmokeTest {
             Panel panel = new Panel(hud);
             Round round = scripted();
             RoundsInAir.Row inbound = new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle",
-                  "1 turn(s)", "0607", "Standard");
+                  "1 turn(s)", "0607", "Standard", true);
             GpuReportLog.Snapshot log = new GpuReportLog.Snapshot(4, GamePhase.END_REPORT, round.log().entries(),
                   Map.of(), round.log().combat(), round.log().psr(), round.log().moves(), List.of(inbound));
             play(panel.state.history, new Round(log, round.events()));
@@ -345,6 +345,14 @@ class GpuLogPanelSmokeTest {
             assertEquals(List.of("1", "1", "Thumper Artillery Vehicle", "0607 · Standard",
                   "1 turn(s) · OpFor"), list.subList(artillery + 1, list.size()),
                   "its count, then the round's card: its turns in the disc, the unit, the hex and warhead, the turn");
+            Container<Label> disc = panel.card(panel.cardActors().size() - 1).findActor("log-card-disc");
+            assertEquals(UiTheme.CORAL, disc.getActor().getStyle().fontColor, "an enemy's round has the enemy's disc");
+            click(hud, panel.find("log-filter-1"));
+            panel.show(hud, status, log);
+            assertFalse(panel.list().contains(UiTheme.upper(Messages.getString("GpuBoard.hud.log.artilleryInFlight"))),
+                  "My force leaves an enemy's round out");
+            click(hud, panel.find("log-filter-0"));
+            panel.show(hud, status, log);
 
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_FILTER)));
             panel.show(hud, status, log);

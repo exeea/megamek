@@ -418,9 +418,17 @@ final class GpuBattleStatus {
         return player == null ? 0 : player.getColour().getColour().getRGB();
     }
 
-    /** Own; otherwise ally unless {@code Player.isEnemyOf} calls the owner an enemy. No owner counts as enemy. */
+    /** Own; otherwise ally unless {@link #enemy} calls the owner an enemy. */
     private static Side side(boolean own, Player owner, Player local) {
-        return own ? Side.OWN : owner == null || owner.isEnemyOf(local) ? Side.ENEMY : Side.ALLY;
+        return own ? Side.OWN : enemy(owner, local) ? Side.ENEMY : Side.ALLY;
+    }
+
+    /**
+     * Whether {@code owner} is the local player's enemy, as {@code Player.isEnemyOf} says (two players without a team
+     * are enemies). No owner counts as enemy.
+     */
+    static boolean enemy(Player owner, Player local) {
+        return owner == null || owner.isEnemyOf(local);
     }
 
     /** How many attacks each unit has declared this phase, one per weapon: {@link #declared}, by attacking unit. */
@@ -460,13 +468,9 @@ final class GpuBattleStatus {
         return weapon == null ? null : weapon.getAttackingEntity();
     }
 
-    /**
-     * Whether {@code weapon}'s owner is not the local player's enemy, by the rule {@code side} uses
-     * ({@code Player.isEnemyOf}: two players without a team are enemies); false when either is unknown.
-     */
+    /** Whether {@code weapon}'s owner is not the local player's {@link #enemy}; false when the weapon is unknown. */
     private static boolean friendly(Entity weapon, Player local) {
-        Player owner = weapon == null ? null : weapon.getOwner();
-        return owner != null && !owner.isEnemyOf(local);
+        return !enemy(weapon == null ? null : weapon.getOwner(), local);
     }
 
     /**

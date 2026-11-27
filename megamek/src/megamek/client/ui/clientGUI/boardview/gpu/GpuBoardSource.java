@@ -1852,7 +1852,7 @@ final class GpuBoardSource implements BoardSource {
     /** EDT: the log of the game's reports, with the artillery rounds in the air the Rounds in the Air window lists. */
     private GpuReportLog.Snapshot captureReports() {
         return reports.capture(view.game.getAllReports(), view.game.getRoundCount(), view.game.getPhase(),
-              RoundsInAir.rows(view.game), this::reportIcon);
+              RoundsInAir.rows(view.game, view.getLocalPlayer()), this::reportIcon);
     }
 
     /** EDT: {@code id} while that unit exists and passes {@code check} now, else {@code Entity.NONE}. */

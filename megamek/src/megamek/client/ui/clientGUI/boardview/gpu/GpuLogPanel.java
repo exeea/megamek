@@ -471,7 +471,8 @@ final class GpuLogPanel implements GpuHud.Component {
     private boolean passes(Card card) {
         Object source = card.source();
         boolean mine = source instanceof Entry entry ? entry.involves(shown.friendly())
-              : !(source instanceof GpuReportLog.MoveEvent move) || shown.friendly().contains(move.entityId());
+              : source instanceof GpuReportLog.MoveEvent move ? shown.friendly().contains(move.entityId())
+              : !(source instanceof RoundsInAir.Row row) || !row.enemy();
         boolean critical = source instanceof Entry entry && entry.critical();
         String plain = card.plain().toLowerCase(Locale.ROOT);
         return (shown.filter() != MY_FORCE || mine) && (shown.filter() != CRITICAL || critical)
@@ -598,7 +599,7 @@ final class GpuLogPanel implements GpuHud.Component {
 
     /** An artillery round in the air (K13, as the Rounds in the Air window lists it): its turns left in the disc. */
     private Card card(RoundsInAir.Row row) {
-        return new Card(row, String.valueOf(row.turnsTilHit()), false, false, row.firedBy(),
+        return new Card(row, String.valueOf(row.turnsTilHit()), false, row.enemy(), row.firedBy(),
               List.of(GpuEventLine.Part.plain(row.targetHex() + SEPARATOR + row.warhead())),
               row.landsIn() + SEPARATOR + row.player(), List.of(), "", List.of(), Entity.NONE, false,
               row.equals(shown.match()));

@@ -24,16 +24,27 @@ class RoundsInAirTest {
     /** The rows the window and the GPU battle log list (K13): own rounds in full, enemy rounds without their aim. */
     @Test
     void rowsListOwnRoundsInFullAndEnemyRoundsWithoutTheirAimSoonestFirst() {
+        Game game = game();
         assertEquals(List.of(
                     new RoundsInAir.Row(0, "Team 1", "Raven's Nest", "Sniper Artillery Vehicle", "This turn",
-                          "Counter-battery (off-board)", "Standard (HE)"),
+                          "Counter-battery (off-board)", "Standard (HE)", false),
                     new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
-                          "Unknown", "Unknown"),
+                          "Unknown", "Unknown", true),
                     new RoundsInAir.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
-                          "0607", "Homing"),
+                          "0607", "Homing", false),
                     new RoundsInAir.Row(3, "Team 2", "OpFor", "(unknown unit)", "3 turn(s)", "Unknown",
-                          "Unknown")),
-              RoundsInAir.rows(game()));
+                          "Unknown", true)),
+              RoundsInAir.rows(game, game.getPlayer(0)));
+    }
+
+    /** A round listed in full is an enemy's when its player is the viewer's enemy, as a Game Master sees them all. */
+    @Test
+    void aFullRoundIsAnEnemysWhenItsPlayerIsTheViewersEnemy() {
+        Game game = game();
+        Player other = new Player(2, "Umpire");
+        other.setTeam(3);
+        assertEquals(List.of(true, true, true, true),
+              RoundsInAir.rows(game, other).stream().map(RoundsInAir.Row::enemy).toList());
     }
 
     /**

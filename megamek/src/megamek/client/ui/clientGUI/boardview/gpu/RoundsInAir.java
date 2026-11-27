@@ -60,11 +60,12 @@ final class RoundsInAir {
      * in full; enemy rounds (a redacted, team-safe feed from the server) show only their landing time, with the target
      * hex and warhead listed as "Unknown". The GPU battle log lists the same rows.
      *
-     * @param game The client's game
+     * @param game  The client's game
+     * @param local The local player, who decides which rounds are an enemy's
      *
      * @return One row per artillery round in the air that the local player is entitled to see
      */
-    public static List<Row> rows(Game game) {
+    public static List<Row> rows(Game game, Player local) {
         List<Row> rows = new ArrayList<>();
 
         // Own and allied rounds: full detail.
@@ -77,7 +78,8 @@ final class RoundsInAir {
                   firingUnitName(game, attack.getEntityId()),
                   landsInText(attack.getTurnsTilHit()),
                   targetHexText(game, attack),
-                  warheadName(attack)));
+                  warheadName(attack),
+                  GpuBattleStatus.enemy(game.getPlayer(attack.getPlayerId()), local)));
         }
 
         // Enemy rounds: redacted - landing time only; the target hex and warhead are withheld (shown as "Unknown").
@@ -89,7 +91,8 @@ final class RoundsInAir {
                   firingUnitName(game, inbound.firingEntityId()),
                   landsInText(inbound.turnsTilHit()),
                   unknown,
-                  unknown));
+                  unknown,
+                  true));
         }
 
         // Sort allied and enemy rounds together so the soonest-landing round is always at the top, regardless of side.
@@ -108,9 +111,10 @@ final class RoundsInAir {
      * @param landsIn     When the round lands
      * @param targetHex   The target hex or its counter-battery or off-board label; "Unknown" for an enemy round
      * @param warhead     The warhead; "Unknown" for an enemy round
+     * @param enemy       Whether an enemy of the local player fired it
      */
     public record Row(int turnsTilHit, String team, String player, String firedBy, String landsIn, String targetHex,
-          String warhead) {}
+          String warhead, boolean enemy) {}
 
     private static String teamName(Game game, int playerId) {
         Player player = game.getPlayer(playerId);

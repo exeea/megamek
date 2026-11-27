@@ -667,9 +667,9 @@ class GpuReportLogTest {
         GpuReportLog log = new GpuReportLog();
         List<List<Report>> history = List.of(List.of(new Report(3000)));
         var own = new RoundsInAir.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
-              "0607", "Homing");
+              "0607", "Homing", false);
         var enemy = new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
-              "Unknown", "Unknown");
+              "Unknown", "Unknown", true);
 
         var inbound = log.capture(history, 1, GamePhase.FIRING, List.of(enemy, own), id -> null);
 
@@ -694,7 +694,7 @@ class GpuReportLogTest {
             });
 
             assertEquals(List.of(new RoundsInAir.Row(2, "Team 2", "OpFor", "(unknown unit)", "2 turn(s)",
-                  "Unknown", "Unknown")), fixture.source.takeFrame().reports().inFlight());
+                  "Unknown", "Unknown", true)), fixture.source.takeFrame().reports().inFlight());
         }
     }
 
