@@ -2123,6 +2123,9 @@ final class BoardRelief {
         return site != null && (site.liquid() || site.fixedOutline() && !site.ultraSublevel());
     }
 
+    /** Whether a tile keeps its outline (#kept): land above it takes its step on its own side (#band). */
+    static boolean keepsOutline(BoardScene scene, BoardScene.Tile tile) { return kept(site(scene, tile, 0)); }
+
     /** From none at a waterline at this level to all half a level above it. */
     private static float waterline(float level, float z) {
         return smooth((z - level * BoardGeometry.level()) / (.5f * BoardGeometry.level()));

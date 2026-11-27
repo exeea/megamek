@@ -90,6 +90,8 @@ final class FieldBoard {
     private final BoardConcrete concrete;
     /** A hex's bit in {@link #walls} beside its edges' six: the field takes it as a plate (FieldPlates). */
     private static final int PLATE = 1 << 6;
+    /** Dry ground that keeps its outline (BoardRelief#keepsOutline): natural land above it banks on its own side. */
+    private static final int KEPT = 1 << 31;
     /**
      * walls' bit LEVEL_SHORE + e: edge e parts natural land from water the shore does not shape at the land's level, or
      * water the shore shapes from water it does not shape at the same surface (FieldShore#seamed): no step (#add).
@@ -266,6 +268,8 @@ final class FieldBoard {
               .map(tunnel -> tunnel.footprint(false)).toArray(float[][]::new);
         if (openings[x][y].length == 0) { openings[x][y] = null; }
         walls[x][y] = 0;
+        // Not natural ground the field shapes itself (a road's hex banks by FieldRoads): plates, paving it leaves.
+        if (!liquid && !dryNatural(t) && BoardRelief.keepsOutline(scene, t)) { walls[x][y] |= KEPT; }
         landings[x][y] = 0;
         for (int dir = 0; dir < 6; dir++) {
             if (BoardNaturalBridge.rampLanding(scene, t, dir)) { landings[x][y] |= 1 << dir; }
@@ -304,7 +308,10 @@ final class FieldBoard {
                 BoardScene.Tile next = scene.tile(n);
                 if (next == null) { continue; }
                 int nextLevel = next.groundLevel() - (next.liquid().present() && shore.family(n) < 0 ? Math.max(0, next.waterDepth()) : 0);
-                if (nextLevel != level[x][y] || next.liquid().present()) { walls[x][y] |= 1 << e; }
+                // Dry natural ground a bank's drop above the plate banks down onto it on its own side (#banksOnto).
+                if ((nextLevel != level[x][y] || next.liquid().present()) && !banksOnto(scene, next, t)) {
+                    walls[x][y] |= 1 << e;
+                }
             }
         } else {
             // A step between two other hexes that ends at a plate's corner is a wall too: a bank there would have to
@@ -315,6 +322,9 @@ final class FieldBoard {
                 Coords n = at.translated(BoardGeometry.edgeDirection(e));
                 int nextLevel = next.groundLevel() - (next.liquid().present() && shore.family(n) < 0 ? Math.max(0, next.waterDepth()) : 0);
                 if (nextLevel == level[x][y]) { continue; }
+                // A bank onto ground that keeps its outline lies whole on this side: it meets that ground's level all
+                // along the edge, its corners too (#banksOnto).
+                if (banksOnto(scene, t, next)) { continue; }
                 for (int side : new int[] { (e + 5) % 6, (e + 1) % 6 }) {
                     BoardScene.Tile third = scene.tile(at.translated(BoardGeometry.edgeDirection(side)));
                     if (third != null && FieldPlates.takes(scene, third)) { walls[x][y] |= 1 << e; }
@@ -381,10 +391,29 @@ final class FieldBoard {
     /** A hex as one int: column * 4096 + row, exact in a float (columns and rows under 4096). */
     static int packed(Coords c) { return c.getX() * 4096 + c.getY(); }
 
+    /**
+     * Whether dry natural ground {@code upper} banks down onto {@code lower} on its own side: a step no wall retains
+     * by today's rule (BoardRelief#levels, two and a half levels) onto dry ground that keeps its outline, as today's
+     * land above paving takes its step (BoardRelief#keepsOutline, #band).
+     */
+    private static boolean banksOnto(BoardScene scene, BoardScene.Tile upper, BoardScene.Tile lower) {
+        return upper != null && lower != null && dryNatural(upper) && !dryNatural(lower) && !lower.liquid().present()
+              && upper.groundLevel() > lower.groundLevel() && BoardRelief.levels(upper, lower) <= 2.5f
+              && BoardRelief.keepsOutline(scene, lower);
+    }
+
+    /** Whether the step between u and v is a bank from natural ground onto ground that keeps its outline. */
+    private boolean plated(Coords u, Coords v, boolean cliff) {
+        Coords high = level(u) > level(v) ? u : v, low = high == u ? v : u;
+        return !cliff && inside(low) && (walls[low.getX()][low.getY()] & KEPT) != 0 && taken(high) && !plate(high)
+              && shore.family(high) < 0;
+    }
+
     /** The hex {@link #packed} gave, or null for -1. */
     static Coords unpacked(int packed) { return packed < 0 ? null : new Coords(packed / 4096, packed % 4096); }
 
-    record Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined) {
+    record Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined,
+          boolean plated) {
         float distance(float x, float y) { return (float) Math.sqrt(squared(x, y)); }
 
         float squared(float x, float y) {
@@ -760,7 +789,8 @@ final class FieldBoard {
                 for (int j = 0; j < FULL; j++) {
                     float t0 = j / (float) FULL, t1 = (j + 1) / (float) FULL;
                     Segment s = new Segment(ax + (bx - ax) * t0 + m[j][0], ay + (by - ay) * t0 + m[j][1],
-                          ax + (bx - ax) * t1 + m[j + 1][0], ay + (by - ay) * t1 + m[j + 1][1], 0, 0, true, -1, false);
+                          ax + (bx - ax) * t1 + m[j + 1][0], ay + (by - ay) * t1 + m[j + 1][1], 0, 0, true, -1, false,
+                          false);
                     best = Math.min(best, s.squared(x, y));
                 }
             }
@@ -1362,7 +1392,7 @@ final class FieldBoard {
     private static boolean closer(Segment s, float[] ox, float[] oy, float reach) {
         float r2 = reach * reach;
         for (int i = 0; i + 1 < ox.length; i++) {
-            Segment o = new Segment(ox[i], oy[i], ox[i + 1], oy[i + 1], 0, 0, false, -1, false);
+            Segment o = new Segment(ox[i], oy[i], ox[i + 1], oy[i + 1], 0, 0, false, -1, false, false);
             if (s.squared(ox[i], oy[i]) <= r2 || o.squared(s.ax(), s.ay()) <= r2 || o.squared(s.bx(), s.by()) <= r2) { return true; }
             // Crossing.
             float d1 = cross(s, ox[i], oy[i]), d2 = cross(s, ox[i + 1], oy[i + 1]);
@@ -1383,20 +1413,20 @@ final class FieldBoard {
         // Shaped water keeps its surface up to such water at its surface: its bed meets today's (FieldShore#seam).
         if (lu == lv || levelShore(u, v)) { return; }
         int top = packed(lu > lv ? u : v);
-        boolean cliff = cliff(u, v);
+        boolean cliff = cliff(u, v), plated = plated(u, v, cliff);
         float ax = cornerX(u, e), ay = cornerY(u, e), bx = cornerX(u, e + 1), by = cornerY(u, e + 1);
         float[][] d = edgeMove(u, e);
         if (!wall(u, v)) {
             // Its samples lie on the straight line between its moved corners: one segment.
             into.add(new Segment(ax + d[0][0], ay + d[0][1], bx + d[FULL][0], by + d[FULL][1], Math.min(lu, lv), Math.max(lu, lv),
-                  cliff, top, joinedWater(u, v)));
+                  cliff, top, joinedWater(u, v), plated));
             return;
         }
         for (int j = 0; j < FULL; j++) {
             float t0 = j / (float) FULL, t1 = (j + 1) / (float) FULL;
             into.add(new Segment(ax + (bx - ax) * t0 + d[j][0], ay + (by - ay) * t0 + d[j][1],
                   ax + (bx - ax) * t1 + d[j + 1][0], ay + (by - ay) * t1 + d[j + 1][1],
-                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v)));
+                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v), plated));
         }
     }
 
@@ -1530,6 +1560,9 @@ final class FieldBoard {
         // Per level set, the nearest step of a stream hex: the lower hex's ground there is its bank slope (#stream).
         float[] streamTo = new float[span];
         Arrays.fill(streamTo, Float.POSITIVE_INFINITY);
+        // Per level set, the nearest bank onto ground that keeps its outline (Segment#plated).
+        float[] platedTo = new float[span];
+        Arrays.fill(platedTo, Float.POSITIVE_INFINITY);
         for (int i = 0; i < d.length; i++) {
             Segment s = segments.get(i);
             for (int j = s.low() - lowest; j < s.high() - lowest; j++) {
@@ -1537,6 +1570,7 @@ final class FieldBoard {
                 if (s.cliff() && streamTop(s.top())) { streamTo[j] = Math.min(streamTo[j], d[i]); }
                 if (!s.cliff()) {
                     bankTo[j] = Math.min(bankTo[j], d[i]);
+                    if (s.plated()) { platedTo[j] = Math.min(platedTo[j], d[i]); }
                     if (s.joined()) { joinedTo[j] = Math.min(joinedTo[j], d[i]); }
                 }
                 else if (d[i] < cliffTo[j] - TIE) { cliffTo[j] = d[i]; drops[j] = Math.max(3, s.high() - s.low()); }
@@ -1612,6 +1646,13 @@ final class FieldBoard {
             }
             if (weight < 1) {
                 float sb = s + bankMix * (smoothDistance(shares, k, x, y, centres, count) - s);
+                // A bank onto ground that keeps its outline lies whole on its own side, a room wide, its foot on the
+                // outline at the lower level (#banksOnto): by its exact distance to that step, which the pavement's
+                // fit can stand off the hexes' own outline the smoothed distance follows (FieldPlates#corner).
+                float platedD = platedTo[k - lowest - 1];
+                if (platedD != Float.POSITIVE_INFINITY && platedD <= bankTo[k - lowest - 1] + TIE) {
+                    sb = (in ? -2 : 2) * (float) Math.sqrt(platedD) + room;
+                }
                 // Beside a stream hex's step a bank's band stands a transition's width further out (its top on the
                 // outline, as the stream bank's): the two bank lines join in plan. Not a bank between joined waters.
                 if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
