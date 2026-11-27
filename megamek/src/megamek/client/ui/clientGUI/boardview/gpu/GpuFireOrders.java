@@ -88,7 +88,9 @@ final class GpuFireOrders implements AutoCloseable {
      * "". {@code damage} is the value before " dmg": "{per hit}x{rack}" for cluster weapons, else the Unit Display's.
      * {@code mode} is "" without modes. {@code ammo} lists the bins it may switch to (its one fixed bin, or none), each
      * by its carrier and number; {@code loadedAmmo} is the loaded bin's index among them (-1 none) and {@code shots}
-     * that bin's shots (-1 none). The TN column shows {@code target}: the target of the weapon's queued attack, else
+     * that bin's shots (-1 none); {@code loadedBins} holds the index of every loaded bin, one for each weapon type of
+     * a bay, the first being {@code loadedAmmo}. The TN column shows {@code target}: the target of the weapon's queued
+     * attack, else
      * the focus, else {@code TargetKey.NONE}; {@code value} and {@code odds} are its roll (TargetRoll values, odds
      * 0-100), and {@code reason} the rules' or the display's reason, non-empty only for an impossible shot.
      * {@code usable}: it can be assigned (valid for the phase) or is queued. {@code aimable}: it may make an aimed shot
@@ -96,10 +98,12 @@ final class GpuFireOrders implements AutoCloseable {
      * none.
      */
     record WeaponRow(int eqNum, String name, String location, String kind, String damage, int heat, String mode,
-          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, int shots, TargetKey target, int value, double odds,
-          String reason, boolean usable, boolean locationDestroyed, boolean aimable, String aimedAt) {
+          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, List<Integer> loadedBins, int shots, TargetKey target,
+          int value, double odds, String reason, boolean usable, boolean locationDestroyed, boolean aimable,
+          String aimedAt) {
         WeaponRow {
             ammo = List.copyOf(ammo);
+            loadedBins = List.copyOf(loadedBins);
         }
     }
 
@@ -1628,13 +1632,16 @@ final class GpuFireOrders implements AutoCloseable {
             // A weapon that cannot switch shows its one bin.
             bins = List.of(loaded);
         }
+        List<AmmoMounted> listed = bins;
+        List<Integer> loadedBins = GpuUnitRecord.ammoWeapons(weapon).stream()
+              .map(member -> listed.indexOf(member.getLinkedAmmo())).filter(index -> index >= 0).distinct().toList();
         int location = weapon.getLocation();
         Targetable target = shot.target().equals(TargetKey.NONE) ? null : resolve(game, shot.target());
         int aimed = aimed(shot.attack());
         return new WeaponRow(eqNum, weapon.getPlainDesc(), parts.location(), kind(weapon.getType()),
               damage(game, actor, weapon), weapon.getCurrentHeat(), (parts.mode() == null) ? "" : parts.mode(),
               bins.stream().map(bin -> GpuUnitRecord.AmmoChoice.of(actor, bin)).toList(),
-              (loaded == null) ? -1 : bins.indexOf(loaded),
+              (loaded == null) ? -1 : bins.indexOf(loaded), loadedBins,
               parts.loadedShots(), shot.target(), value(shot.toHit()), odds(shot.toHit(), aptitude),
               reason(shot.toHit()), queued || actor.isWeaponValidForPhase(weapon),
               (location >= 0) && actor.isLocationBad(location), !aimingMode(fd, actor, weapon, target).isNone(),

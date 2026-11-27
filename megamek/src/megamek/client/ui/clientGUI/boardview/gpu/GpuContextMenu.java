@@ -397,7 +397,7 @@ final class GpuContextMenu implements GpuHud.Component {
         if (row.ammo().size() > 1) {
             for (int index = 0; index < row.ammo().size(); index++) {
                 GpuUnitRecord.AmmoChoice ammo = row.ammo().get(index);
-                boolean loaded = index == row.loadedAmmo();
+                boolean loaded = row.loadedBins().contains(index);
                 // The bin's Unit Display entry, as the row's select lists it: it names its carrier and shots.
                 item(list, ammo.label(), loaded ? text("GpuBoard.hud.context.loaded") : null, true, () -> {
                     if (!loaded) {
@@ -481,13 +481,24 @@ final class GpuContextMenu implements GpuHud.Component {
         list(face, choices, selected, index -> true, choose);
     }
 
+    /** The select list with several choices marked: the loaded bin of each weapon type of a bay. */
+    void list(Actor face, List<String> choices, List<Integer> selected, IntConsumer choose) {
+        list(face, choices, selected::contains, index -> true, choose);
+    }
+
     /** The select list with the choices {@code enabled} refuses shown disabled. */
     void list(Actor face, List<String> choices, int selected, IntPredicate enabled, IntConsumer choose) {
+        list(face, choices, index -> index == selected, enabled, choose);
+    }
+
+    private void list(Actor face, List<String> choices, IntPredicate selected, IntPredicate enabled,
+          IntConsumer choose) {
         cancel();
         UiMenuList list = new UiMenuList(ui);
         for (int index = 0; index < choices.size(); index++) {
             int choice = index;
-            item(list, choices.get(index), null, index == selected, enabled.test(index), () -> choose.accept(choice));
+            item(list, choices.get(index), null, selected.test(index), enabled.test(index),
+                  () -> choose.accept(choice));
         }
         popover.header(null, null).content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());

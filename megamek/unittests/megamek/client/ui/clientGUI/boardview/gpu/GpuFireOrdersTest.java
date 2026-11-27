@@ -31,6 +31,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.dialogs.phaseDisplay.AimedShotDialog;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
@@ -405,6 +406,57 @@ class GpuFireOrdersTest {
             assertEquals(bins.indexOf(towed), weaponRow(loaded, srm).loadedAmmo());
             GpuFiringFixture.command(firing, fire -> fire.setAmmo(srm, own));
             assertSame(tractor, onSwing(() -> launcher.getLinkedAmmo().getEntity()), "and its own bin again");
+        }
+    }
+
+    /**
+     * A DropShip's LRM bay that holds LRM 20s and an LRM 15 lists the bins of both types, marks the bin each type has
+     * loaded, and a pick of the LRM 15's other bin loads the LRM 15 only.
+     */
+    @Test
+    void aBayOfTwoWeaponTypesListsAndLoadsEachTypesBins() throws Exception {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity union = GpuFiringFixture.unit("Union (3055).blk", 60, new Coords(8, 8));
+            WeaponMounted[] added = new WeaponMounted[2];
+            AmmoMounted[] bins = new AmmoMounted[2];
+            GpuFireOrders.Snapshot shown = onSwing(() -> {
+                WeaponMounted bay = WeaponDisplayData.listedWeapons(union).stream().filter(weapon -> weapon
+                      .getBayWeapons().stream().anyMatch(member -> member.getName().equals("LRM 20"))).findFirst()
+                      .orElseThrow();
+                WeaponMounted launcher = (WeaponMounted) union.addEquipment(EquipmentType.get("ISLRM15"),
+                      bay.getLocation());
+                bins[0] = (AmmoMounted) union.addEquipment(EquipmentType.get("ISLRM15 Ammo"), bay.getLocation());
+                bins[1] = (AmmoMounted) union.addEquipment(EquipmentType.get("ISLRM15 Ammo"), bay.getLocation());
+                bay.addWeaponToBay(launcher);
+                bay.addAmmoToBay(bins[0]);
+                bay.addAmmoToBay(bins[1]);
+                union.loadWeapon(launcher, bins[0]);
+                added[0] = bay;
+                added[1] = launcher;
+                union.setOwner(firing.board.player);
+                firing.board.game.addEntity(union, false);
+                firing.display.selectEntity(union.getId());
+                return firing.board.source.fire().capture(firing.display, null);
+            });
+            int bayNum = union.getEquipmentNum(added[0]);
+            int launcherNum = union.getEquipmentNum(added[1]);
+            WeaponMounted first = added[0].getBayWeapon(0);
+            GpuFireOrders.WeaponRow row = weaponRow(shown, bayNum);
+            List<Integer> listed = row.ammo().stream().map(GpuUnitRecord.AmmoChoice::eqNum).toList();
+            int firstBin = union.getEquipmentNum(first.getLinkedAmmo());
+            assertEquals(List.of(firstBin, union.getEquipmentNum(bins[0]), union.getEquipmentNum(bins[1])), listed,
+                  "The LRM 20s' bin, then the LRM 15's two");
+            assertEquals(List.of(0, List.of(0, 1)), List.of(row.loadedAmmo(), row.loadedBins()),
+                  "Each type's loaded bin is marked");
+
+            GpuFireOrders.Snapshot loaded = GpuFiringFixture.command(firing,
+                  fire -> fire.setAmmo(bayNum, row.ammo().get(2)));
+            verify(firing.client).sendAmmoChange(union.getId(), launcherNum, union.getEquipmentNum(bins[1]),
+                  union.getId(), 0);
+            verify(firing.client, times(1)).sendAmmoChange(anyInt(), anyInt(), anyInt(), anyInt(), anyInt());
+            assertSame(bins[1], onSwing(added[1]::getLinkedAmmo));
+            assertEquals(firstBin, union.getEquipmentNum(onSwing(first::getLinkedAmmo)), "The LRM 20s keep their bin");
+            assertEquals(List.of(0, 2), weaponRow(loaded, bayNum).loadedBins());
         }
     }
 

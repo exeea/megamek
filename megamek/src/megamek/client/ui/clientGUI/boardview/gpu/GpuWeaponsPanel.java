@@ -565,7 +565,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             return ammoText(ui, face, color);
         }
         UiButton select = ui.select(face, true);
-        onChange(select, () -> menu.list(select, labels, loaded,
+        onChange(select, () -> menu.list(select, labels, weapon.loadedBins(),
               choice -> source.fire().setAmmo(weapon.eqNum(), weapon.ammo().get(choice))));
         return select;
     }
