@@ -1446,16 +1446,19 @@ vec3 groundFields(vec3 world) {
 vec3 groundPathFields(vec3 world) { return groundFields(world); }
 
 #ifdef terrainBlendFlag
-TerrainMaterial groundPathCliffBlend(MaterialProjection p, vec3 world, vec3 face, float foot, float rim, float rock,
-      float bed, float sediment, vec3 fields, TerrainMaterial incoming, out vec4 weights) {
-    return blendCliff(p, world, face, foot, rim, rock, bed, fields.x, fields.y, fields.z, sediment, weights);
-}
-
 void groundPathCovers(MaterialProjection p, vec3 world, vec3 face, float foot, float rim, float rock, float hardness,
-      float sediment, vec3 fields, bool sides,
+      float sediment, vec3 fields, bool sides, bool walls,
       inout vec3 color, inout vec3 normal, inout float cavity, inout float relief, inout float height,
       inout float grass, inout float sand, inout vec3 bounce, inout float response, inout float rainCover,
       inout Finish finish, out float volcanic, out vec4 weights) {
+    if (walls) {
+        TerrainMaterial material = blendCliff(p, world, face, foot, rim, rock, hardness, fields.x, fields.y, fields.z,
+              sediment, weights);
+        coverEffects(weights, sediment, grass, sand, bounce, response, rainCover);
+        color = material.color; normal = material.normal; cavity = material.cavity; relief = material.relief;
+        height = material.height; finish = material.finish; volcanic = material.volcanic;
+        return;
+    }
     blendCovers(world, face, foot, rim, rock, hardness, sediment, fields.x, fields.y, fields.z, color, normal, cavity,
           relief, height, grass, sand, bounce, response, rainCover, finish, volcanic, weights);
 }

@@ -295,7 +295,7 @@ vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, 
 // sculpt-material-functions
 // The ground's material comes from one of two files, never both (GpuShaderSource#terrainLighting): ground-material.glsl,
 // or old-ground-material.glsl for an A/B against the path it replaced. Each implements the four entries main calls:
-// groundPathFields, groundPathMaterial, groundPathCliffBlend and groundPathCovers.
+// groundPathFields, groundPathMaterial and groundPathCovers.
 void main() {
     vec2 surfaceUV = v_diffuseUV;
     vec3 face = normalize(v_normal);
@@ -472,26 +472,19 @@ void main() {
 #else
     vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
     if (natural) {
-        float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
-        float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
-        float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
-        float bed = ground ? .5 : hardness;
-#ifdef terrainBlendFlag
-        // Blended tops take blendCovers below.
-        if (rocky) {
-            TerrainMaterial material = groundPathCliffBlend(rockProjection, world, face, foot, rim, rock, bed,
-                  sediment, fields, TerrainMaterial(albedo, normal, cavity, materialHeight, finish, 0.0, relief),
-                  materialCoverage);
-            coverEffects(materialCoverage, sediment, grass, sand, bounce, response, rainCover);
-#else
+        // A blended surface, its walls too, takes groundPathCovers below.
+#ifndef terrainBlendFlag
         {
+            float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
+            float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
+            float bed = ground ? .5 : hardness;
 #ifdef volcanicFlag
             TerrainMaterial material = crustOrBankMaterial(world, face);
 #else
             // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
             TerrainMaterial material = groundPathMaterial(rockProjection, world, face, foot, rim, rock, bed, sediment,
                   fields, rocky);
-#endif
 #endif
             albedo = material.color;
             normal = material.normal;
@@ -501,6 +494,7 @@ void main() {
             finish = material.finish;
             volcanic = material.volcanic;
         }
+#endif
         // Match a top to its slope at the same height; tactical level grading remains continuous.
         if (!shore) level = v_cloudPosition.z / u_levelHeight;
     } else if (ground) {
@@ -664,21 +658,21 @@ void main() {
               albedo, normal, occlusion, cavity, finish);
     }
 #ifdef terrainBlendFlag
-    if ((ground || cliff) && !rocky) {
-        float foot = shore || cliff ? surfaceUV.x : surfaceUV.y;
-        float rim = shore || cliff ? surfaceUV.y : surfaceUV.x;
-        float rock = ground ? rockiness(steps) : v_color.g;
+    if (ground || cliff || rocky) {
+        float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+        float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
+        float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
         // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
-        // A paved base slot is the slab drawn above. Volcanic programs blend every face here (rocky is never set):
-        // their walls, steep banks and bedrock take the wall projections.
+        // A paved base slot is the slab drawn above. A natural wall, steep bank or bedrock (rocky) takes the wall
+        // projections and its foot's share of the cover; volcanic programs (rocky is never set) the projections alone.
 #ifdef volcanicFlag
         bool sides = natural && (cliff || bedrock || (ground && face.z < .6));
 #else
-        bool sides = false;
+        bool sides = rocky;
 #endif
         groundPathCovers(rockProjection, world, face, foot, rim, rock, ground ? .5 : hardness, sediment, fields,
-              sides, albedo, normal, cavity, relief, materialHeight, grass, sand, bounce, response, rainCover, finish,
-              volcanic, materialCoverage);
+              sides, rocky, albedo, normal, cavity, relief, materialHeight, grass, sand, bounce, response, rainCover,
+              finish, volcanic, materialCoverage);
     }
 #endif
 #endif

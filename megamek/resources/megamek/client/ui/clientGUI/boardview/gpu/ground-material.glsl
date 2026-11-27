@@ -749,27 +749,22 @@ TerrainMaterial compactBlend(GroundPixel px, vec4 raw, vec3 fields, TerrainMater
 }
 #endif
 
-// ---- The compact ground's four entries (terrain-sculpt.frag's main calls them).
+// ---- The compact ground's three entries (terrain-sculpt.frag's main calls them).
 
 vec3 groundPathFields(vec3 world) { return compactFields(world); }
 
 #ifdef terrainBlendFlag
-// A blended wall, steep bank or bedrock: each slot through the compact material on the wall projections.
-TerrainMaterial groundPathCliffBlend(MaterialProjection p, vec3 world, vec3 face, float foot, float rim, float rock,
-      float bed, float sediment, vec3 fields, TerrainMaterial incoming, out vec4 weights) {
-    return compactBlend(groundPixel(p, world, face, foot, rim, rock, bed, sediment, true),
-          footCover(max(v_coverWeights, vec4(0.0)), world, foot), fields, incoming, weights);
-}
-
-// A cover hex's ground with its live layers' shares (design.md 8.17).
+// A cover hex's ground with its live layers' shares (design.md 8.17). walls: a blended wall, steep bank or bedrock,
+// whose cover is its foot's share by height (footCover). One call site for both: a program carries the material once.
 void groundPathCovers(MaterialProjection p, vec3 world, vec3 face, float foot, float rim, float rock, float hardness,
-      float sediment, vec3 fields, bool sides,
+      float sediment, vec3 fields, bool sides, bool walls,
       inout vec3 color, inout vec3 normal, inout float cavity, inout float relief, inout float height,
       inout float grass, inout float sand, inout vec3 bounce, inout float response, inout float rainCover,
       inout Finish finish, out float volcanic, out vec4 weights) {
+    vec4 raw = max(v_coverWeights, vec4(0.0));
+    if (walls) raw = footCover(raw, world, foot);
     TerrainMaterial blended = compactBlend(groundPixel(p, world, face, foot, rim, rock, hardness, sediment, sides),
-          max(v_coverWeights, vec4(0.0)), fields, TerrainMaterial(color, normal, cavity, height, finish, 0.0, relief),
-          weights);
+          raw, fields, TerrainMaterial(color, normal, cavity, height, finish, 0.0, relief), weights);
     color = blended.color; normal = blended.normal; cavity = blended.cavity; relief = blended.relief;
     height = blended.height; finish = blended.finish; volcanic = blended.volcanic;
     coverEffects(weights, sediment, grass, sand, bounce, response, rainCover);
