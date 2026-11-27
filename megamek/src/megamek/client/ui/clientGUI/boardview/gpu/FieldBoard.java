@@ -678,29 +678,52 @@ final class FieldBoard {
         return level(t[lower]) < level(t[third]) && level(t[third]) < level(t[upper]) ? new int[] { upper, third } : null;
     }
 
+    /** A wall's end nose (#wallEndNose), metres: level at the wall's upper level round the corner, and its reach. */
+    private static final float NOSE_CORE = 2f, NOSE_REACH = 6.5f;
+    /** The share of the nose's size left in front of the wall's face, and the turn from the bank it shrinks over. */
+    private static final float NOSE_FRONT = .35f, NOSE_TURN = (float) Math.toRadians(40);
     /**
-     * How high the ground may stand at (x, y), a point of hex {@code here}, beside a corner of it where a wall ends
-     * against banks ({@link #wallEnd}; #corner holds it and the wall's row fades out to it over half the edge): the
-     * corner's own height at the corner, rising to the wall's upper level over that half edge, so
-     * the wall's top comes down with its row and none of the fading wall stands above the rim it ends against.
-     * Positive infinity elsewhere. The point alone decides (a corner within half an edge of it is its own hex's).
+     * The share of the wall's height the bank beside its end must span for a nose: none at the first, whole from the
+     * second on. Where the bank is lower the wall has no nose and runs out into the banks, as today's.
      */
-    private float wallEndCap(Coords h, List<Segment> segments, Shares shares, Coords here, float x, float y) {
-        float reach = .5f * edge;
+    private static final float NOSE_BANK = .5f, NOSE_BANK_WHOLE = 2 / 3f;
+
+    /**
+     * The nose of rock a wall ends in at (x, y), a point of hex {@code here}, beside a corner of it where a wall ends
+     * against banks ({@link #wallEnd}; #corner holds it and the wall's row fades out to it): {the wall's upper
+     * level's height, the share of the rise to it the ground takes there, the wall's upper hex (#packed)}. The wall
+     * keeps its height to its end, as today's, and ends by its foot rising: the ground of all three hexes comes up
+     * to the rim round the corner, whole within {@link #NOSE_CORE} and falling away to {@link #NOSE_REACH}. On the
+     * bank's side the nose is whole; the lower hex {@code h}'s own ground, in front of the wall's face, takes
+     * {@link #NOSE_FRONT} of its size, eased in from the edge it shares with the bank's hex (where both give one
+     * height), so the cliff's end stands in the cliff's line. Null elsewhere.
+     */
+    private float[] wallEndNose(Coords h, Coords here, float x, float y) {
+        float reach = NOSE_REACH * metre, core = NOSE_CORE * metre;
         for (int k = 0; inside(here) && k < 6; k++) {
             float dx = x - cornerX(here, k), dy = y - cornerY(here, k), d2 = dx * dx + dy * dy;
             if (d2 >= reach * reach) { continue; }
-            Coords[] t = { here, here.translated(BoardGeometry.edgeDirection((k + 5) % 6)), here.translated(BoardGeometry.edgeDirection(k)) };
+            Coords[] t = { here, here.translated(BoardGeometry.edgeDirection((k + 5) % 6)),
+                  here.translated(BoardGeometry.edgeDirection(k)) };
             int[] end = wallEnd(t);
-            if (end == null) { return Float.POSITIVE_INFINITY; }
-            // From the corner's own height (the ground at the wall's foot never stands under the cap by more than it
-            // rises to the corner), asked without this cap.
-            float[] corner = new float[8];
-            height(h, segments, shares, cornerX(here, k), cornerY(here, k), corner, false);
-            float low = corner[0], high = level(t[end[0]]) * levelZ;
-            return high <= low ? Float.POSITIVE_INFINITY : low + (high - low) * BoardRelief.smooth((float) Math.sqrt(d2) / reach);
+            if (end == null) { return null; }
+            float d = (float) Math.sqrt(d2), size = 1;
+            Coords up = t[end[0]], low = t[3 - end[0] - end[1]];
+            if (h.equals(low) && d > 1e-4f * metre) {
+                // The turn from the edge between the bank's hex and the lower one, which runs from the corner straight
+                // away from the upper hex's centre.
+                float ex = cornerX(here, k) - centerX(up), ey = cornerY(here, k) - centerY(up);
+                float along = (dx * ex + dy * ey) / (d * (float) Math.hypot(ex, ey));
+                float turn = (float) Math.acos(Math.clamp(along, -1, 1));
+                size = 1 - (1 - NOSE_FRONT) * BoardRelief.smooth(turn / NOSE_TURN);
+            }
+            float share = 1 - BoardRelief.smooth(Math.max(0, d / size - core) / (reach - core));
+            // By how much of the wall the bank beside its end spans: from the third hex's level up to the rim.
+            float spans = (level(up) - level(t[end[1]])) / (float) (level(up) - level(low));
+            share *= BoardRelief.smooth((spans - NOSE_BANK) / (NOSE_BANK_WHOLE - NOSE_BANK));
+            return new float[] { level(t[end[0]]) * levelZ, share, packed(t[end[0]]) };
         }
-        return Float.POSITIVE_INFINITY;
+        return null;
     }
 
     /** Whether the step's upper hex ({@link #packed}) is a plate (FieldPlates). */
@@ -1587,11 +1610,6 @@ final class FieldBoard {
      * its lowest level.
      */
     void height(Coords h, List<Segment> segments, Shares shares, float x, float y, float[] out) {
-        height(h, segments, shares, x, y, out, true);
-    }
-
-    /** {@link #height}; {@code ends} false leaves out the cap beside a wall's end (#wallEndCap asks so for the corner's own height). */
-    private void height(Coords h, List<Segment> segments, Shares shares, float x, float y, float[] out, boolean ends) {
         // A point with no place (a coordinate not finite) lies in no hex (#hexAt): it has no height.
         if (!Float.isFinite(x) || !Float.isFinite(y)) {
             java.util.Arrays.fill(out, 0);
@@ -1898,11 +1916,18 @@ final class FieldBoard {
         // face under the stream hex, and level land within 3 m of the line below the slope's foot is marked for its
         // rock (#gorgeGround): the gorge's rock down to the water (FieldCover#gorge). The point alone decides, so
         // hexes sharing a sample give it one height.
-        // Beside a corner where a wall ends against banks the ground comes down with the wall's fading row (#wallEndCap).
-        float ending = ends ? wallEndCap(h, segments, shares, here, x, y) : Float.POSITIVE_INFINITY;
-        if (z > ending) {
-            zt -= z - ending;
-            z = ending;
+        // Beside a corner where a wall ends against banks the ground rises to the wall's rim: its nose of rock, the
+        // cliff's own (#wallEndNose).
+        float[] nose = wallEndNose(h, here, x, y);
+        if (nose != null && z < nose[0]) {
+            float up = (nose[0] - z) * nose[1];
+            z += up;
+            zt += up;
+            if (up > .25f * metre) {
+                role = 1;
+                rock = Math.max(rock, nose[1]);
+                nearTop = (int) nose[2];
+            }
         }
         float[] streams = streamsNear(here, x, y);
         float[] line = streams == null ? null : new float[6];
