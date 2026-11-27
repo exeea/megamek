@@ -1220,9 +1220,68 @@ final class FieldBoard {
                 for (Coords c : t) { share = Math.min(share, relief(c, cornerX(h, k), cornerY(h, k), foot)); }
                 // Not held (the third value); then the relief the move carries and the share left of it (#rimMove).
                 result = new float[] { move[0] * share, move[1] * share, 0, move[2], move[3] * share };
+                // Above the portal's head the hexes over the wall stand back with its rim (#latticeMove): the move
+                // by the hold at the rim's height, its share, and the hexes that take it, a bit each.
+                float top = Math.max(level(t[0]), Math.max(level(t[1]), level(t[2]))) * levelZ, rise = 1;
+                for (Coords c : t) { rise = Math.min(rise, relief(c, cornerX(h, k), cornerY(h, k), top)); }
+                boolean parts = rise > share;
+                for (int[] p : pairs) { parts &= side[p[0]] == side[p[1]] || leans(t[p[0]], t[p[1]]); }
+                if (parts) {
+                    result = new float[] { result[0], result[1], 0, move[2], result[4], move[0] * rise, move[1] * rise,
+                          move[3] * rise, (side[0] ? 1 : 0) | (side[1] ? 2 : 0) | (side[2] ? 4 : 0) };
+                }
             }
         }
         return result;
+    }
+
+    /** Whether the step between u and v is a wall whose row the field moves (#canonicalEdge). */
+    private boolean rowWall(Coords u, Coords v) {
+        // A plate's edge runs straight between its corners.
+        // A cliff between two hexes at one level is the shore's to shape: no rise to move a rim by (#corner).
+        return wall(u, v) && !plate(u) && !plate(v) && level(u) != level(v);
+    }
+
+    /** Whether the wall between u and v can lean (#latticeMove): a stream hex's step has no wall to (#stream). */
+    private boolean leans(Coords u, Coords v) { return rowWall(u, v) && !stream(u, v) && !stream(v, u); }
+
+    /** Corner k of hex h where h stands over a leaning wall there: the rim's move, as #corner's; else null. */
+    private float[] rimCorner(Coords h, int k) {
+        float[] c = cornerMove(h, k);
+        if (c.length <= 5) { return null; }
+        int[] slot = cornerSlot(h, k);
+        Coords first = new Coords(slot[0], slot[1]);
+        Coords[] t = { first, first.translated(BoardGeometry.edgeDirection((slot[3] + 5) % 6)),
+              first.translated(BoardGeometry.edgeDirection(slot[3])) };
+        for (int i = 0; i < 3; i++) {
+            if (t[i].equals(h) && ((int) c[8] >> i & 1) != 0) { return new float[] { c[5], c[6], 0, c[3], c[7] }; }
+        }
+        return null;
+    }
+
+    /**
+     * The moves hex h's own lattice takes along its edge e: the row's (#edgeMove), but for the hexes over a wall that
+     * leans round a ground portal. Its foot keeps the row, on the edge the portal's head is set into, as today's foot;
+     * the hexes above stand back with the rim, as today's rim does above the head (#canonicalEdge, #corner).
+     */
+    float[][] latticeMove(Coords h, int e) {
+        float[][] moves = edgeMove(h, e);
+        Coords g = h.translated(BoardGeometry.edgeDirection(e));
+        if (moves[0].length <= 4 || rowWall(h, g) && level(h) < level(g)) { return moves; }
+        float[][] rim = new float[FULL + 1][];
+        for (int j = 0; j <= FULL; j++) { rim[j] = new float[] { moves[j][4], moves[j][5], moves[j][2], moves[j][6] }; }
+        return rim;
+    }
+
+    /** Whether hex h stands over a leaning wall on its edge e: its lattice's row there is the rim's (#latticeMove). */
+    boolean leans(Coords h, int e) {
+        Coords g = h.translated(BoardGeometry.edgeDirection(e));
+        return rowWall(h, g) && level(h) > level(g) && edgeMove(h, e)[0].length > 4;
+    }
+
+    /** The share of a wall's move that stands at (x, y, z) of the edge between h and g round their ground portals. */
+    float hold(Coords h, Coords g, float x, float y, float z) {
+        return Math.min(relief(h, x, y, z), relief(g, x, y, z));
     }
 
     /** An edge's key, the same from either hex (the smaller coordinates first). */
@@ -1255,14 +1314,21 @@ final class FieldBoard {
         int e = edgeIndex(u, v);
         float ax = cornerX(u, e), ay = cornerY(u, e), bx = cornerX(u, e + 1), by = cornerY(u, e + 1);
         float[] ca = cornerMove(u, e), cb = cornerMove(u, (e + 1) % 6);
-        // A plate's edge runs straight between its corners.
-        // A cliff between two hexes at one level is the shore's to shape: no rise to move a rim by (#corner).
-        boolean wall = wall(u, v) && !plate(u) && !plate(v) && level(u) != level(v);
+        boolean wall = rowWall(u, v);
         Coords[] around = { u, v };
         float[][] points = new float[FULL + 1][];
         float fade = .5f * edge;
         Coords upper = level(u) > level(v) ? u : v;
         boolean pool = wall && poolWall(upper, edgeIndex(upper, upper == u ? v : u));
+        // The rim's row, where the hexes over a leaning wall stand (#latticeMove): between their own corners.
+        Coords above = wall ? upper : u;
+        int ea = above == u ? e : edgeIndex(v, u);
+        float[] ra = rimCorner(above, above == u ? ea : (ea + 1) % 6);
+        float[] rb = rimCorner(above, above == u ? (ea + 1) % 6 : ea);
+        boolean parted = ra != null || rb != null;
+        ra = ra == null ? ca : ra;
+        rb = rb == null ? cb : rb;
+        float[][] rim = parted || leans(u, v) ? new float[FULL + 1][] : null;
         for (int j = 0; j <= FULL; j++) {
             float t = j / (float) FULL;
             float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
@@ -1271,6 +1337,10 @@ final class FieldBoard {
                 float[] corner = j == 0 ? ca : cb;
                 boolean carries = wall && (j == 0 || j == FULL) && corner.length > 3;
                 points[j] = new float[] { mx, my, carries ? corner[3] : Float.NaN, carries ? corner[4] : 1 };
+                if (rim != null) {
+                    rim[j] = new float[] { ra[0] + (rb[0] - ra[0]) * t, ra[1] + (rb[1] - ra[1]) * t,
+                          carries ? (j == 0 ? ra : rb)[3] : Float.NaN, carries ? (j == 0 ? ra : rb)[4] : 1 };
+                }
                 continue;
             }
             float[] d = rimMove(middle(u, v), ax + (bx - ax) * t, ay + (by - ay) * t, around,
@@ -1284,22 +1354,45 @@ final class FieldBoard {
             w = w * w * (3 - 2 * w);
             // Round a ground portal the wall's row stays on the edge, as today's foot does (BoardTunnel#relief).
             float x = ax + (bx - ax) * t, y = ay + (by - ay) * t, foot = Math.min(level(u), level(v)) * levelZ;
-            w *= Math.min(relief(u, x, y, foot), relief(v, x, y, foot));
+            float kept = hold(u, v, x, y, foot);
+            if (rim != null) {
+                // The rim stands back by the hold at its own height: above the head, as today's.
+                float rise = hold(u, v, x, y, Math.max(level(u), level(v)) * levelZ);
+                float rx = ra[0] + (rb[0] - ra[0]) * t, ry = ra[1] + (rb[1] - ra[1]) * t;
+                parted |= rise != kept;
+                rim[j] = new float[] { rx + (d[0] * rise - rx) * w, ry + (d[1] * rise - ry) * w, d[2],
+                      d[3] * w * rise };
+            }
+            w *= kept;
             // With the relief the rim carries there and the share of the move the fades left (#rimMove).
             points[j] = new float[] { mx + (d[0] - mx) * w, my + (d[1] - my) * w, d[2], d[3] * w };
         }
         // A wall's rim flattens toward its corners' line until neither hex's lattice folds on it.
         for (int left = FULL; wall && left > 0 && !(unfolded(u, e, points, false)
               && unfolded(v, edgeIndex(v, u), points, true)); left--) {
-            for (int j = 1; j < FULL; j++) {
-                float t = j / (float) FULL;
-                float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
-                points[j][0] = mx + (points[j][0] - mx) * (left - 1) / left;
-                points[j][1] = my + (points[j][1] - my) * (left - 1) / left;
-                points[j][3] *= (left - 1f) / left;
-            }
+            flatten(points, ca, cb, left);
+        }
+        if (!parted) { return points; }
+        // The rim's row likewise, on the lattice of the hex above alone.
+        for (int left = FULL; wall && left > 0 && !unfolded(above, ea, rim, above != u); left--) {
+            flatten(rim, ra, rb, left);
+        }
+        for (int j = 0; j <= FULL; j++) {
+            float[] p = points[j];
+            points[j] = new float[] { p[0], p[1], p[2], p[3], rim[j][0], rim[j][1], rim[j][3] };
         }
         return points;
+    }
+
+    /** One step of a row's flattening toward its corners' line (#canonicalEdge): {@code left} steps are left. */
+    private static void flatten(float[][] points, float[] ca, float[] cb, int left) {
+        for (int j = 1; j < FULL; j++) {
+            float t = j / (float) FULL;
+            float mx = ca[0] + (cb[0] - ca[0]) * t, my = ca[1] + (cb[1] - ca[1]) * t;
+            points[j][0] = mx + (points[j][0] - mx) * (left - 1) / left;
+            points[j][1] = my + (points[j][1] - my) * (left - 1) / left;
+            points[j][3] *= (left - 1f) / left;
+        }
     }
 
     /**

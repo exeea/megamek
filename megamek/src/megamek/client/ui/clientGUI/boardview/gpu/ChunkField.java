@@ -278,7 +278,7 @@ final class ChunkField {
             for (int k = 0; k < 6; k++) {
                 cornerX[k] = b.cornerX(h, k);
                 cornerY[k] = b.cornerY(h, k);
-                float[][] e = b.edgeMove(h, k);
+                float[][] e = b.latticeMove(h, k);
                 for (int j = 0; j < FieldBoard.FULL; j++) { boundary[k * FieldBoard.FULL + j] = e[j]; }
             }
             float ownZ = own * b.levelZ, flatReach = BoardRelief.metres(8);
@@ -691,6 +691,15 @@ final class ChunkField {
             final float[][] corners = new float[2][];
             /** The current column's place on the row, its top and foot, its rim's relief, its corners' shares. */
             float px, py, top, bottom, rimPush, share, first, second;
+            /**
+             * A wall that leans round a ground portal (FieldBoard#latticeMove): its feet's places on the lower hex's
+             * row (null for a wall that stands on its own row), the hex across, the current column's foot, its point
+             * on the hex edge and the portal's hold there at its foot and its top.
+             */
+            final float[] footX, footY;
+            final Coords across;
+            final int edge;
+            float fx, fy, ex, ey, holdFoot, holdTop;
             /** The current column's relief family (a pool's step: BoardRelief#poolStepFamily). */
             int columnFamily;
             /** The lower hex is shaped water (FieldShore): the wall's foot is the bed and the relief counts from it,
@@ -702,17 +711,19 @@ final class ChunkField {
             final boolean landing;
 
             Wall(int e, boolean outside, boolean wall, float landform, float base, float onx, float ony, int[] samples,
-                  float[] tops, float[] feet, int rows) {
+                  float[] tops, float[] feet, int rows, float[] footX, float[] footY) {
                 this.outside = outside; this.wall = wall; this.landform = landform; this.base = base;
                 this.onx = onx; this.ony = ony; this.samples = samples; this.tops = tops; this.feet = feet;
-                this.rows = rows;
+                this.rows = rows; this.footX = footX; this.footY = footY;
+                edge = e;
+                across = h.translated(BoardGeometry.edgeDirection(e));
                 this.family = b.family(h);
                 landing = wall && b.landing(h, e);
                 rimRelief = new float[samples.length];
                 rimShare = new float[samples.length];
                 java.util.Arrays.fill(rimShare, 1);
                 if (!wall) { return; }
-                float[][] moves = b.edgeMove(h, e);
+                float[][] moves = b.latticeMove(h, e);
                 int every = FieldBoard.FULL / (samples.length - 1);
                 for (int j = 0; j < samples.length; j++) {
                     float[] move = moves[j * every];
@@ -789,8 +800,10 @@ final class ChunkField {
                 if (corner == null || share <= 0) { return; }
                 int q0 = r / ROWS_A_LEVEL, q1 = Math.min(q0 + 1, (rows - 1) / ROWS_A_LEVEL);
                 float z0 = height(q0 * ROWS_A_LEVEL), z1 = height(q1 * ROWS_A_LEVEL);
-                float e0 = share * BoardRelief.smooth((z0 - bottom) / (1.5f * b.metre));
-                float e1 = share * BoardRelief.smooth((z1 - bottom) / (1.5f * b.metre));
+                // Round a ground portal by the hold at the two rows (FieldBoard#hold), so the line stays straight
+                // between them there too.
+                float e0 = share * BoardRelief.smooth((z0 - bottom) / (1.5f * b.metre)) * b.hold(h, across, ex, ey, z0);
+                float e1 = share * BoardRelief.smooth((z1 - bottom) / (1.5f * b.metre)) * b.hold(h, across, ex, ey, z1);
                 float t = z1 - z0 < 1e-6f ? 0 : Math.clamp((zr - z0) / (z1 - z0), 0, 1);
                 out[0] += lerp(corner[q0 * 2] * e0, corner[q1 * 2] * e1, t);
                 out[1] += lerp(corner[q0 * 2 + 1] * e0, corner[q1 * 2 + 1] * e1, t);
@@ -816,6 +829,14 @@ final class ChunkField {
                 // Toward a corner the wall takes the corner's column, as today's (over .3 of the edge); toward a
                 // corner without one its relief fades out.
                 float along = c / (float) columns;
+                ex = b.cornerX(h, edge) + (b.cornerX(h, edge + 1) - b.cornerX(h, edge)) * along;
+                ey = b.cornerY(h, edge) + (b.cornerY(h, edge + 1) - b.cornerY(h, edge)) * along;
+                if (footX != null) {
+                    fx = footX[a] + (footX[d] - footX[a]) * f;
+                    fy = footY[a] + (footY[d] - footY[a]) * f;
+                    holdFoot = b.hold(h, across, ex, ey, bottom);
+                    holdTop = b.hold(h, across, ex, ey, top);
+                }
                 columnFamily = family;
                 if (wall && chunk.scene != null && chunk.scene.tile(h).liquid().present()) {
                     BoardScene.Tile tile = chunk.scene.tile(h);
@@ -839,7 +860,19 @@ final class ChunkField {
                 // The relief eases to nothing at the foot row, which stands on the lower ground's own samples.
                 float ease = outside ? 0 : BoardRelief.smooth((zr - bottom) / (1.5f * b.metre));
                 float rest = 1 - first - second;
-                out[0] = px; out[1] = py; out[2] = zr;
+                // A leaning wall's rows come from its foot's row to its rim's by the portal's hold at their heights:
+                // on the edge up to the head, back above it, as today's face.
+                float sx = px, sy = py;
+                if (footX != null) {
+                    // Straight between its rows a level apart, the coarsest detail's (as #addCorner): one line at
+                    // every detail and morph weight, so two walls share their corner's and the details morph on it.
+                    int q0 = r / ROWS_A_LEVEL, q1 = Math.min(q0 + 1, (rows - 1) / ROWS_A_LEVEL);
+                    float z0 = height(q0 * ROWS_A_LEVEL), z1 = height(q1 * ROWS_A_LEVEL);
+                    float s = lerp(lean(z0), lean(z1), z1 - z0 < 1e-6f ? 0 : Math.clamp((zr - z0) / (z1 - z0), 0, 1));
+                    sx = fx + (px - fx) * s;
+                    sy = fy + (py - fy) * s;
+                }
+                out[0] = sx; out[1] = sy; out[2] = zr;
                 if (ease > 0 && rest > 0) {
                     // Today's rock relief above the lower level, caprock included.
                     float foot = wet ? Math.min(base, bottom) : base;
@@ -857,9 +890,22 @@ final class ChunkField {
                     out[0] += onx * d * share * rest * ease;
                     out[1] += ony * d * share * rest * ease;
                 }
+                // Round a ground portal the face stands flat: the relief by the hold at its height, the corners'
+                // columns by the hold at their own rows (#addCorner).
+                b.portalFace(h, sx, sy, zr, out);
                 addCorner(corners[0], r, zr, first, out);
                 addCorner(corners[1], r, zr, second, out);
-                b.portalFace(h, px, py, zr, out);
+            }
+
+            /**
+             * How far a leaning wall's current column has come from its foot's row to its rim's at height z: by the
+             * portal's hold there (FieldBoard#hold), nothing at its foot and all at its top; where the hold is one
+             * at both, straight up the wall.
+             */
+            private float lean(float z) {
+                if (z <= bottom || z >= top) { return z >= top ? 1 : 0; }
+                return Math.clamp(holdTop - holdFoot < 1e-4f ? (z - bottom) / (top - bottom)
+                      : (b.hold(h, across, ex, ey, z) - holdFoot) / (holdTop - holdFoot), 0, 1);
             }
         }
 
@@ -1020,14 +1066,24 @@ final class ChunkField {
             // The foot is the lower hex's ground as its own block takes it: stepped back beside a containment wall
             // (FieldStamps#stepBack) as that block's samples are, so the wall meets them.
             boolean lowerWalled = other != null && FieldStamps.nearWalls(b, g, chunk::shares);
+            // A wall that leans round a ground portal stands on the lower hex's row, not under this hex's own
+            // (FieldBoard#latticeMove): its feet's places.
+            float[][] row = wall && b.leans(h, e) ? b.edgeMove(h, e) : null;
+            float[] footX = row == null ? null : new float[n + 1], footY = row == null ? null : new float[n + 1];
             for (int j = 0; j <= n; j++) {
                 int v = j == n ? vertex((e + 1) % 6, n, 0) : vertex(e, n, j);
                 samples[j] = v;
                 tops[j] = z[v];
                 feet[j] = otherZ;
+                float fx = x[v], fy = y[v];
+                if (row != null) {
+                    float[] move = row[j * FieldBoard.FULL / n];
+                    fx = footX[j] = c0x + (c1x - c0x) * j / n + move[0];
+                    fy = footY[j] = c0y + (c1y - c0y) * j / n + move[1];
+                }
                 if (other != null) {
-                    b.height(g, other, chunk.shares(g), x[v], y[v], out);
-                    if (lowerWalled) { FieldStamps.stepBack(b, chunk::shares, g, x[v], y[v], out); }
+                    b.height(g, other, chunk.shares(g), fx, fy, out);
+                    if (lowerWalled) { FieldStamps.stepBack(b, chunk::shares, g, fx, fy, out); }
                     feet[j] = out[0];
                 }
             }
@@ -1044,7 +1100,8 @@ final class ChunkField {
                     frame = (float) Math.atan2(ony, onx);
                 }
             }
-            Wall w = new Wall(e, outside || cast, wall, landform, otherZ, onx, ony, samples, tops, feet, finest);
+            Wall w = new Wall(e, outside || cast, wall, landform, otherZ, onx, ony, samples, tops, feet, finest, footX,
+                  footY);
             w.wet = other != null && b.shore.family(g) >= 0;
             w.fall = !outside && b.falls(h, g);
             int[][] columns = new int[n * split + 1][];
