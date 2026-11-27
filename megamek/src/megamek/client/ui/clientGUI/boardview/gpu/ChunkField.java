@@ -204,6 +204,11 @@ final class ChunkField {
         /** Each edge's wall samples, from {@code wallStart[e]} to before {@code wallEnd[e]}. */
         final int[] wallStart = new int[6], wallEnd = new int[6];
         final boolean[] flat;
+        /** The lattice samples some triangle of the hex has as a corner (#emit), for the merged triangles' edges. */
+        final boolean[] used;
+        /** The merged triangles, drawn after every leaf has marked its corners: k, the corners' (i, j), level top. */
+        int[] merged = new int[64];
+        int mergedCount;
         /** Each lattice sample's nearest step's lowest level (FieldBoard#height). */
         final float[] stepLow;
         /** Each sample's nearest step's upper hex (FieldBoard#height out[7], FieldBoard#packed; -1 none): Block#stepTop. */
@@ -233,6 +238,7 @@ final class ChunkField {
             rim = new float[capacity]; foot = new float[capacity]; steps = new float[capacity]; faceRim = new float[capacity];
             faceFoot = new float[capacity]; projection = new float[capacity];
             flat = new boolean[lattice];
+            used = new boolean[lattice];
             stepLow = new float[lattice];
             stepTop = new int[capacity];
             java.util.Arrays.fill(stepTop, -1);
@@ -325,6 +331,10 @@ final class ChunkField {
             if (cover != null) { cover.lattice(x, y, z, role, rock, foot, stepTop, lattice); }
             for (int k = 0; k < 6; k++) { cut |= !b.inside(h.translated(BoardGeometry.edgeDirection(k))); }
             for (int k = 0; k < 6; k++) { emit(k, 0, 0, n, 0, n, n); }
+            for (int m = 0; m < mergedCount; m += 8) {
+                outline(merged[m], merged[m + 1], merged[m + 2], merged[m + 3], merged[m + 4], merged[m + 5],
+                      merged[m + 6], merged[m + 7] == 1);
+            }
             for (int e = 0; e < 6; e++) {
                 wallStart[e] = size;
                 walls(e);
@@ -1209,19 +1219,83 @@ final class ChunkField {
                 return;
             }
             int a = vertex(k, i0, j0), c1 = vertex(k, i1, j1), c2 = vertex(k, i2, j2);
-            // Counter-clockwise from above, as today's faces.
-            float cross = (x[c1] - x[a]) * (y[c2] - y[a]) - (y[c1] - y[a]) * (x[c2] - x[a]);
-            int second = cross >= 0 ? c1 : c2, third = cross >= 0 ? c2 : c1;
+            used[a] = used[c1] = used[c2] = true;
             // A level triangle under another cover than the hex's own, or in lava's reach, is drawn with its weights.
-            if (level && (cover == null || cover.plain(a))) {
-                levelTops = add(levelTops, levelTopCount, a, second, third);
+            boolean top = level && (cover == null || cover.plain(a));
+            if (extent == 1) {
+                // A triangle with any step sample is a step face: a bank's top row is all face, none alternating.
+                triangle(top, !level && role[a] + role[c1] + role[c2] >= 1, a, c1, c2);
+                return;
+            }
+            if (mergedCount + 8 > merged.length) { merged = java.util.Arrays.copyOf(merged, merged.length * 2); }
+            int[] m = { k, i0, j0, i1, j1, i2, j2, top ? 1 : 0 };
+            System.arraycopy(m, 0, merged, mergedCount, 8);
+            mergedCount += 8;
+        }
+
+        /**
+         * A merged triangle with the samples on its edges that another triangle of the hex has as a corner, and every
+         * sample on the hex's edge (the next hex's triangles are not known here): whatever meets an edge then meets
+         * vertices, never an edge's inside (a T junction: single-pixel holes). A strip between AB and AC from A, then a
+         * fan from the strip's last rung over BC's samples: none degenerate.
+         */
+        private void outline(int k, int i0, int j0, int i1, int j1, int i2, int j2, boolean top) {
+            int e = Math.max(Math.abs(i1 - i0), Math.max(Math.abs(i2 - i0), Math.abs(i2 - i1)));
+            int[] p = side(k, i0, j0, i1, j1, e), q = side(k, i0, j0, i2, j2, e), s = side(k, i1, j1, i2, j2, e);
+            if (p.length == 2 && q.length == 2) {
+                fan(top, p[0], s);
+                return;
+            }
+            triangle(top, false, p[0], p[1], q[1]);
+            int i = 1, j = 1;
+            while (i < p.length - 1 || j < q.length - 1) {
+                // The side whose next sample lies nearer A goes on; the step onto B and C at once fans over BC instead.
+                boolean left = j == q.length - 1
+                      || i < p.length - 1 && (i + 1) * (q.length - 1) <= (j + 1) * (p.length - 1);
+                if (left ? i + 2 == p.length && j + 1 == q.length : j + 2 == q.length && i + 1 == p.length) {
+                    fan(top, left ? p[i] : q[j], s);
+                    return;
+                }
+                if (left) {
+                    triangle(top, false, p[i], p[i + 1], q[j]);
+                    i++;
+                } else {
+                    triangle(top, false, p[i], q[j + 1], q[j]);
+                    j++;
+                }
+            }
+        }
+
+        /** A side's samples from corner to corner: the corners, the used ones between, every one on the hex's edge. */
+        private int[] side(int k, int ia, int ja, int ib, int jb, int e) {
+            int[] out = new int[e + 1];
+            int count = 0;
+            for (int t = 0; t <= e; t++) {
+                int v = vertex(k, ia + (ib - ia) * t / e, ja + (jb - ja) * t / e);
+                if (t == 0 || t == e || ia == n && ib == n || used[v]) { out[count++] = v; }
+            }
+            return java.util.Arrays.copyOf(out, count);
+        }
+
+        private void fan(boolean top, int apex, int[] side) {
+            for (int t = 0; t + 1 < side.length; t++) { triangle(top, false, apex, side[t], side[t + 1]); }
+        }
+
+        /** A triangle, counter-clockwise from above as today's faces, into the level tops, step faces or ground. */
+        private void triangle(boolean top, boolean face, int a, int b, int c) {
+            if ((x[b] - x[a]) * (y[c] - y[a]) - (y[b] - y[a]) * (x[c] - x[a]) < 0) {
+                int swap = b;
+                b = c;
+                c = swap;
+            }
+            if (top) {
+                levelTops = add(levelTops, levelTopCount, a, b, c);
                 levelTopCount += 3;
-            // A triangle with any step sample is a step face: a bank's top row is all face, none alternating.
-            } else if (!level && role[a] + role[c1] + role[c2] >= 1) {
-                faces = add(faces, faceCount, a, second, third);
+            } else if (face) {
+                faces = add(faces, faceCount, a, b, c);
                 faceCount += 3;
             } else {
-                ground = add(ground, groundCount, a, second, third);
+                ground = add(ground, groundCount, a, b, c);
                 groundCount += 3;
             }
         }
