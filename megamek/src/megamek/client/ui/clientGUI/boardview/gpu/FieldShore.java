@@ -301,7 +301,7 @@ final class FieldShore {
     }
 
     /**
-     * Today's water surface of water hex h (on the board, not molten) at (x, y): a descending stream's graded surface
+     * Today's surface of water or molten hex h (on the board) at (x, y): a descending stream's graded surface
      * (BoardSurface#waterHeight, which carries the nearest shore's height past its mesh), else the level surface. Where
      * the point lies in another water hex, that hex's: one function of the position, so the planes of two hexes meet, and a
      * hex whose outline the field moved past its neighbour's reads the water today draws there; a pool across a fall
@@ -314,7 +314,7 @@ final class FieldShore {
               : scene.tile(at);
         // Only water joined to h within two levels (one sloping surface, BoardSurface#waterSlope): across a fall each
         // plane keeps its own, or the lower pool's plane, carried past the wall's row, would climb to the pool above.
-        if (there != null && there.liquid().present() && !there.liquid().molten()
+        if (there != null && there.liquid().present()
               && (at.equals(h) || BoardSurface.waterSlope(scene.tile(h), there))) { h = at; }
         ring(h);
         return grades.containsKey(h) ? descending(h, x, y) : BoardGeometry.waterZ(scene.tile(h));
@@ -361,7 +361,7 @@ final class FieldShore {
     private BoardScene.Tile descends(BoardScene.Tile tile, Coords h, int e) {
         Coords n = h.translated(BoardGeometry.edgeDirection(e));
         BoardScene.Tile next = n.getX() < 0 || n.getY() < 0 || n.getX() >= cols || n.getY() >= rows ? null : scene.tile(n);
-        return next == null || !next.liquid().present() || next.liquid().molten() || !BoardSurface.waterSlope(tile, next)
+        return next == null || !next.liquid().present() || !BoardSurface.waterSlope(tile, next)
               || BoardGeometry.waterZ(next) == BoardGeometry.waterZ(tile) ? null : next;
     }
 
@@ -392,8 +392,9 @@ final class FieldShore {
         fx /= length;
         fy /= length;
         // A field planted under the water (a paddy) is a pool, not a stream: its descents keep today's mouth and depth.
+        // So does molten rock, which runs down its whole mouth whatever its depth.
         BoardScene.Tile upper = down ? tile : next;
-        int depth = upper.ground().fieldUnderWater() ? 2 : Math.max(0, upper.waterDepth());
+        int depth = upper.ground().fieldUnderWater() || upper.liquid().molten() ? 2 : Math.max(0, upper.waterDepth());
         float[] opening = mouth(down ? h : n, down ? e : (e + 3) % 6, ux, uy, fx, fy, length);
         float mouth = opening[1], away = edgeDistance(h, e, x, y);
         out[0] = drop;
@@ -421,7 +422,7 @@ final class FieldShore {
             return false;
         }
         BoardScene.Tile from = scene.tile(a), to = scene.tile(b);
-        return from.liquid().present() && !from.liquid().molten() && to.liquid().present() && !to.liquid().molten()
+        return from.liquid().present() && to.liquid().present()
               && BoardSurface.waterSlope(from, to) && BoardGeometry.waterZ(from) > BoardGeometry.waterZ(to);
     }
 
