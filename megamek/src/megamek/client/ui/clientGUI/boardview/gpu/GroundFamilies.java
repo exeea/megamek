@@ -177,9 +177,12 @@ final class GroundFamilies {
         ABRASION("groundAbrasionRule", null, (rules, floor) -> rules.at(5, 3) > 0),
         POCKETS("groundPocketsRule", BoardSwitch.GROUND_POCKETS, (rules, floor) -> true),
         TWO_SCALES("groundTwoScaleRule", BoardSwitch.GROUND_TWO_SCALE_PATCHES, (rules, floor) -> true),
+        WALL_READS("groundWallReadsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> true),
+        /** Walls read in four offset cells (Rules#cellWalls), with Varied cliff faces: its own kind, so the branch
+         *  stays out of the programs of families, and of boards ({@link #withoutWallCells}), that have no such wall. */
+        WALL_CELLS("groundWallCellsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> rules.at(12, 3) > 0),
         /** A family whose own materials declare a finish (emission, metallic, scattering): set by the materials, not
          *  the row ({@link #kinds(int, String[], int)}). */
-        WALL_READS("groundWallReadsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> true),
         FINISH("groundFinishRule", null, (rules, floor) -> false);
 
         final String define;
@@ -225,6 +228,15 @@ final class GroundFamilies {
     static int kinds(int families, String[] floors, int finishing) {
         return kinds(families, floors) | ((families & finishing) != 0 ? 1 << Rule.FINISH.ordinal() : 0);
     }
+
+    /** Whether the family's walls read in four offset cells (its row's cellWalls). */
+    static boolean cellWalls(BoardScene.Surface family) { return RULES_OF.get(family).at(12, 3) > 0; }
+
+    /**
+     * {@code kinds} for a generic program of a board without a family whose walls read in cells
+     * (GpuEnvironmentLighting.cellWalls): without {@link Rule#WALL_CELLS}, a branch none of its pixels would take.
+     */
+    static int withoutWallCells(int kinds) { return kinds & ~(1 << Rule.WALL_CELLS.ordinal()); }
 
     /** The define lines of a sculpt program's prefix for {@code kinds}, without the kinds whose switch is off. */
     static String defines(int kinds, Predicate<BoardSwitch> on) {

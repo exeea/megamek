@@ -309,7 +309,7 @@ final class GpuTerrain implements Disposable {
                   + "#define CLOSE_PIXEL " + GpuMaterialCache.CLOSE_PIXEL + "\n"
                   // The compact ground's table rows (ground-material.glsl), one a surface family, and its rules.
                   + (chosen == sculptShader && GroundFamilies.ON ? "#define GROUND_FAMILIES " + GroundFamilies.COUNT + "\n"
-                        + GroundFamilies.defines(GroundFamilies.kinds(groundRows, FLOORS, finishFamilies()), environmentLighting::has) : "")
+                        + GroundFamilies.defines(groundKinds(groundRows, renderable), environmentLighting::has) : "")
                   + TerrainField.prefix(renderable.material)
                   + (SUBLEVEL_FLOORS ? "#define sublevelFloorFlag\n#define FLOOR_FAMILIES " + FLOORS.length + "\n" : "")
                   + GpuIceShader.prefix(renderable.material)
@@ -1336,7 +1336,8 @@ final class GpuTerrain implements Disposable {
     private final BoundingBox coverGuard = new BoundingBox();
     private List<BoardScene.Tile> coverCandidates = List.of(), coverTiles;
     /** The lists last asked about fields, crystals and biomes, and the answers: a list changes only with the board. */
-    private List<BoardScene.Tile> fieldsTiles, crystalTiles, biomeTiles;
+    private List<BoardScene.Tile> fieldsTiles, crystalTiles, biomeTiles, cellWallTiles;
+    private boolean cellWallsPresent;
     private boolean fields, biomesActive, crystals;
     private final GpuBiomeSurface biomes;
     private final GpuGroundDamage groundDamage = new GpuGroundDamage();
@@ -3136,6 +3137,7 @@ final class GpuTerrain implements Disposable {
             requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
             GpuBiomeSurface.mark(environment, biomeStage(scene));
+            GpuEnvironmentLighting.required(environment).cellWalls = cellWallStage(scene);
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
         } else if (requested == null) {
@@ -3143,6 +3145,7 @@ final class GpuTerrain implements Disposable {
                 tiles = scene.tiles();
                 coverScene = scene;
                 GpuBiomeSurface.mark(environment, biomeStage(scene));
+                GpuEnvironmentLighting.required(environment).cellWalls = cellWallStage(scene);
                 installedSettings = settings;
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
@@ -3152,6 +3155,36 @@ final class GpuTerrain implements Disposable {
     /** Whether this board's programs compile the biome stage: the warm-up's choice, else the editor's or the board's. */
     private boolean biomeStage(BoardScene scene) {
         return biomeStage != null ? biomeStage : editable || biomesActive(scene);
+    }
+
+    /**
+     * Whether this board's generic ground programs compile the walls read in cells (GpuEnvironmentLighting.cellWalls):
+     * a family that reads so is on the board (no game turns a hex into one), or the editor may paint one. Asked every
+     * frame of a list that changes only with the scene.
+     */
+    private boolean cellWallStage(BoardScene scene) {
+        if (editable) { return true; }
+        if (cellWallTiles != scene.tiles()) {
+            cellWallTiles = scene.tiles();
+            cellWallsPresent = false;
+            for (BoardScene.Tile tile : cellWallTiles) {
+                if (GroundFamilies.cellWalls(tile.surface())) {
+                    cellWallsPresent = true;
+                    break;
+                }
+            }
+        }
+        return cellWallsPresent;
+    }
+
+    /**
+     * A sculpt program's rule kinds: its families' rows' ({@code rows} -1: a generic program, every family), a generic
+     * program's without the walls read in cells where its board has none.
+     */
+    private int groundKinds(int rows, Renderable renderable) {
+        int kinds = GroundFamilies.kinds(rows, FLOORS, finishFamilies());
+        var lighting = GpuEnvironmentLighting.of(renderable.environment);
+        return rows == -1 && lighting != null && !lighting.cellWalls ? GroundFamilies.withoutWallCells(kinds) : kinds;
     }
 
     /** GpuBiomeSurface.active for these tiles, asked every frame of a list that changes only with the scene. */

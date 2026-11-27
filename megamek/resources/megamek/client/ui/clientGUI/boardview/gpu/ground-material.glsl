@@ -130,7 +130,9 @@ void groundWallPair(vec2 uv, float variation, out vec2 a, out vec2 b, out float 
     t = smoothstep(.2, .8, fract(choice));
 }
 
-// The four offset cells of a wall that reads in cells, and their weights.
+#ifdef groundWallCellsRule
+// The four offset cells of a wall that reads in cells, and their weights. Its own rule kind (groundWallCellsRule): only
+// the programs of a family that reads so, and the generic programs of a board that has one, carry it.
 void groundWallCells(vec2 uv, out vec2 a, out vec2 b, out vec2 c, out vec2 d, out vec4 weights) {
     vec2 cell = floor(uv), blend = smoothstep(.15, .85, fract(uv)), keep = 1.0 - blend;
     a = uv + materialOffset(cell);
@@ -140,6 +142,7 @@ void groundWallCells(vec2 uv, out vec2 a, out vec2 b, out vec2 c, out vec2 d, ou
     weights = vec4(keep.x * keep.y, blend.x * keep.y, keep.x * blend.y, blend.x * blend.y);
 }
 #endif
+#endif
 
 // One side projection's colour/height and normal/AO on a wall, and its normals' spread: the pair through mixedTexel
 // (its read of weight zero skipped), the cells (a draw's whole family) four reads each.
@@ -148,6 +151,7 @@ void groundWallRead(vec2 uv, mat2 gradient, float layer, float variation, bool c
     data = vec4(.5, .5, 1.0, 1.0);
     spread = 0.0;
 #ifdef groundWallReadsRule
+#ifdef groundWallCellsRule
     if (cells) {
         vec2 a, b, c, d;
         vec4 w;
@@ -162,6 +166,7 @@ void groundWallRead(vec2 uv, mat2 gradient, float layer, float variation, bool c
         }
         return;
     }
+#endif
     vec2 a, b;
     float t;
     groundWallPair(uv, variation, a, b, t);
@@ -179,6 +184,7 @@ void groundWallRead(vec2 uv, mat2 gradient, float layer, float variation, bool c
 // The wall's height at its reads (groundWallRead), for the parallax.
 float groundWallHeight(vec2 uv, mat2 gradient, float layer, float variation, bool cells) {
 #ifdef groundWallReadsRule
+#ifdef groundWallCellsRule
     if (cells) {
         vec2 a, b, c, d;
         vec4 w;
@@ -186,6 +192,7 @@ float groundWallHeight(vec2 uv, mat2 gradient, float layer, float variation, boo
         return w.x * heightTexel(layer, a, gradient) + w.y * heightTexel(layer, b, gradient)
               + w.z * heightTexel(layer, c, gradient) + w.w * heightTexel(layer, d, gradient);
     }
+#endif
     vec2 a, b;
     float t;
     groundWallPair(uv, variation, a, b, t);

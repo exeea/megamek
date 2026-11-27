@@ -340,6 +340,7 @@ class GpuCliffMaterialsSmokeTest {
               #define GROUND_COLOUR u_terrainLayers
               #define GROUND_DATA u_terrainData
               #define groundWallReadsRule
+              #define groundWallCellsRule
               uniform float u_layer;
               uniform int u_mode;
               """ + sampling + """
