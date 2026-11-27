@@ -31,6 +31,10 @@ final class FieldBoard {
     private static final float FOLD = .1f;
     /** Squared distances closer than this are one distance (steps meeting at a corner sample). */
     private static final float TIE = 1e-6f;
+    /** How far a two-level bank's shoulder reaches to each side of its outline, in rooms (#benched). */
+    private static final float BENCH = .4f;
+    /** How far a benched bank's faces reach to each side of its outline, in rooms: its band's half width. */
+    private static final float BENCH_OUT = 1.2f;
     /** How far above its foot a wall's rock relief eases in, metres (ChunkField.Wall). */
     static final float FOOT_EASE = 1.5f;
     /**
@@ -532,6 +536,26 @@ final class FieldBoard {
               && BoardRelief.keepsOutline(scene, lower);
     }
 
+    /**
+     * Whether the step between u and v is a bank that keeps a shoulder between two faces: two levels over dry
+     * ground, of any family (today's rule, BoardRelief#band, benches grass alone; the shoulder says how many
+     * levels the bank crosses, from straight above too, which is the game's information on sand and rock as well).
+     */
+    private boolean benched(Coords u, Coords v, boolean cliff) {
+        Coords high = level(u) > level(v) ? u : v, low = high == u ? v : u;
+        return !cliff && level(high) - level(low) == 2 && taken(high) && !plate(high) && shore.family(high) < 0
+              && inside(low) && shore.family(low) < 0;
+    }
+
+    /**
+     * A benched bank's distance for one of its two levels (#benched): the lower level's face stands between the
+     * shoulder and the band's foot, the upper level's between the band's rim and the shoulder.
+     */
+    private float bench(float s, boolean lower) {
+        float b = BENCH * room, out = BENCH_OUT * room;
+        return room - 2 * room * ((lower ? out - s : -b - s) / (out - b));
+    }
+
     /** Whether the step between u and v is a bank from natural ground onto ground that keeps its outline. */
     private boolean plated(Coords u, Coords v, boolean cliff) {
         Coords high = level(u) > level(v) ? u : v, low = high == u ? v : u;
@@ -543,11 +567,14 @@ final class FieldBoard {
     static Coords unpacked(int packed) { return packed < 0 ? null : new Coords(packed / 4096, packed % 4096); }
 
     record Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined,
-          boolean plated, Segment rim) {
-        /** A step whose rim stands on its own line ({@code rim} null); a wall's can stand off it (#canonicalEdge). */
+          boolean plated, boolean benched, Segment rim) {
+        /**
+         * A step whose rim stands on its own line ({@code rim} null; a wall's can stand off it, #canonicalEdge) and
+         * that keeps no shoulder (#benched).
+         */
         Segment(float ax, float ay, float bx, float by, int low, int high, boolean cliff, int top, boolean joined,
               boolean plated) {
-            this(ax, ay, bx, by, low, high, cliff, top, joined, plated, null);
+            this(ax, ay, bx, by, low, high, cliff, top, joined, plated, false, null);
         }
 
         float distance(float x, float y) { return (float) Math.sqrt(squared(x, y)); }
@@ -1780,7 +1807,7 @@ final class FieldBoard {
         // Shaped water keeps its surface up to such water at its surface: its bed meets today's (FieldShore#seam).
         if (lu == lv || levelShore(u, v)) { return; }
         int top = packed(lu > lv ? u : v);
-        boolean cliff = cliff(u, v), plated = plated(u, v, cliff);
+        boolean cliff = cliff(u, v), plated = plated(u, v, cliff), benched = !plated && benched(u, v, cliff);
         float ax = cornerX(u, e), ay = cornerY(u, e), bx = cornerX(u, e + 1), by = cornerY(u, e + 1);
         float[][] d = edgeMove(u, e);
         if (slopes(u, v)) {
@@ -1795,7 +1822,7 @@ final class FieldBoard {
             // hexes at a wall's top at a corner, #latticeMove), between the rim's corners, as their lattices lie.
             int o = d[0].length > 4 ? 4 : 0;
             into.add(new Segment(ax + d[0][o], ay + d[0][o + 1], bx + d[FULL][o], by + d[FULL][o + 1], Math.min(lu, lv),
-                  Math.max(lu, lv), cliff, top, joinedWater(u, v), plated));
+                  Math.max(lu, lv), cliff, top, joinedWater(u, v), plated, benched, null));
             return;
         }
         for (int j = 0; j < FULL; j++) {
@@ -1807,7 +1834,7 @@ final class FieldBoard {
                         false);
             into.add(new Segment(ax + (bx - ax) * t0 + d[j][0], ay + (by - ay) * t0 + d[j][1],
                   ax + (bx - ax) * t1 + d[j + 1][0], ay + (by - ay) * t1 + d[j + 1][1],
-                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v), plated, rim));
+                  Math.min(lu, lv), Math.max(lu, lv), cliff, top, joinedWater(u, v), plated, false, rim));
         }
     }
 
@@ -1948,6 +1975,10 @@ final class FieldBoard {
         // Per level set, the nearest bank onto ground that keeps its outline (Segment#plated).
         float[] platedTo = new float[span];
         Arrays.fill(platedTo, Float.POSITIVE_INFINITY);
+        // Per level set, the nearest bank that keeps a shoulder (Segment#benched): as its lower level, as its upper.
+        float[] lowerTo = new float[span], upperTo = new float[span];
+        Arrays.fill(lowerTo, Float.POSITIVE_INFINITY);
+        Arrays.fill(upperTo, Float.POSITIVE_INFINITY);
         // Per level set, the nearest plate's slope (#paved): its bank is the plate's straight slope.
         float[] pavedTo = new float[span];
         Arrays.fill(pavedTo, Float.POSITIVE_INFINITY);
@@ -1961,6 +1992,10 @@ final class FieldBoard {
                 if (!s.cliff()) {
                     bankTo[j] = Math.min(bankTo[j], d[i]);
                     if (s.plated()) { platedTo[j] = Math.min(platedTo[j], d[i]); }
+                    if (s.benched()) {
+                        float[] to = j == s.low() - lowest ? lowerTo : upperTo;
+                        to[j] = Math.min(to[j], d[i]);
+                    }
                     if (paved(s)) { pavedTo[j] = Math.min(pavedTo[j], d[i]); }
                     if (s.joined()) { joinedTo[j] = Math.min(joinedTo[j], d[i]); }
                 }
@@ -2058,8 +2093,16 @@ final class FieldBoard {
                 if (!joinedBank && streamTo[k - lowest - 1] != Float.POSITIVE_INFINITY) {
                     sb -= room * (1 - far((float) Math.sqrt(streamTo[k - lowest - 1])));
                 }
+                // A bank that keeps a shoulder (#benched): this level's face stands to its own side of it, eased out
+                // over a metre where another bank of the level set stands nearer.
+                float benchD = Math.min(lowerTo[k - lowest - 1], upperTo[k - lowest - 1]);
+                float benches = benchD == Float.POSITIVE_INFINITY ? 0
+                      : 1 - BoardRelief.smooth(((float) Math.sqrt(benchD) - bankD) / metre);
+                if (benches > 0) {
+                    sb += benches * (bench(sb, lowerTo[k - lowest - 1] <= upperTo[k - lowest - 1]) - sb);
+                }
                 // The top level of banks stacked on one outline rounds its upper shoulder over a deeper band (#stackTop).
-                if (sb < 0) { sb /= stackTop(bankTo, k - lowest - 1, span); }
+                if (sb < 0 && benches < 1) { sb /= 1 + (stackTop(bankTo, k - lowest - 1, span) - 1) * (1 - benches); }
                 float banked = bank(sb, x, y);
                 // Beside a stream hex's step the bank takes the stream bank's straight profile over a band a quarter wider
                 // (whole within 6 m of the step, eased out to 12 m): the two banks turn their corner as one even slope.
@@ -2085,7 +2128,9 @@ final class FieldBoard {
                       * (in ? 1 - BoardRelief.smooth(Math.max(0, -sb - .95f * room) / room)
                             : 1 - BoardRelief.smooth(Math.max(0, sb - .95f * room) / run));
                 // A bank's face spans its band, as today's does; the top cover's rim and foot distances run from its edges.
-                step |= !pavedLine && Math.abs(sb) < .95f * room;
+                // A benched face is a step's face up to its crest on the shoulder's edge, so the whole face takes the
+                // step's cover and projection; the shoulder between the two crests stays top cover.
+                step |= !pavedLine && Math.abs(sb) < (.95f + .05f * benches) * room;
                 boolean slab = pavedLine && Math.abs(sb) < room;
                 // The lower half of a bank that lies whole on its own side is its foot's side, as the lower hex's.
                 if (in && !slab && !(whole && sb > 0)) { bankRim = Math.min(bankRim, Math.max(0, -sb - .95f * room)); }
