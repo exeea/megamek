@@ -1791,9 +1791,11 @@ final class FieldBoard {
             return;
         }
         if (!wall(u, v)) {
-            // Its samples lie on the straight line between its moved corners: one segment.
-            into.add(new Segment(ax + d[0][0], ay + d[0][1], bx + d[FULL][0], by + d[FULL][1], Math.min(lu, lv), Math.max(lu, lv),
-                  cliff, top, joinedWater(u, v), plated));
+            // Its samples lie on the straight line between its moved corners: one segment. Where its rows part (both
+            // hexes at a wall's top at a corner, #latticeMove), between the rim's corners, as their lattices lie.
+            int o = d[0].length > 4 ? 4 : 0;
+            into.add(new Segment(ax + d[0][o], ay + d[0][o + 1], bx + d[FULL][o], by + d[FULL][o + 1], Math.min(lu, lv),
+                  Math.max(lu, lv), cliff, top, joinedWater(u, v), plated));
             return;
         }
         for (int j = 0; j < FULL; j++) {
