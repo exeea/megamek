@@ -1597,7 +1597,6 @@ public class ClientGUI extends AbstractClientGUI
 
         showDefaultBoard(mainNames.get(name));
         maybeShowCommandBar();
-        ensureCurrentUnit();
 
         cardsMain.show(panMain, mainNames.get(name));
         String secondaryToShow = secondaryNames.get(name);
@@ -1899,17 +1898,6 @@ public class ClientGUI extends AbstractClientGUI
         panTop.revalidate();
         panTop.repaint();
         logger.debug("[GameCommands] command bar visible={} in phase {}", phaseAllowsCommandBar, phase);
-    }
-
-    /** A board phase other than a report begins while no unit is current: the game's first unit becomes it. */
-    private void ensureCurrentUnit() {
-        GamePhase phase = getClient().getGame().getPhase();
-        if (phase.isOnMap() && !phase.isReport() && (getUnitDisplayState().getCurrentEntity() == null)) {
-            List<Entity> units = getClient().getGame().getEntitiesVector();
-            if (!units.isEmpty()) {
-                getUnitDisplayState().displayEntity(units.getFirst());
-            }
-        }
     }
 
     /**

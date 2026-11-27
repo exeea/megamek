@@ -33,6 +33,7 @@
 
 package megamek.client.ui.panels.phaseDisplay;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,6 +67,7 @@ import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.units.BipedMek;
+import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -145,6 +147,12 @@ class MovementDisplayTurnChangeTest {
     @AfterEach
     void tearDown() {
         mockedMegaMekGUI.close();
+    }
+
+    @Test
+    @DisplayName("the move envelope of no unit is nothing: no unit is current until one is selected")
+    void theMoveEnvelopeOfNoUnitIsNothing() {
+        assertDoesNotThrow(() -> movementDisplay.computeMovementEnvelope((Entity) null));
     }
 
     @Test

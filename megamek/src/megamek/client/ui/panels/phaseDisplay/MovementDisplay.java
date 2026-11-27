@@ -7336,8 +7336,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
      *
      * @param suggestion The suggested Entity to use to compute the movement envelope.
      */
-    public void computeMovementEnvelope(Entity suggestion) {
-        if (!suggestion.isDeployed()) {
+    public void computeMovementEnvelope(@Nullable Entity suggestion) {
+        if ((suggestion == null) || !suggestion.isDeployed()) {
             return;
         }
         if (suggestion.isAero()) {
