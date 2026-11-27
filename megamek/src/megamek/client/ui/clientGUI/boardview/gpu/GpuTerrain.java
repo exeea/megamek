@@ -7366,9 +7366,10 @@ final class GpuTerrain implements Disposable {
      */
     private void fieldGround(GpuTerrainLayer solid, Chunk chunk, BoardScene scene, BoardScene.Tile tile, ChunkMesh.Hex mesh,
           BoardSurface surface, Map<Coords, BoardSurface> surfaces) {
-        // A water hex's ground is its bed's family (FieldShore), as today's bed is. A hex with cover weights draws in
-        // its draw's blend material: an entry a slot of today's blend palette. Another draws its cover's (crust and
-        // bank included, which today's sculpted tops draw too, where the surface would say rock).
+        // A water hex's ground is its bed's family (FieldShore), as today's bed is; molten rock's is its bank's. A hex
+        // with cover weights draws in its draw's blend material: an entry a slot of today's blend palette. Another
+        // draws its cover's (crust and bank included, which today's sculpted tops draw too, where the surface would say
+        // rock).
         fieldGroundMesh(solid, scene, tile, mesh, surface);
         float[] b = mesh.bounds();
         chunk.bounds.ext(b[0], b[1], b[2]).ext(b[3], b[4], b[5]);
@@ -7388,7 +7389,8 @@ final class GpuTerrain implements Disposable {
     private void fieldGroundMesh(GpuTerrainLayer layer, BoardScene scene, BoardScene.Tile tile, ChunkMesh.Hex mesh,
           BoardSurface surface) {
         Material material = TerrainField.material(mesh.palette() != null ? blendMaterial(fieldPalette(mesh.palette()))
-                    : tile.liquid().present() ? sculptMaterial(FieldShore.ground(scene, tile, surface.relief.family()))
+                    : tile.liquid().present() && !tile.liquid().molten()
+                          ? sculptMaterial(FieldShore.ground(scene, tile, surface.relief.family()))
                     : sculptMaterial(BoardSurfaceBlend.family(tile)),
               TerrainField.key(tile.coords().getX(), tile.coords().getY()));
         // Land ice is a coat over its ground, and dry land beside it draws their shared border, as today's sculpted

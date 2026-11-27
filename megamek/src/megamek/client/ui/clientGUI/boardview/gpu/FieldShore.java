@@ -121,12 +121,12 @@ final class FieldShore {
 
     /**
      * The bed's family (a {@link BoardScene.Surface} ordinal) where the operator shapes a hex's water, which the field
-     * then takes, else -1: level water on natural ground, unfrozen, without a road, ford or ramp (today's geometry
-     * until the roads' corridor is tried under water), its land neighbours all the field's. A bridge's deck stands
-     * over the water as over today's.
+     * then takes, else -1: level water or molten rock on natural ground, unfrozen, without a road, ford or ramp
+     * (today's geometry until the roads' corridor is tried under water), its land neighbours all the field's. A
+     * bridge's deck stands over the water as over today's.
      */
     private int family(BoardScene.Tile t) {
-        if (!t.liquid().present() || t.liquid().molten() || t.frozen() || t.ultraSublevel() || t.backdrop().present()
+        if (!t.liquid().present() || t.frozen() || t.ultraSublevel() || t.backdrop().present()
               || BoardFeatures.shaft(t) || t.wayExits() != 0 || t.road() != BoardRoad.Kind.NONE
               || BoardSurface.ramps(scene, t) != 0) { return -1; }
         for (int d = 0; d < 6; d++) {
@@ -279,7 +279,7 @@ final class FieldShore {
     float surface(float x, float y, boolean graded) {
         Coords at = GpuStarShells.hexAt(x, y);
         BoardScene.Tile tile = at.getX() < 0 || at.getY() < 0 || at.getX() >= cols || at.getY() >= rows ? null : scene.tile(at);
-        if (tile != null && tile.liquid().present() && !tile.liquid().molten()) {
+        if (tile != null && tile.liquid().present()) {
             return graded ? water(at, x, y) : BoardGeometry.waterZ(tile);
         }
         // A dry hex between two levels of water takes the water whose line holds the point (a pool's line beside a
@@ -289,7 +289,7 @@ final class FieldShore {
             Coords next = at.translated(d);
             BoardScene.Tile water = next.getX() < 0 || next.getY() < 0 || next.getX() >= cols || next.getY() >= rows ? null
                   : scene.tile(next);
-            if (water != null && water.liquid().present() && !water.liquid().molten()) {
+            if (water != null && water.liquid().present()) {
                 float z = graded ? water(next, x, y) : BoardGeometry.waterZ(water);
                 top = Float.isNaN(top) ? z : Math.max(top, z);
                 if (contains(ring(next), x, y)) { held = Float.isNaN(held) ? z : Math.max(held, z); }
@@ -874,7 +874,7 @@ final class FieldShore {
         if (known != null) { return known; }
         BoardScene.Tile tile = h.getX() < 0 || h.getY() < 0 || h.getX() >= cols || h.getY() >= rows ? null : scene.tile(h);
         float[] ring = new float[0];
-        if (tile != null && tile.liquid().present() && !tile.liquid().molten()) {
+        if (tile != null && tile.liquid().present()) {
             BoardSurface surface = new BoardSurface(scene, tile, TerrainLod.FULL);
             BoardSurface.WaterGeometry today = surface.waterGeometry();
             Vector3[] line = today.waterline();
