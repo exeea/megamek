@@ -48,7 +48,6 @@ import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -62,7 +61,6 @@ import javax.swing.*;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ColourSelectorButton;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.settings.SettingsBadge;
 import megamek.client.ui.settings.SettingsButton;
@@ -713,15 +711,10 @@ class CommonSettingsDialogTest {
         SettingsFormPanel heatGrid = CommonSettingsDialog.createUnitDisplayHeatGrid(
                   seenByLabel, seenBy, heatLabels, heatSpinners, heatColours, overheatLabel, overheatColour);
 
-        DefaultListModel<String> order = unitDisplayOrderModel();
-        JPanel orderGrid = CommonSettingsDialog.createUnitDisplayOrderGrid(order);
-
         JLabel sortLabel = new JLabel(Messages.getString("CommonSettingsDialog.defaultWeaponSortOrder"));
         JComboBox<String> sort = new JComboBox<>(new String[] { "Name", "Range" });
-        JLabel heightLabel = new JLabel(Messages.getString("CommonSettingsDialog.weaponListHeight"));
-        JSpinner height = CommonSettingsDialog.createIntegerSpinner(200, 1, 1);
         SettingsFormPanel weaponsGrid = CommonSettingsDialog.createGameBoardFieldGrid(
-                  "TestUnitDisplayWeaponsGrid", sortLabel, sort, heightLabel, height);
+                  "TestUnitDisplayWeaponsGrid", sortLabel, sort);
 
         JLabel armorLargeLabel = new JLabel(Messages.getString(
             "CommonSettingsDialog.unitDisplayMekArmorLargeFontSize"));
@@ -743,11 +736,10 @@ class CommonSettingsDialogTest {
                   informationLargeLabel, informationLarge, informationMediumLabel, informationMedium);
 
         JPanel heatSection = settingsGroup(List.of(row(heatGrid)));
-        JPanel orderSection = settingsGroup(List.of(row(orderGrid)));
         JPanel weaponsSection = settingsGroup(List.of(row(weaponsGrid)));
         JPanel fontsSection = settingsGroup(List.of(row(fontsGrid)));
         CommonSettingsPane pane = createSettingsPane("unitDisplay",
-                  heatSection, orderSection, weaponsSection, fontsSection);
+                  heatSection, weaponsSection, fontsSection);
 
         assertSame(seenBy, seenByLabel.getLabelFor());
         for (int index = 0; index < heatLabels.length; index++) {
@@ -757,12 +749,11 @@ class CommonSettingsDialogTest {
         }
         assertSame(overheatColour, overheatLabel.getLabelFor());
         assertSame(sort, sortLabel.getLabelFor());
-        assertSame(height, heightLabel.getLabelFor());
         assertSame(armorLarge, armorLargeLabel.getLabelFor());
         assertSame(informationMedium, informationMediumLabel.getLabelFor());
 
         assertAtConstrainedStandardAndWideWidths(pane,
-                  List.of(heatGrid, orderGrid, weaponsGrid, fontsGrid), laidOutPane -> {
+                  List.of(heatGrid, weaponsGrid, fontsGrid), laidOutPane -> {
                 List<List<Component>> heatRows = new ArrayList<>();
                 heatRows.add(List.of(seenByLabel, seenBy));
                 for (int index = 0; index < heatLabels.length; index++) {
@@ -770,60 +761,21 @@ class CommonSettingsDialogTest {
                 }
                 heatRows.add(List.of(overheatLabel, overheatColour));
                 assertAlignedBalancedRows(heatGrid, heatRows);
-                    assertAlignedBalancedRows(weaponsGrid, List.of(
-                        List.of(sortLabel, sort), List.of(heightLabel, height)));
+                    assertAlignedBalancedRows(weaponsGrid, List.of(List.of(sortLabel, sort)));
                     assertAlignedBalancedRows(fontsGrid, List.of(
                         List.of(armorLargeLabel, armorLarge), List.of(armorMediumLabel, armorMedium),
                         List.of(armorSmallLabel, armorSmall),
                         List.of(informationLargeLabel, informationLarge),
                         List.of(informationMediumLabel, informationMedium)));
-                assertThreeColumnUnitDisplayOrderGrid(orderGrid);
-                assertEquals(heatGrid.getWidth(), orderGrid.getWidth());
-                assertEquals(orderGrid.getWidth(), weaponsGrid.getWidth());
+                assertEquals(heatGrid.getWidth(), weaponsGrid.getWidth());
                 assertEquals(weaponsGrid.getWidth(), fontsGrid.getWidth());
             });
-    }
-
-    @Test
-    void reordersNonTabbedUnitDisplayPanelsWithSharedDragListControl() {
-        DefaultListModel<String> order = unitDisplayOrderModel();
-        JPanel orderGrid = CommonSettingsDialog.createUnitDisplayOrderGrid(order);
-        JList<?> orderList = findComponent(orderGrid, JList.class);
-
-        CommonSettingsDialog.moveListElement(order, 0, 3);
-
-        assertSame(order, orderList.getModel());
-        assertEquals(UnitDisplayPanel.NON_TABBED_PILOT, order.get(0));
-        assertEquals(UnitDisplayPanel.NON_TABBED_GENERAL, order.get(3));
-        assertEquals(JList.HORIZONTAL_WRAP, orderList.getLayoutOrientation());
-        assertEquals(2, orderList.getVisibleRowCount());
-        assertEquals(ListSelectionModel.SINGLE_SELECTION, orderList.getSelectionMode());
-        assertTrue(orderList.getMouseMotionListeners().length > 0);
-        orderGrid.setSize(orderGrid.getPreferredSize());
-        layoutRecursively(orderGrid);
-        assertThreeColumnUnitDisplayOrderGrid(orderGrid);
     }
 
     @Test
     void localizesMovementTraitorCommand() {
         assertTrue(Messages.keyExists("MovementDisplay.Traitor"));
         assertEquals("Traitor", Messages.getString("MovementDisplay.Traitor"));
-    }
-
-    @Test
-    void loadsUnitDisplayOrderWithoutRecursion() {
-        DefaultListModel<String> order = new DefaultListModel<>();
-        order.addElement("stale");
-        List<String> savedOrder = List.of(
-                                    UnitDisplayPanel.NON_TABBED_GENERAL, UnitDisplayPanel.NON_TABBED_WEAPON,
-                                    UnitDisplayPanel.NON_TABBED_EXTRA, UnitDisplayPanel.NON_TABBED_PILOT,
-                                    UnitDisplayPanel.NON_TABBED_SYSTEM, UnitDisplayPanel.NON_TABBED_ARMOR);
-
-        CommonSettingsDialog.loadUnitDisplayOrder(order, savedOrder);
-
-                            assertEquals(savedOrder, java.util.stream.IntStream.range(0, order.size())
-                .mapToObj(order::get)
-                .toList());
     }
 
     @Test
@@ -1033,12 +985,11 @@ class CommonSettingsDialogTest {
     }
 
     @Test
-    void laysOutAutoDisplayAsBalancedPhaseRowsAndTabCheckboxes() {
+    void laysOutAutoDisplayAsBalancedPhaseRows() {
         List<SettingsFormPanel> phaseGrids = new ArrayList<>();
         List<List<Component>> phaseControls = new ArrayList<>();
         List<JPanel> sections = new ArrayList<>();
-        for (String name : List.of(
-                                    "UnitDisplay", "MiniReport", "PlayerList", "ForceDisplay", "BotCommands")) {
+        for (String name : List.of("UnitDisplay")) {
             JLabel reportLabel = new JLabel(Messages.getString("CommonSettingsDialog.reportPhases"));
             JComboBox<String> reportControl = new JComboBox<>(new String[] { "Hide", "Show", "Manual" });
             JLabel nonReportLabel = new JLabel(Messages.getString("CommonSettingsDialog.nonReportPhases"));
@@ -1054,17 +1005,9 @@ class CommonSettingsDialogTest {
             sections.add(settingsGroup(List.of(row(grid))));
         }
 
-        JCheckBox movement = new JCheckBox(Messages.getString("CommonSettingsDialog.tabsMove"));
-        JCheckBox firing = new JCheckBox(Messages.getString("CommonSettingsDialog.tabsFire"));
-        SettingsFormPanel tabGrid = CommonSettingsDialog.createAutoDisplayTabGrid(movement, firing);
-        JPanel tabSection = settingsGroup(List.of(row(tabGrid)));
-        sections.add(tabSection);
         CommonSettingsPane pane = createSettingsPane(
                                     "autoDisplay", sections.toArray(JComponent[]::new));
 
-        assertEquals(2, tabGrid.getComponentCount());
-        assertTrue(movement.getText().startsWith("Show "));
-        assertTrue(firing.getText().startsWith("Show "));
         assertAtConstrainedStandardAndWideWidths(pane, sections, laidOutPane -> {
             int expectedWidth = phaseGrids.getFirst().getWidth();
             for (int index = 0; index < phaseGrids.size(); index++) {
@@ -1074,8 +1017,6 @@ class CommonSettingsDialogTest {
                                             controls.subList(0, 2), controls.subList(2, 4)));
                 assertEquals(expectedWidth, grid.getWidth());
             }
-            assertAlignedBalancedRows(tabGrid, List.of(List.of(movement, firing)));
-            assertEquals(expectedWidth, tabGrid.getWidth());
         });
     }
 
@@ -1696,29 +1637,6 @@ class CommonSettingsDialogTest {
 
     private static List<Component> row(Component... components) {
         return List.of(components);
-    }
-
-    private static DefaultListModel<String> unitDisplayOrderModel() {
-        DefaultListModel<String> order = new DefaultListModel<>();
-        order.addElement(UnitDisplayPanel.NON_TABBED_GENERAL);
-        order.addElement(UnitDisplayPanel.NON_TABBED_PILOT);
-        order.addElement(UnitDisplayPanel.NON_TABBED_ARMOR);
-        order.addElement(UnitDisplayPanel.NON_TABBED_WEAPON);
-        order.addElement(UnitDisplayPanel.NON_TABBED_SYSTEM);
-        order.addElement(UnitDisplayPanel.NON_TABBED_EXTRA);
-        return order;
-    }
-
-    private static void assertThreeColumnUnitDisplayOrderGrid(JPanel orderGrid) {
-        JList<?> orderList = findComponent(orderGrid, JList.class);
-        assertEquals(6, orderList.getModel().getSize());
-        assertEquals(2, orderList.getVisibleRowCount());
-        int preferredCellWidth = UIUtil.scaleForGUI((SettingsFormPanel.DEFAULT_LABEL_WIDTH * 2) / 3);
-        Insets insets = orderGrid.getInsets();
-        int availableWidth = orderGrid.getWidth() - insets.left - insets.right;
-        assertEquals(Math.min(preferredCellWidth, availableWidth / 3), orderList.getFixedCellWidth());
-        assertTrue(orderList.getFixedCellHeight() > 0);
-        assertComponentWithinParent(orderList);
     }
 
     private static JPanel settingsGroup(List<List<Component>> rows) {

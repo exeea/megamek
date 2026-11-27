@@ -56,7 +56,6 @@ import megamek.client.ui.util.KeyBindReceiver;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.CalledShot;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
@@ -375,9 +374,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
             Entity en_Target = clientgui.getUnitDisplayState().getCurrentEntity();
             // Avoided using selectEntity(), to avoid centering on active unit
             clientgui.getUnitDisplayState().displayEntity(currentEntity());
-            if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-                clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
-            }
             clientgui.getUnitDisplayState().selectFirstWeapon();
             target(en_Target);
         }
@@ -1904,9 +1900,6 @@ public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarati
         }
         clientgui.onAllBoardStates(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplayState().displayEntity(currentEntity());
-        if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
-        }
         clientgui.getUnitDisplayState().selectFirstWeapon();
         if (currentEntity().isMakingVTOLGroundAttack()) {
             updateVTOLGroundTarget();

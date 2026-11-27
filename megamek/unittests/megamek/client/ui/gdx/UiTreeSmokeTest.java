@@ -74,14 +74,14 @@ class UiTreeSmokeTest {
                     sidebar("gameBoard.fov", "gameBoard.fovInside", "gameBoard.fovOutside")),
               sidebar("unitDisplay",
                     sidebar("unitDisplay.tooltips", "unitDisplay.tooltip", "unitDisplay.armor"),
-                    sidebar("unitDisplay.interface", "unitDisplay.heat", "unitDisplay.order", "unitDisplay.weapons",
+                    sidebar("unitDisplay.interface", "unitDisplay.heat", "unitDisplay.weapons",
                           "unitDisplay.sensors", "unitDisplay.fonts")),
               sidebar("miniMap", "miniMap.theme", "miniMap.display"),
               sidebar("report", "report.appearance", "report.content", "report.filter"),
               sidebar("overlays", "overlays.planetary", "overlays.toasts", "overlays.trace"),
               sidebar("buttonOrder", "buttonOrder.movement", "buttonOrder.deployment", "buttonOrder.firing",
                     "buttonOrder.physical", "buttonOrder.targeting"),
-              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.tabs"),
+              sidebar("autoDisplay", "autoDisplay.unit"),
               sidebar("aiDisplay", "aiDisplay.settings"),
               sidebar("advanced", "advanced.timing", "advanced.safety"));
     }

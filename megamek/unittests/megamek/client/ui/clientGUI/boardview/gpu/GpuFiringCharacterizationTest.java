@@ -115,8 +115,6 @@ class GpuFiringCharacterizationTest {
                     firing.unitDisplay.displayEntity(inspected);
                     firing.unitDisplay.selectWeapon(otherGrenade);
                     assertSame(firing.ahead, active.getTarget());
-                    assertNull(firing.gui.getUnitDisplay());
-                    assertNull(firing.gui.getUnitDisplayDialog());
                 } finally {
                     if (pointblank) { active.removeAllListeners(); }
                 }

@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -41,8 +39,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.common.Player;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -73,11 +69,8 @@ class GpuSwingCutSmokeTest {
     private static final List<String> SHOWN = List.of(GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE,
           GUIPreferences.UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE);
 
-    /** The client's windows, real Swing dialogs owned by its Swing frame. */
-    private record Client2d(JFrame frame, CommonMenuBar menus, UnitDisplayDialog unit) {
-        List<Window> windows() {
-            return List.of(unit);
-        }
+    /** The client's Swing frame and its menus. */
+    private record Client2d(JFrame frame, CommonMenuBar menus) {
     }
 
     @AfterEach
@@ -175,7 +168,6 @@ class GpuSwingCutSmokeTest {
                 });
                 await(() -> !GpuHost.isOpen());
                 onSwing(() -> {
-                    client.windows().forEach(Window::dispose);
                     client.frame().dispose();
                     client.menus().die();
                     saved.forEach(preferences::setValue);
@@ -238,8 +230,7 @@ class GpuSwingCutSmokeTest {
     }
 
     /**
-     * The client's Swing frame and its Unit Display, as ClientGUI builds them; the Unit Display observes a request
-     * outside the native window on its dialog.
+     * The client's Swing frame and menus, as ClientGUI builds them.
      */
     private static Client2d windows(ClientGUI gui, GpuBoardFixture fixture) {
         JFrame frame = new JFrame("MegaMek - Swing cut test");
@@ -254,25 +245,11 @@ class GpuSwingCutSmokeTest {
         set(ClientGUI.class, gui, "botCommandsPanel", new BotCommandsPanel(gui.getClient(), null, null, gui));
         set(ClientGUI.class, gui, "commandBarPanel", bar);
         set(ClientGUI.class, gui, "panTop", top);
-        when(gui.getUnitDisplayState()).thenReturn(new UnitDisplayState(gui));
-        UnitDisplayPanel unitPanel = new UnitDisplayPanel(gui);
-        UnitDisplayDialog unit = new UnitDisplayDialog(frame, gui);
-        when(gui.getUnitDisplay()).thenReturn(unitPanel);
-        when(gui.getUnitDisplayDialog()).thenReturn(unit);
-        unitPanel.displayEntity(fixture.entity);
-        doAnswer(invocation -> placementOrDialog(gui, invocation, unit)).when(gui).setUnitDisplayLocation(anyBoolean());
+        UnitDisplayState unit = new UnitDisplayState(gui);
+        when(gui.getUnitDisplayState()).thenReturn(unit);
+        unit.displayEntity(fixture.entity);
         frame.setVisible(true);
-        return new Client2d(frame, menus, unit);
-    }
-
-    /** ClientGUI's own placement over the native window; without it the request shows on the dialog. */
-    private static Object placementOrDialog(ClientGUI gui, org.mockito.invocation.InvocationOnMock invocation,
-          JDialog dialog) throws Throwable {
-        if (GpuBoardWindow.isActiveFor(gui)) {
-            return invocation.callRealMethod();
-        }
-        dialog.setVisible(invocation.getArgument(0));
-        return null;
+        return new Client2d(frame, menus);
     }
 
     private static void set(Class<?> owner, Object instance, String name, Object value) {

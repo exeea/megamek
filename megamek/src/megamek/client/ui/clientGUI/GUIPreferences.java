@@ -174,20 +174,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_UNIMPLEMENTED_QUIRKS = "ShowUnimplementedQuirks";
 
 
-    public static final String UNIT_DISPLAY_POS_X = "UnitDisplayPosX";
-    public static final String UNIT_DISPLAY_POS_Y = "UnitDisplayPosY";
-    public static final String UNIT_DISPLAY_NONTABBED_POS_X = "UnitDisplayNontabbedPosX";
-    public static final String UNIT_DISPLAY_NONTABBED_POS_Y = "UnitDisplayNontabbedPosY";
-    public static final String UNIT_DISPLAY_START_TABBED = "UnitDisplayStartTabbed";
-    public static final String UNIT_DISPLAY_SPLIT_ABC_LOC = "UnitDisplaySplitABCLoc";
-    public static final String UNIT_DISPLAY_SPLIT_BC_LOC = "UnitDisplaySplitBCLoc";
-    public static final String UNIT_DISPLAY_SPLIT_A1_LOC = "UnitDisplaySplitA1Loc";
-    public static final String UNIT_DISPLAY_SPLIT_B1_LOC = "UnitDisplaySplitB1Loc";
-    public static final String UNIT_DISPLAY_SPLIT_C1_LOC = "UnitDisplaySplitC2Loc";
-    public static final String UNIT_DISPLAY_SIZE_HEIGHT = "UnitDisplaySizeHeight";
-    public static final String UNIT_DISPLAY_SIZE_WIDTH = "UnitDisplaySizeWidth";
-    public static final String UNIT_DISPLAY_NONTABBED_SIZE_HEIGHT = "UnitDisplayNonTabbedSizeHeight";
-    public static final String UNIT_DISPLAY_NONTABBED_SIZE_WIDTH = "UnitDisplayNontabbedSizeWidth";
     public static final String UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE = "UnitDisplayAutoDisplayReportPhase";
     public static final String UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE = "UnitDisplayAutoDisplayNonReportPhase";
     public static final String UNIT_DISPLAY_ENABLED = "UnitDisplayEnabled";
@@ -204,7 +190,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String UNIT_DISPLAY_HEAT_VALUE_4 = "UnitDisplayHeatValue4";
     public static final String UNIT_DISPLAY_HEAT_VALUE_5 = "UnitDisplayHeatValue5";
     public static final String UNIT_DISPLAY_HEAT_VALUE_6 = "UnitDisplayHeatValue6";
-    public static final String UNIT_DISPLAY_WEAPON_LIST_HEIGHT = "UnitDisplayWeaponListHeight";
     public static final String UNIT_DISPLAY_MEK_ARMOR_LARGE_FONT_SIZE = "UnitDisplayMekArmorLargeFontSize";
     public static final String UNIT_DISPLAY_MEK_ARMOR_MEDIUM_FONT_SIZE = "UnitDisplayMekArmorMediumFontSize";
     public static final String UNIT_DISPLAY_MEK_ARMOR_SMALL_FONT_SIZE = "UnitDisplayMekArmorSmallFontSize";
@@ -336,8 +321,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MINI_MAP_PAINT_BORDERS = "MinimapPaintBorders";
     /** The 3D board's battle HUD shows its contacts panel; its Contacts utility switches it as Map does the minimap. */
     public static final String GPU_CONTACTS_ENABLED = "GpuContactsEnabled";
-    public static final String FIRE_DISPLAY_TAB_DURING_PHASES = "FireDisplayTabDuringPhases";
-    public static final String MOVE_DISPLAY_TAB_DURING_PHASES = "MoveDisplayTabDuringPhases";
     public static final String HIGH_PERFORMANCE_GRAPHICS = "HighPerformanceGraphics";
     public static final String MINIMUM_SIZE_HEIGHT = "MinimumSizeHeight";
     public static final String MINIMUM_SIZE_WIDTH = "MinimumSizeWidth";
@@ -682,16 +665,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(BOT_COMMANDS_PAUSE_AT_START, true);
 
-        store.setDefault(UNIT_DISPLAY_SIZE_HEIGHT, 500);
-        store.setDefault(UNIT_DISPLAY_SIZE_WIDTH, 300);
-        store.setDefault(UNIT_DISPLAY_NONTABBED_SIZE_HEIGHT, 900);
-        store.setDefault(UNIT_DISPLAY_NONTABBED_SIZE_WIDTH, 900);
-        store.setDefault(UNIT_DISPLAY_START_TABBED, true);
-        store.setDefault(UNIT_DISPLAY_SPLIT_ABC_LOC, 300);
-        store.setDefault(UNIT_DISPLAY_SPLIT_BC_LOC, 300);
-        store.setDefault(UNIT_DISPLAY_SPLIT_A1_LOC, 900);
-        store.setDefault(UNIT_DISPLAY_SPLIT_B1_LOC, 500);
-        store.setDefault(UNIT_DISPLAY_SPLIT_C1_LOC, 500);
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, 0);
         store.setDefault(UNIT_DISPLAY_AUTO_DISPLAY_NON_REPORT_PHASE, 1);
         store.setDefault(UNIT_DISPLAY_ENABLED, true);
@@ -712,7 +685,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(UNIT_DISPLAY_MEK_ARMOR_MEDIUM_FONT_SIZE, 10);
         store.setDefault(UNIT_DISPLAY_MEK_ARMOR_SMALL_FONT_SIZE, 9);
         store.setDefault(UNIT_DISPLAY_MEK_LARGE_FONT_SIZE, 12);
-        setDefault(UNIT_DISPLAY_WEAPON_LIST_HEIGHT, 200);
 
         store.setDefault(UNIT_TOOLTIP_SEEN_BY_RESOLUTION, 3);
         store.setDefault(UNIT_TOOLTIP_ARMOR_MINI_UNITS_PER_BLOCK, 10);
@@ -798,8 +770,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
                         ? GifRecordingMode.ALWAYS.name()
                         : GifRecordingMode.NEVER.name());
         }
-        store.setDefault(MOVE_DISPLAY_TAB_DURING_PHASES, true);
-        store.setDefault(FIRE_DISPLAY_TAB_DURING_PHASES, true);
         store.setDefault(MOVE_ENVELOPE, true);
 
         store.setDefault(MM_SYMBOL, true);
@@ -983,62 +953,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getBoolean(SHOW_UNIMPLEMENTED_QUIRKS);
     }
 
-    public int getUnitDisplayPosX() {
-        return store.getInt(UNIT_DISPLAY_POS_X);
-    }
-
-    public int getUnitDisplayPosY() {
-        return store.getInt(UNIT_DISPLAY_POS_Y);
-    }
-
-    public int getUnitDisplayNontabbedPosX() {
-        return store.getInt(UNIT_DISPLAY_NONTABBED_POS_X);
-    }
-
-    public int getUnitDisplayNontabbedPosY() {
-        return store.getInt(UNIT_DISPLAY_NONTABBED_POS_Y);
-    }
-
-    public boolean getUnitDisplayStartTabbed() {
-        return store.getBoolean(UNIT_DISPLAY_START_TABBED);
-    }
-
-    public int getUnitDisplaySplitABCLoc() {
-        return store.getInt(UNIT_DISPLAY_SPLIT_ABC_LOC);
-    }
-
-    public int getUnitDisplaySplitBCLoc() {
-        return store.getInt(UNIT_DISPLAY_SPLIT_BC_LOC);
-    }
-
-    public int getUnitDisplaySplitA1Loc() {
-        return store.getInt(UNIT_DISPLAY_SPLIT_A1_LOC);
-    }
-
-    public int getUnitDisplaySplitB1Loc() {
-        return store.getInt(UNIT_DISPLAY_SPLIT_B1_LOC);
-    }
-
-    public int getUnitDisplaySplitC1Loc() {
-        return store.getInt(UNIT_DISPLAY_SPLIT_C1_LOC);
-    }
-
-    public int getUnitDisplaySizeHeight() {
-        return store.getInt(UNIT_DISPLAY_SIZE_HEIGHT);
-    }
-
-    public int getUnitDisplaySizeWidth() {
-        return store.getInt(UNIT_DISPLAY_SIZE_WIDTH);
-    }
-
-    public int getUnitDisplayNonTabbedSizeHeight() {
-        return store.getInt(UNIT_DISPLAY_NONTABBED_SIZE_HEIGHT);
-    }
-
-    public int getUnitDisplayNonTabbedSizeWidth() {
-        return store.getInt(UNIT_DISPLAY_NONTABBED_SIZE_WIDTH);
-    }
-
     public int getUnitDisplayAutoDisplayReportPhase() {
         return store.getInt(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE);
     }
@@ -1049,10 +963,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getUnitDisplayEnabled() {
         return store.getBoolean(UNIT_DISPLAY_ENABLED);
-    }
-
-    public int getUnitDisplayWeaponListHeight() {
-        return store.getInt(UNIT_DISPLAY_WEAPON_LIST_HEIGHT);
     }
 
     public Color getUnitDisplayHeatLevel1() {
@@ -1309,14 +1219,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getGpuContactsEnabled() {
         return store.getBoolean(GPU_CONTACTS_ENABLED);
-    }
-
-    public boolean getFireDisplayTabDuringFiringPhases() {
-        return store.getBoolean(FIRE_DISPLAY_TAB_DURING_PHASES);
-    }
-
-    public boolean getMoveDisplayTabDuringMovePhases() {
-        return store.getBoolean(MOVE_DISPLAY_TAB_DURING_PHASES);
     }
 
     public int getMinimapZoom() {
@@ -1908,62 +1810,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(SHOW_UNIMPLEMENTED_QUIRKS, state);
     }
 
-    public void setUnitDisplayPosX(int i) {
-        store.setValue(UNIT_DISPLAY_POS_X, i);
-    }
-
-    public void setUnitDisplayPosY(int i) {
-        store.setValue(UNIT_DISPLAY_POS_Y, i);
-    }
-
-    public void setUnitDisplayNontabbedPosX(int i) {
-        store.setValue(UNIT_DISPLAY_NONTABBED_POS_X, i);
-    }
-
-    public void setUnitDisplayNontabbedPosY(int i) {
-        store.setValue(UNIT_DISPLAY_NONTABBED_POS_Y, i);
-    }
-
-    public void setUnitDisplayStartTabbed(boolean state) {
-        store.setValue(UNIT_DISPLAY_START_TABBED, state);
-    }
-
-    public void setUnitDisplaySplitABCLoc(int i) {
-        store.setValue(UNIT_DISPLAY_SPLIT_ABC_LOC, i);
-    }
-
-    public void setUnitDisplaySplitBCLoc(int i) {
-        store.setValue(UNIT_DISPLAY_SPLIT_BC_LOC, i);
-    }
-
-    public void setUnitDisplaySplitA1Loc(int i) {
-        store.setValue(UNIT_DISPLAY_SPLIT_A1_LOC, i);
-    }
-
-    public void setUnitDisplaySplitB1Loc(int i) {
-        store.setValue(UNIT_DISPLAY_SPLIT_B1_LOC, i);
-    }
-
-    public void setUnitDisplaySplitC2Loc(int i) {
-        store.setValue(UNIT_DISPLAY_SPLIT_C1_LOC, i);
-    }
-
-    public void setUnitDisplaySizeHeight(int i) {
-        store.setValue(UNIT_DISPLAY_SIZE_HEIGHT, i);
-    }
-
-    public void setUnitDisplaySizeWidth(int i) {
-        store.setValue(UNIT_DISPLAY_SIZE_WIDTH, i);
-    }
-
-    public void setUnitDisplayNonTabbedSizeHeight(int i) {
-        store.setValue(UNIT_DISPLAY_NONTABBED_SIZE_HEIGHT, i);
-    }
-
-    public void setUnitDisplayNonTabbedSizeWidth(int i) {
-        store.setValue(UNIT_DISPLAY_NONTABBED_SIZE_WIDTH, i);
-    }
-
     public void setUnitDisplayAutoDisplayReportPhase(int i) {
         store.setValue(UNIT_DISPLAY_AUTO_DISPLAY_REPORT_PHASE, i);
     }
@@ -1978,10 +1824,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUnitDisplayEnabled(boolean b) {
         store.setValue(UNIT_DISPLAY_ENABLED, b);
-    }
-
-    public void setUnitDisplayWeaponListHeight(int i) {
-        store.setValue(UNIT_DISPLAY_WEAPON_LIST_HEIGHT, i);
     }
 
     public void setUnitDisplayHeatColorLevel1(Color c) {
@@ -2238,14 +2080,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setMinimapHeightDisplayMode(int zoom) {
         store.setValue(MINI_MAP_HEIGHT_DISPLAY_MODE, zoom);
-    }
-
-    public void setFireDisplayTabDuringFiringPhases(boolean b) {
-        store.setValue(FIRE_DISPLAY_TAB_DURING_PHASES, b);
-    }
-
-    public void setMoveDisplayTabDuringMovePhases(boolean b) {
-        store.setValue(MOVE_DISPLAY_TAB_DURING_PHASES, b);
     }
 
     public void setMiniReportShowSprites(boolean b) {

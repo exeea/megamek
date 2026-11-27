@@ -74,8 +74,7 @@ import org.mockito.MockedStatic;
 
 /**
  * The unit record service with real units: what it captures (the critical table and hit boxes as the record sheet
- * shows them, the unit's vitals and the Unit Display's content), and that each unit action sends what the Unit
- * Display's control sends (UnitDisplayActionsTest records those packets from the Swing panels).
+ * shows them, the unit's vitals, weapons, pilot and extras), and what each unit action sends.
  */
 @ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
@@ -203,7 +202,7 @@ class GpuUnitRecordTest {
                 atlas.setCrew(new Crew(CrewType.COMMAND_CONSOLE));
             });
             assertEquals(List.of(Messages.getString("MekDisplay.ActivateHidden.StopActivating"),
-                  GamePhase.MOVEMENT.toString(), GamePhase.FIRING.toString(), GamePhase.PHYSICAL.toString()),
+                  "Movement", "Ranged Attack", "Physical"),
                   system(session.record(), GpuUnitRecord.HIDDEN).choices());
             session.source.record().setSystem(id, GpuUnitRecord.HIDDEN, 2);
             session.source.record().setSystem(id, GpuUnitRecord.CONSOLE_ROLES, 1);

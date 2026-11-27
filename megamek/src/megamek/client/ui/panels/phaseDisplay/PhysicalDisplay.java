@@ -62,7 +62,6 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
 import megamek.common.ToHitData;
@@ -496,9 +495,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
 
         clientgui.getUnitDisplayState().displayEntity(entity);
-        if (GUIP.getMoveDisplayTabDuringMovePhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
-        }
 
         clientgui.centerOnUnit(entity);
 

@@ -75,12 +75,10 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.UITheme;
-import megamek.client.ui.clientGUI.UnitDisplayOrderPreferences;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.comboBoxes.MMComboBox;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
@@ -131,7 +129,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         Messages.getString("CommonSettingsDialog.legend.important"));
     private static final int BEHAVIOR_OPTION_COLUMNS = 2;
     private static final int SLIDER_VALUE_COLUMNS = 5;
-    private static final int UNIT_DISPLAY_ORDER_COLUMNS = 3;
     private static final int SENSOR_PREFERENCE_COLUMNS = 3;
     private static final int BUTTON_ORDER_COLUMNS = 4;
     private static final String REORDER_LIST_CELL_WIDTH = "CommonSettingsDialog.reorderListCellWidth";
@@ -397,7 +394,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private DefaultListModel<StatusBarPhaseDisplay.PhaseCommand> targetingPhaseCommands;
 
     // Unit Display order
-    private final DefaultListModel<String> unitDisplayNonTabbed = new DefaultListModel<>();
 
     // Sensor preference order, most preferred first
     private final DefaultListModel<SensorFamily> sensorPreferenceOrder = new DefaultListModel<>();
@@ -442,7 +438,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JSpinner unitDisplayHeatLevel5Spinner;
     private JSpinner unitDisplayHeatLevel6Spinner;
     private JComboBox<String> unitTooltipSeenByCbo;
-    private JSpinner unitDisplayWeaponListHeightSpinner;
 
     private ColourSelectorButton csbUnitTooltipArmorMiniIntact;
     private ColourSelectorButton csbUnitTooltipArmorMiniPartial;
@@ -461,8 +456,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     // Auto Display
     private JComboBox<String> unitDisplayAutoDisplayReportCombo;
     private JComboBox<String> unitDisplayAutoDisplayNonReportCombo;
-    private JCheckBox displayMoveDisplayDuringMovePhases;
-    private JCheckBox displayFireDisplayDuringFirePhases;
 
     // Report
     private final JCheckBox chkReportShowPlayers = new JCheckBox(Messages.getString(
@@ -523,7 +516,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
     private static final ClientPreferences CLIENT_PREFERENCES = PreferenceManager.getClientPreferences();
-    private static final UnitDisplayOrderPreferences UNIT_DISPLAY_ORDER_PREFERENCES = UnitDisplayOrderPreferences.getInstance();
     private static final ButtonOrderPreferences BOP = ButtonOrderPreferences.getInstance();
 
     private static final String[] LOCALE_CHOICES = { "en", "de", "ru", "es" };
@@ -689,10 +681,9 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                                        CommonSettingsPane.SETTINGS_UNITDISPLAY + ".interface"),
                                   unitDisplay,
                                   section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".heat", 2),
-                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".order", 3),
-                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".weapons", 4),
-                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".sensors", 5),
-                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".fonts", 6)));
+                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".weapons", 3),
+                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".sensors", 4),
+                                  section(CommonSettingsPane.SETTINGS_UNITDISPLAY + ".fonts", 5)));
 
         CommonSettingsPane.SectionedContent miniMap = sectionedContent(getMiniMapPanel(),
                                                                        CommonSettingsPane.SETTINGS_MINIMAP);
@@ -729,8 +720,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                        optionPage(CommonSettingsPane.SETTINGS_AUTODISPLAY,
                                   path(CommonSettingsPane.SETTINGS_AUTODISPLAY),
                                   autoDisplay,
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".unit", 0),
-                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".tabs", 1)));
+                                  section(CommonSettingsPane.SETTINGS_AUTODISPLAY + ".unit", 0)));
 
         CommonSettingsPane.SectionedContent aiDisplay = sectionedContent(aiDisplayPanel(),
                                                                          CommonSettingsPane.SETTINGS_AIDISPLAY);
@@ -1717,11 +1707,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         addLineSpacer(comps);
 
-        loadUnitDisplayOrder(unitDisplayNonTabbed, savedUnitDisplayOrder());
-        comps.add(List.of(createUnitDisplayOrderGrid(unitDisplayNonTabbed)));
-
-        addLineSpacer(comps);
-
         JLabel defaultSortOrderLabel = new JLabel(Messages.getString("CommonSettingsDialog.defaultWeaponSortOrder"));
         String toolTip = Messages.getString("CommonSettingsDialog.defaultWeaponSortOrder.tooltip");
         defaultSortOrderLabel.setToolTipText(toolTip);
@@ -1732,14 +1717,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         comboDefaultWeaponSortOrder = new MMComboBox<>("comboDefaultWeaponSortOrder", defaultWeaponSortOrderModel);
         comboDefaultWeaponSortOrder.setToolTipText(toolTip);
 
-        JLabel weaponListHeightLabel = new JLabel(Messages.getString("CommonSettingsDialog.weaponListHeight"));
-        unitDisplayWeaponListHeightSpinner = createIntegerSpinner(GUIP.getUnitDisplayWeaponListHeight(), 1, 1);
-        String weaponListHeightToolTip = Messages.getString("CommonSettingsDialog.weaponListHeight.tooltip");
-        weaponListHeightLabel.setToolTipText(weaponListHeightToolTip);
-        unitDisplayWeaponListHeightSpinner.setToolTipText(weaponListHeightToolTip);
         comps.add(List.of(createGameBoardFieldGrid("CommonSettingsUnitDisplayWeaponsGrid",
-              defaultSortOrderLabel, comboDefaultWeaponSortOrder,
-              weaponListHeightLabel, unitDisplayWeaponListHeightSpinner)));
+              defaultSortOrderLabel, comboDefaultWeaponSortOrder)));
 
         addLineSpacer(comps);
 
@@ -1822,25 +1801,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         return grid;
     }
 
-    static JPanel createUnitDisplayOrderGrid(DefaultListModel<String> orderModel) {
-        if (orderModel.size() != 6) {
-            throw new IllegalArgumentException("Unit Display panel order must contain six positions");
-        }
-
-        JList<String> orderList = new JList<>(orderModel);
-        orderList.setName("unitDisplayOrder");
-        orderList.setToolTipText(Messages.getString("CommonSettingsDialog.unitDisplayOrder.tooltip"));
-        JPanel panel = createReorderListPanel(orderList, UNIT_DISPLAY_ORDER_COLUMNS);
-                setPreferredReorderListCellWidth(orderList, Math.max(orderList.getFixedCellWidth(),
-                UIUtil.scaleForGUI((SettingsFormPanel.DEFAULT_LABEL_WIDTH * 2) / UNIT_DISPLAY_ORDER_COLUMNS)));
-        return panel;
-    }
-
-    static void loadUnitDisplayOrder(DefaultListModel<String> orderModel, List<String> panelOrder) {
-        orderModel.clear();
-        panelOrder.forEach(orderModel::addElement);
-    }
-
     /**
      * Builds the drag-to-reorder list the player ranks the sensor families with. The list shows every family, since a
      * family the player cannot use on any of their units simply never matches and costs them nothing.
@@ -1884,16 +1844,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             }
             return this;
         }
-    }
-
-    private static List<String> savedUnitDisplayOrder() {
-        return List.of(
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_A1),
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_B1),
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_C1),
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_A2),
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_B2),
-            UNIT_DISPLAY_ORDER_PREFERENCES.getString(UnitDisplayPanel.NON_TABBED_C2));
     }
 
     private JPanel getReportPanel() {
@@ -2889,13 +2839,10 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         bombsDisplayMisses.setSelected(GUIP.getShowBombMisses());
         bombsDisplayDrifts.setSelected(GUIP.getShowBombDrifts());
 
-        loadUnitDisplayOrder(unitDisplayNonTabbed, savedUnitDisplayOrder());
         loadSensorPreferenceOrder(sensorPreferenceOrder, GUIP.getSensorPreferenceOrder());
 
         unitDisplayAutoDisplayReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayReportPhase());
         unitDisplayAutoDisplayNonReportCombo.setSelectedItem(GUIP.getUnitDisplayAutoDisplayNonReportPhase());
-        displayMoveDisplayDuringMovePhases.setSelected(GUIP.getMoveDisplayTabDuringMovePhases());
-        displayFireDisplayDuringFirePhases.setSelected(GUIP.getFireDisplayTabDuringFiringPhases());
 
         csbUnitDisplayHeatLevel1.setColour(GUIP.getUnitDisplayHeatLevel1());
         csbUnitDisplayHeatLevel2.setColour(GUIP.getUnitDisplayHeatLevel2());
@@ -2913,7 +2860,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         unitDisplayHeatLevel6Spinner.setValue(GUIP.getUnitDisplayHeatValue6());
 
         unitTooltipSeenByCbo.setSelectedIndex(GUIP.getUnitToolTipSeenByResolution());
-        unitDisplayWeaponListHeightSpinner.setValue(GUIP.getUnitDisplayWeaponListHeight());
 
         unitDisplayMekArmorLargeFontSizeSpinner.setValue(GUIP.getUnitDisplayMekArmorLargeFontSize());
         unitDisplayMekArmorMediumFontSizeSpinner.setValue(GUIP.getUnitDisplayMekArmorMediumFontSize());
@@ -3293,28 +3239,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             clientgui.updateButtonPanel(GamePhase.TARGETING);
         }
 
-        String[] unitDisplayPositions = {
-                        UnitDisplayPanel.NON_TABBED_A1, UnitDisplayPanel.NON_TABBED_B1, UnitDisplayPanel.NON_TABBED_C1,
-                        UnitDisplayPanel.NON_TABBED_A2, UnitDisplayPanel.NON_TABBED_B2, UnitDisplayPanel.NON_TABBED_C2
-        };
-        boolean unitDisplayNonTabbedChanged = false;
-        int savedPositions = Math.min(unitDisplayNonTabbed.getSize(), unitDisplayPositions.length);
-        for (int index = 0; index < savedPositions; index++) {
-            String position = unitDisplayPositions[index];
-            String panelName = unitDisplayNonTabbed.get(index);
-            if (!panelName.equals(UNIT_DISPLAY_ORDER_PREFERENCES.getString(position))) {
-                UNIT_DISPLAY_ORDER_PREFERENCES.setValue(position, panelName);
-                unitDisplayNonTabbedChanged = true;
-            }
-        }
-        if (unitDisplayNonTabbedChanged && (clientgui != null) && !GUIP.getUnitDisplayStartTabbed()) {
-            if (clientgui.getUnitDisplay() != null) { clientgui.getUnitDisplay().setDisplayNonTabbed(); }
-        }
-
         GUIP.setUnitDisplayAutoDisplayReportPhase(unitDisplayAutoDisplayReportCombo.getSelectedIndex());
         GUIP.setUnitDisplayAutoDisplayNonReportPhase(unitDisplayAutoDisplayNonReportCombo.getSelectedIndex());
-        GUIP.setMoveDisplayTabDuringMovePhases(displayMoveDisplayDuringMovePhases.isSelected());
-        GUIP.setFireDisplayTabDuringFiringPhases(displayFireDisplayDuringFirePhases.isSelected());
 
         GUIP.setUnitDisplayHeatColorLevel1(csbUnitDisplayHeatLevel1.getColour());
         GUIP.setUnitDisplayHeatColorLevel2(csbUnitDisplayHeatLevel2.getColour());
@@ -3331,7 +3257,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setUnitDisplayHeatColorValue6((Integer) unitDisplayHeatLevel6Spinner.getValue());
 
         GUIP.setUnitToolTipSeenByResolution(unitTooltipSeenByCbo.getSelectedIndex());
-        GUIP.setUnitDisplayWeaponListHeight((Integer) unitDisplayWeaponListHeightSpinner.getValue());
 
         GUIP.setUnitDisplayMekArmorLargeFontSize((Integer) unitDisplayMekArmorLargeFontSizeSpinner.getValue());
         GUIP.setUnitDisplayMekArmorMediumFontSize((Integer) unitDisplayMekArmorMediumFontSizeSpinner.getValue());
@@ -3725,15 +3650,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
               unitDisplayReportLabel, unitDisplayAutoDisplayReportCombo,
               unitDisplayNonReportLabel, unitDisplayAutoDisplayNonReportCombo)));
 
-        addLineSpacer(comps);
-
-        displayMoveDisplayDuringMovePhases = new JCheckBox(
-              Messages.getString("CommonSettingsDialog.tabsMove"), GUIP.getMoveDisplayTabDuringMovePhases());
-        displayFireDisplayDuringFirePhases = new JCheckBox(
-              Messages.getString("CommonSettingsDialog.tabsFire"), GUIP.getFireDisplayTabDuringFiringPhases());
-        comps.add(List.of(createAutoDisplayTabGrid(
-              displayMoveDisplayDuringMovePhases, displayFireDisplayDuringFirePhases)));
-
         return createSettingsPanel(comps);
     }
 
@@ -3746,13 +3662,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         nonReportLabel.setLabelFor(nonReportControl);
         grid.addEqualWidthComponentGrid(2,
               reportLabel, reportControl, nonReportLabel, nonReportControl);
-        return grid;
-    }
-
-    static SettingsFormPanel createAutoDisplayTabGrid(JCheckBox movement, JCheckBox firing) {
-        SettingsFormPanel grid = new SettingsFormPanel(
-              "CommonSettingsAutoDisplayTabGrid", SettingsFormPanel.DEFAULT_LABEL_WIDTH, 0);
-        grid.addEqualWidthComponentGrid(2, movement, firing);
         return grid;
     }
 

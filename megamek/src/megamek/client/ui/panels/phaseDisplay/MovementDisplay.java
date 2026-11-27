@@ -66,7 +66,6 @@ import megamek.client.ui.util.CommandAction;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.AtmosphericLandingMovePath;
 import megamek.common.Hex;
@@ -932,9 +931,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
      */
     private void updateUnitDisplay(final Entity entity) {
         clientgui.getUnitDisplayState().displayEntity(entity);
-        if (GUIP.getMoveDisplayTabDuringMovePhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
-        }
     }
 
     /**

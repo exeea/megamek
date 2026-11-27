@@ -17,7 +17,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,9 +64,6 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
@@ -125,10 +121,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void nativeGameplayRendersWithoutConstructingALegacy2DBoardOrInspector() throws Exception {
-        var inspector = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayPanel.class));
-        var inspectorDialog = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayDialog.class));
-        var weapons = GpuTestSupport.onSwing(() -> mockConstruction(WeaponPanel.class));
+    void nativeGameplayRendersWithoutConstructingALegacy2DBoard() throws Exception {
         var session = GpuTestSupport.onSwing(GpuGameplayStateTest.Session::create);
         JFrame owner = GpuTestSupport.onSwing(JFrame::new);
         CommonMenuBar menus = GpuTestSupport.onSwing(CommonMenuBar::getMenuBarForGame);
@@ -163,9 +156,6 @@ class GpuBoardWindowSmokeTest {
             GpuTestSupport.onSwing(() -> {
 
 
-                assertTrue(inspector.constructed().isEmpty());
-                assertTrue(inspectorDialog.constructed().isEmpty());
-                assertTrue(weapons.constructed().isEmpty());
                 assertFalse(session.state().isClosed());
                 return null;
             });
@@ -177,9 +167,6 @@ class GpuBoardWindowSmokeTest {
                 owner.dispose();
                 menus.die();
 
-                weapons.close();
-                inspectorDialog.close();
-                inspector.close();
 
                 return null;
             });

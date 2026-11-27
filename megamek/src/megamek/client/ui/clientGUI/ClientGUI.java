@@ -114,8 +114,6 @@ import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionWarning;
 import megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.panels.ReceivingGameDataPanel;
@@ -330,10 +328,7 @@ public class ClientGUI extends AbstractClientGUI
 
     private JPanel panTop;
 
-    private UnitDisplayPanel unitDisplayPanel;
     private final UnitDisplayState unitDisplayState;
-    private UnitDisplayDialog unitDisplayDialog;
-
     private BotCommandsPanel botCommandsPanel;
     private CommandBarPanel commandBarPanel;
 
@@ -649,29 +644,9 @@ public class ClientGUI extends AbstractClientGUI
         toastDripTimer.start();
     }
 
-    /** The optional Swing inspector. Gameplay code must use {@link #getUnitDisplayState()}. */
-    @Nullable
-    public UnitDisplayPanel getUnitDisplay() {
-        return unitDisplayPanel;
-    }
-
     @Override
     public UnitDisplayState getUnitDisplayState() {
         return unitDisplayState;
-    }
-
-    /** Presentation only: a phase may suggest a Swing inspector tab without constructing the inspector. */
-    public void showUnitDisplayPanel(String panel) {
-        if (unitDisplayPanel != null) { unitDisplayPanel.showPanel(panel); }
-    }
-
-    public UnitDisplayDialog getUnitDisplayDialog() {
-        return unitDisplayDialog;
-    }
-
-    public void setUnitDisplayDialog(final UnitDisplayDialog unitDisplayDialog) {
-        this.unitDisplayDialog = unitDisplayDialog;
-        this.unitDisplayDialog.setFocusableWindowState(false);
     }
 
     public BotCommandsPanel getBotCommandsPanel() {
@@ -1150,9 +1125,6 @@ public class ClientGUI extends AbstractClientGUI
      * its size, and the minimap keeps its zoom.
      */
     public void resetWindowPositions() {
-        if (getUnitDisplayDialog() != null) {
-            getUnitDisplayDialog().setLocation(0, 0);
-        }
         if (getGameOptionsDialog() != null) {
             getGameOptionsDialog().setBounds(0,
                                              0,
@@ -1496,19 +1468,6 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /**
-     * Saves the current settings to the cfg file.
-     */
-    @Override
-    void saveSettings() {
-        super.saveSettings();
-
-        // Unit Display Dialog
-        if (getUnitDisplayDialog() != null) {
-            getUnitDisplayDialog().saveSettings();
-        }
-    }
-
     @Override
     public void die() {
         if (client.isAwaitingSave()) {
@@ -1518,8 +1477,6 @@ public class ClientGUI extends AbstractClientGUI
 
         // Capture window positions before anything is torn down.
         saveSettings();
-
-        if (unitDisplayPanel != null) { unitDisplayPanel.disposeDisplay(); }
 
         dead = true;
         try {
@@ -1980,14 +1937,8 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /**
-     * Shows or hides the Unit Display based on the given visible. This works independently of the current menu setting,
-     * so it should be used only when the Unit Display is to be shown or hidden without regard for the user setting,
-     * e.g. hiding it in the lobby or a report phase. Does not change the menu setting.
-     */
+    /** The Unit Display switch changed: switched on while no unit is current, the game's first unit becomes it. */
     public void setUnitDisplayVisible(boolean visible) {
-        // If no unit displayed, select a unit so display can be safely shown
-        // This can happen when using mouse button 4
         if (visible && (getUnitDisplayState().getCurrentEntity() == null) && (getClient() != null) && (getClient().getGame()
               != null)) {
             List<Entity> es = getClient().getGame().getEntitiesVector();
@@ -1995,13 +1946,6 @@ public class ClientGUI extends AbstractClientGUI
                 getUnitDisplayState().displayEntity(es.getFirst());
             }
         }
-
-        setUnitDisplayLocation(visible);
-    }
-
-    /** The 3D board's HUD shows the unit record; the Swing unit display stays hidden. */
-    public void setUnitDisplayLocation(boolean visible) {
-        if (getUnitDisplayDialog() != null) { getUnitDisplayDialog().setVisible(false); }
     }
 
     /**

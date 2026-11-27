@@ -56,7 +56,6 @@ import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.HexTarget;
 import megamek.common.Player;
 import megamek.common.RangeType;
@@ -969,9 +968,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         }
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplayState().displayEntity(currentEntity());
-        if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
-        }
         clientgui.getUnitDisplayState().selectFirstWeapon();
         updateTarget();
         clientgui.updateFiringArc(currentEntity());

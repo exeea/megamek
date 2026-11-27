@@ -66,7 +66,6 @@ import megamek.client.ui.util.CommandAction;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.battleArmor.ProtoMekClampMount;
 import megamek.common.bays.Bay;
 import megamek.common.board.AllowedDeploymentHelper;
@@ -317,7 +316,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         setRemoveEnabled(true);
 
         clientgui.getUnitDisplayState().displayEntity(entity);
-        clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         computeWarningHexes(entity);

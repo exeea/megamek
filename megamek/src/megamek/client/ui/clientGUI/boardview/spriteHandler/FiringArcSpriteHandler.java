@@ -501,11 +501,8 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
             ranges[1] = new int[] { 0, 0, 0, 0, 0 };
             int maxRange;
 
-            // In the WeaponPanel, when the weapon is out of ammo
-            // or otherwise nonfunctional, SHORT range will be listed;
-            // the field of fire is instead disabled
-            // Here as well as in WeaponPanel, choosing a specific ammo
-            // only works for the current player's units
+            // When the weapon is out of ammo or otherwise nonfunctional, the field of fire is disabled.
+            // Choosing a specific ammo only works for the current player's units
             if (!weapon.isBreached() && !weapon.isMissing()
                   && !weapon.isDestroyed() && !weapon.isJammed()
                   && ((ammoMounted == null)

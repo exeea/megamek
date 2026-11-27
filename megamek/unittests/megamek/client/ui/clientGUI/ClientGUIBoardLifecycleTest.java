@@ -23,9 +23,6 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.common.Player;
@@ -46,18 +43,12 @@ class ClientGUIBoardLifecycleTest {
     @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
     void nativeMapArrivalReplacementAndBoardSelectionNeedNoLegacy2DRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
-            try (var display = mockConstruction(UnitDisplayPanel.class);
-                  var dialog = mockConstruction(UnitDisplayDialog.class);
-                  var weapons = mockConstruction(WeaponPanel.class);
-                  var sound = mockConstruction(SoundManager.class);
+            try (var sound = mockConstruction(SoundManager.class);
                   var session = Session.create(phase)) {
                 Game game = session.game();
                 ClientGUI gui = session.gui();
-                // Startup preferences and phase rules may request the inspector before the native window exists.
+                // Startup preferences and phase rules may switch the Unit Display on before the native window exists.
                 gui.setUnitDisplayVisible(true);
-                gui.setUnitDisplayLocation(true);
-                assertNull(gui.getUnitDisplay());
-                assertNull(gui.getUnitDisplayDialog());
                 game.receiveBoard(0, Board.createEmptyBoard(8, 8));
                 BoardClientState first = gui.getBoardState();
                 assertNotNull(first);
@@ -91,9 +82,6 @@ class ClientGUIBoardLifecycleTest {
                 assertEquals(List.of(), boardListeners(removedBoard));
 
 
-                assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");
-                assertTrue(dialog.constructed().isEmpty());
-                assertTrue(weapons.constructed().isEmpty());
                 gui.die();
                 assertTrue(gui.boardStates().isEmpty());
                 assertTrue(session.closeListeners().isEmpty());
@@ -117,7 +105,6 @@ class ClientGUIBoardLifecycleTest {
         Board server = Board.createEmptyBoard(6, 6);
         try {
             onClient(() -> {
-                resources.push(mockConstruction(UnitDisplayPanel.class));
                 resources.push(mockConstruction(SoundManager.class));
                 // Without a server-built battlefield every preview request rolls a new board from the map settings.
                 var rolls = mockStatic(ServerBoardHelper.class);

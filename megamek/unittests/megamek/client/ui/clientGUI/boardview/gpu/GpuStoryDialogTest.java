@@ -42,7 +42,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.common.Player;
 import megamek.common.event.GameScriptedMessageEvent;
 import megamek.common.game.Game;
@@ -167,10 +166,9 @@ class GpuStoryDialogTest {
         return null;
     }
 
-    /** EDT: a real client of an empty game, its unit display and sounds stubbed. */
+    /** EDT: a real client of an empty game, its sounds stubbed. */
     private static ClientGUI client() {
-        try (var display = mockConstruction(UnitDisplayPanel.class);
-              var sound = mockConstruction(SoundManager.class)) {
+        try (var sound = mockConstruction(SoundManager.class)) {
             Game game = new Game();
             Player player = new Player(0, "Story reader");
             game.addPlayer(0, player);

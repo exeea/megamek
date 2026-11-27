@@ -765,7 +765,7 @@ final class GpuUnitRecord {
                 equipment.add(new Equipment(entity.getEquipmentNum(mounted), mounted.getName(),
                       location(entity, mounted), choices.labels(), choices.selectedIndex(),
                       modeIndex(mounted, mounted.curMode()),
-                      // MegaMek's rule for a queued switch (SystemPanel): a pending mode other than "None"
+                      // MegaMek's rule for a queued switch: a pending mode other than "None"
                       mounted.pendingMode().equals(Mounted.MODE_NONE) ? -1 : modeIndex(mounted, mounted.pendingMode()),
                       choices.enabled()));
             }
@@ -965,7 +965,6 @@ final class GpuUnitRecord {
         lines(info, InfoSection.REPAIRS, UnitToolTip.getPartialRepairs(entity, true));
         PilotingRollData roll = entity.getBasePilotingRoll();
         info.add(new InfoRow(InfoSection.PSR, roll.getValueAsString(), roll.getDesc(), Entity.NONE));
-        // The Unit Display's summary shows the unit's hex the same way (SummaryPanel)
         Hex hex = game.getHex(entity.getBoardLocation());
         if (hex != null) {
             lines(info, InfoSection.HEX, HexTooltip.getTerrainTip(hex, entity.getBoardId(), game));

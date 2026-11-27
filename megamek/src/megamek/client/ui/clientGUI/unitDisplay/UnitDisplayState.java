@@ -229,11 +229,9 @@ public final class UnitDisplayState {
     public void setRange(String value) { range = Objects.toString(value, ""); changed(); }
     public String getRange() { return range; }
     public String getToHit() { return toHit; }
-    public String getTargetExtra() { return targetExtra; }
     public String getTargetText() {
         return target == null ? Messages.getString("MekDisplay.NoTarget") : UnitToolTip.getTargetTipDetail(target, client());
     }
-    public String getTargetName() { return target == null ? Messages.getString("MekDisplay.NoTarget") : target.getDisplayName(); }
     public String getFiringSolution() {
         return Messages.getString("MekDisplay.Range") + " " + range + "<br>" + toHit + "<br>" + targetExtra;
     }
