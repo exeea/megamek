@@ -538,13 +538,14 @@ final class FieldBoard {
 
     /**
      * Whether the step between u and v is a bank that keeps a shoulder between two faces: two levels over dry
-     * ground, of any family (today's rule, BoardRelief#band, benches grass alone; the shoulder says how many
+     * ground the field takes (no water hex, the shore's or one it leaves, as under a bridge), of any family
+     * (today's rule, BoardRelief#band, benches grass alone; the shoulder says how many
      * levels the bank crosses, from straight above too, which is the game's information on sand and rock as well).
      */
     private boolean benched(Coords u, Coords v, boolean cliff) {
         Coords high = level(u) > level(v) ? u : v, low = high == u ? v : u;
         return !cliff && level(high) - level(low) == 2 && taken(high) && !plate(high) && shore.family(high) < 0
-              && inside(low) && shore.family(low) < 0;
+              && taken(low) && shore.family(low) < 0;
     }
 
     /**
