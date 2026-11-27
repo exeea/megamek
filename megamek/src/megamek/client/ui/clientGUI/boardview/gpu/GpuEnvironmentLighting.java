@@ -197,6 +197,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     static void register(DefaultShader shader) {
         GpuCrystalTransmission.register(shader);
         GpuSkyVisibility.register(shader);
+        GpuShadowLight.registerFar(shader);
         shader.register("u_shadowStrength", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);

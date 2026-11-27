@@ -4759,7 +4759,7 @@ final class GpuTerrain implements Disposable {
         detailPixelsPerUnit = Float.NaN;
         // A refined chunk casts its terrain at finer detail. The cached shadow serves until refinement settles
         // (GpuTerrainShadows.render): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
-        shadowMap.refined();
+        shadowMap.refined(next.bounds);
         fitShadowBounds();
     }
 
@@ -11385,21 +11385,29 @@ final class GpuTerrain implements Disposable {
             syncHidden();
             indirect.begin(indirectPass);
             indirect.begin(treePass);
-            // The shadow map takes its casters' detail from its own texel, not from the camera's pixels: trees and
-            // scatter at the level their size in texels needs (TreeLod's thresholds), and scatter only where the map
-            // resolves it, as well as where the view shows it. A map's casters are then the same wherever the view
-            // moves at one texel size. A map whose texel spans half a metre or more cannot resolve leaves: its trees
-            // cast the shadow of their second decimated level at most. Alpha-tested foliage drawn into such a map at the
-            // near level was fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
+            // A tree's shadow goes as the tree does: by its size on screen, one tree at a time, not by the map's texel.
+            indirect.minimum(treePass, shadows && shadowPixelsPerUnit > 0
+                  ? .5f * SHADOW_TREE_PIXELS / shadowPixelsPerUnit : 0);
+            // Trees cast at the coarser of the levels their size on screen and in the map's texels take (TreeLod's
+            // thresholds, by a chunk's largest tree): never finer than the view draws them, nor than the map resolves.
+            // A whole board's map resolves finer than its pixels, and its trees cast by texels alone took ten times the
+            // triangles the view drew of them (Valencia whole at 4K). Scatter only where the map resolves it, as well
+            // as where the view shows it. A map whose texel spans half a metre or more cannot resolve leaves: its
+            // trees cast the shadow of their second decimated level at most. Alpha-tested foliage drawn into such a map
+            // at the near level was fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
             float texels = shadows ? shadowMap.resolution() / Math.min(camera.viewportWidth, camera.viewportHeight) : 0;
             int coarsest = shadows && 1 / texels >= BoardRelief.metres(.5f) ? 2 : 0;
             for (Chunk chunk : chunks) {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
-                boolean scatterVisible = includeScatter && !scatterHidden && visible && chunk.scatterVisible
-                      && (!shadows || chunk.scatterDiameter * texels >= 2);
-                boolean standVisible = includeScatter && !scatterHidden && visible && chunk.standVisible
+                // In a shadow map its texel decides scatter, not the view's pixels: the near map's texel follows the
+                // zoom, and the outer map is kept across views.
+                boolean scatterVisible = includeScatter && !scatterHidden && visible
+                      && (chunk.scatterVisible || shadows) && (!shadows || chunk.scatterDiameter * texels >= 2);
+                boolean standVisible = includeScatter && !scatterHidden && visible && (chunk.standVisible || shadows)
                       && (!shadows || chunk.standDiameter * texels >= 2);
-                addStands(chunk, treePass, shadows ? Math.max(TreeLod.level(chunk.treeDiameter * texels, 0), coarsest)
+                int onScreen = shadowPixelsPerUnit > 0 ? TreeLod.level(chunk.treeDiameter * shadowPixelsPerUnit, 0) : 0;
+                addStands(chunk, treePass, shadows
+                      ? Math.max(Math.max(TreeLod.level(chunk.treeDiameter * texels, 0), onScreen), coarsest)
                       : -1, visible, standVisible);
                 if (visible) {
                     Hidden hidden = hidden(chunk);
@@ -11454,8 +11462,15 @@ final class GpuTerrain implements Disposable {
         renderShadows(null, units);
     }
 
+    /** Trees and plants cast no shadow under this many scene pixels across, about where their stands stop drawing. */
+    private static final float SHADOW_TREE_PIXELS = 2.5f;
+    /** The view's scene pixels a world unit at its focus, for the shadow pass (renderDepth); NaN without a view. */
+    private float shadowPixelsPerUnit = Float.NaN;
+
     void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) { updateDetail(view); }
+        shadowPixelsPerUnit = view instanceof BoardProjectionCamera board ? BoardCamera.pixelsPerUnit(board,
+              new Vector3(board.position).mulAdd(board.direction, board.pivotDepth)) : Float.NaN;
         if (lifts != null || !flagRevisions.isEmpty() || !destruction.isEmpty()) {
             // Moving lifts and falling pieces cast like units, over the cached terrain's shadow, which leaves them out.
             units = new ArrayList<>(units);

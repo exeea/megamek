@@ -374,7 +374,9 @@ class GpuDetailSmokeTest {
             assertEquals(0, profiler.getDrawCalls(), "A changed view with the same fitted shadow projection must reuse the map");
             assertArrayEquals(lightMatrix.val, terrain.environment().shadowMap.getProjViewTrans().val,
                   "Skipping the draw must retain the biased light matrix exactly");
-            camera.camera.zoom *= .2f;
+            // Far enough in that the near map no longer holds the whole board (GpuTerrainShadows#fitLayer): a zoom that
+            // still lets it hold the board keeps the map, whose texel is then finer than the view needs.
+            camera.camera.zoom *= .05f;
             camera.camera.update();
             terrain.renderShadows(camera.camera, units);
             assertTrue(profiler.getDrawCalls() > 0, "A changed fitted projection must refresh the map");

@@ -491,6 +491,8 @@ final class GpuIndirectInstances implements Disposable {
          */
         int partBuffer, commandCount;
         float[] culledFor;
+        /** The smallest bounding sphere's radius it draws, world units ({@link #minimum}); 0 for all. */
+        float minRadius;
         /** Whether it was built for the culling pass (its jobs and parts uploaded, its instances left to it). */
         boolean builtCulled;
         /** The keys this pass hides ({@link #hide}) and their revision; the revision its jobs were built for. */
@@ -557,6 +559,7 @@ final class GpuIndirectInstances implements Disposable {
           layout(std430, binding = 5) readonly buffer Parts { ivec4 parts[]; };
           layout(std430, binding = 6) readonly buffer Bounds { vec4 bounds[]; };
           uniform vec4 u_planes[4];
+          uniform float u_minRadius;
           uniform int u_firstPart, u_parts;
           shared uint kept[64];
           shared uint total;
@@ -579,7 +582,7 @@ final class GpuIndirectInstances implements Disposable {
                           vec4 place = source[at], turn = source[at + 1];
                           vec3 centre = placePoint(place, turn, sphere.xyz);
                           float radius = sphere.w * max(abs(place.w), turn.z) * (source[at + 3].x > 0.5 ? SWAY_ROOM : 1.0);
-                          shown = true;
+                          shown = radius >= u_minRadius;
                           for (int p = 0; p < 4; p++) { shown = shown && dot(u_planes[p].xyz, centre) + u_planes[p].w >= -radius; }
                       }
                       kept[local] = shown ? 1u : 0u;
@@ -605,7 +608,7 @@ final class GpuIndirectInstances implements Disposable {
     /** {@code false} draws every instance of the visible snapshots (a comparison); the culling pass runs otherwise. */
     private static final boolean CULLING = !"false".equals(System.getProperty("megamek.gpu.indirectCulling"));
     private static final int MAX_GROUPS = 65535;
-    private final int compact, compactJobs, cull, cullPlanes, cullFirstPart, cullParts;
+    private final int compact, compactJobs, cull, cullPlanes, cullFirstPart, cullParts, cullMinRadius;
     /** The compute passes and multi-draws ({@link #fullContext}); false: the 4.1 way. */
     private final boolean full;
 
@@ -626,6 +629,7 @@ final class GpuIndirectInstances implements Disposable {
         cullPlanes = full ? GL20C.glGetUniformLocation(cull, "u_planes") : -1;
         cullFirstPart = full ? GL20C.glGetUniformLocation(cull, "u_firstPart") : -1;
         cullParts = full ? GL20C.glGetUniformLocation(cull, "u_parts") : -1;
+        cullMinRadius = full ? GL20C.glGetUniformLocation(cull, "u_minRadius") : -1;
         // Record 0 stands for none, and the buffer texture always has a buffer: its programs never find it incomplete.
         records.take(1);
         recordsTexture = GL11C.glGenTextures();
@@ -1055,6 +1059,12 @@ final class GpuIndirectInstances implements Disposable {
     void add(Pass pass, Instances list) { add(pass, list, null); }
 
     /**
+     * The pass draws no instance whose bounding sphere's radius (world units) is under {@code radius}, where the
+     * culling pass runs (the 4.1 way draws them all); 0 for every one.
+     */
+    void minimum(Pass pass, float radius) { passes[pass.ordinal()].minRadius = radius; }
+
+    /**
      * A snapshot this pass draws, those of its parts {@code shown} names by their index among the parts written (null
      * for all): a selection that differs from the last frame's regroups the pass, the list stays as written. The set is
      * the pass's from now on, until its next frame.
@@ -1201,7 +1211,9 @@ final class GpuIndirectInstances implements Disposable {
      * from a buffer of its own (#commands). Nothing where the planes are those it last culled for.
      */
     private void cull(Drawn drawn, Camera camera) {
-        float[] planes = new float[16];
+        // The side planes, and the smallest radius drawn after them: what it was culled for.
+        float[] planes = new float[17];
+        planes[16] = drawn.minRadius;
         for (int side = 0; side < 4; side++) {
             // libGDX's frustum: near, far, then left, right, top and bottom.
             Plane plane = camera.frustum.planes[side + 2];
@@ -1214,7 +1226,8 @@ final class GpuIndirectInstances implements Disposable {
         drawn.culledFor = planes;
         if (drawn.firsts.size == 0) { return; }
         GL20C.glUseProgram(cull);
-        GL20C.glUniform4fv(cullPlanes, planes);
+        GL20C.glUniform4fv(cullPlanes, Arrays.copyOf(planes, 16));
+        GL20C.glUniform1f(cullMinRadius, drawn.minRadius);
         GL30C.glBindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, 0, instances.handle);
         GL30C.glBindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, 1, drawn.output);
         GL30C.glBindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, 2, drawn.jobs);

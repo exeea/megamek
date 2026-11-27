@@ -72,7 +72,8 @@ class GpuShadowCacheSmokeTest {
             var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
             terrain.setAtmosphere(lighting);
             terrain.renderShadows(camera.camera, List.of());
-            assertNull(GpuTestSupport.field(GpuTestSupport.field(terrain, "shadowMap"), "staticShadow"), "Map-only views keep one shadow framebuffer");
+            assertNull(GpuTestSupport.field(GpuTestSupport.field(terrain, "shadowMap"), "farTerrain"),
+                  "A whole-board view draws one map: the near and the outer map are the board-wide fit");
             camera.zoom(.6f);
             // The zoom changes tree levels, which the map picks up at its next redraw: start from that redraw.
             terrain.refreshShadows();
@@ -125,7 +126,9 @@ class GpuShadowCacheSmokeTest {
                 if (step == 7) {
                     assertTrue(cached <= full + 1, "Terrain invalidation may copy its static depth once for moving debris");
                 } else if (step == 5 || step == 6) {
-                    assertEquals(full, cached, "Camera, light and terrain changes must not pay an extra cache copy");
+                    // A refit redraws the map that moved (the outer one may stay), the light both: never more.
+                    assertTrue(cached <= full, "Camera, light and terrain changes must not pay an extra cache copy: "
+                          + cached + " / " + full);
                 }
                 System.out.printf("SHADOW step=%d cached=%d full=%d%n", step, cached, full);
             }
@@ -227,22 +230,30 @@ class GpuShadowCacheSmokeTest {
         return result;
     }
 
+    /** Both maps drawn whole, each into its half of the texture: the near map below, the outer map above. */
     private static void fullPass(GpuTerrain terrain, List<ModelInstance> units) throws ReflectiveOperationException {
-        var shadow = (DirectionalShadowLight) terrain.environment().shadowMap;
+        var shadow = (GpuShadowLight) terrain.environment().shadowMap;
         var draw = GpuTerrain.class.getDeclaredMethod("renderDepth", Camera.class, List.class, ModelBatch.class, boolean.class,
               boolean.class);
         draw.setAccessible(true);
-        // As the full shadow pass draws: shadows on, scatter included.
+        int texels = shadow.getFrameBuffer().getWidth();
+        // As the full shadow pass draws: shadows on, scatter included, a texel of each map's edge left clear.
         shadow.begin();
-        try { draw.invoke(terrain, shadow.getCamera(), units, GpuTestSupport.field(terrain, "depthBatch"), true, true); }
-        finally { shadow.end(); }
+        try {
+            for (int layer = 0; layer < 2; layer++) {
+                Gdx.gl.glViewport(0, layer * texels, texels, texels);
+                Gdx.gl.glScissor(1, layer * texels + 1, texels - 2, texels - 2);
+                draw.invoke(terrain, layer == 0 ? shadow.getCamera() : shadow.far, units,
+                      GpuTestSupport.field(terrain, "depthBatch"), true, true);
+            }
+        } finally { shadow.end(); }
     }
 
     private static byte[] depth(GpuTerrain terrain) { return GpuFamilyAssemblyReview.shadowDepth(terrain); }
 
     /**
-     * The map's trees take their detail from its texel, not from the camera: a zoom that changes the view's tree levels
-     * changes none of the map's depth at the same projection.
+     * The map's trees take the coarser of the view's level and the map's own: a zoom that brings the view's trees
+     * nearer levels changes none of the map's depth at the same projection.
      */
     private static void assertCastersIgnoreTheCameraZoom(GpuTerrain terrain, BoardCamera camera) throws Exception {
         var detail = GpuTerrain.class.getDeclaredMethod("updateDetail", Camera.class);

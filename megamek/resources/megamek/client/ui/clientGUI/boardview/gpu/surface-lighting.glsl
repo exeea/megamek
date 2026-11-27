@@ -53,13 +53,88 @@ float shadowPlane(vec2 offset, vec2 slope) {
 // everything else reads the finest.
 float shadowLevel = 0.0;
 
+// Two sun maps in one texture (GpuTerrainShadows#drawLayers): the near map round the view's focus in its lower half
+// (u_shadowMapProjViewTrans), the outer map round it in its upper half (u_shadowFarProjViewTrans), each square and of
+// the map's texels. Lookups work in one map's own coordinates (shadowLayer: 0 near, 1 outer); only a comparison moves
+// into its half (shadowAtlas). The vertex stage's v_shadowMapUv is the near map's: a lookup reads its position instead.
+uniform mat4 u_shadowFarProjViewTrans;
+float shadowLayer = 0.0;
+
+vec2 shadowDrift();
+float shadowTent(vec3 uv, vec2 slope, float halfWidth, bool wide);
+
+mat4 shadowMatrix() { return shadowLayer < .5 ? u_shadowMapProjViewTrans : u_shadowFarProjViewTrans; }
+
+// A map's coordinates in the texture, held half a texel of the level read inside the map's edge: a comparison never
+// reads the other map.
+vec2 shadowAtlas(vec2 at) {
+    float edge = exp2(shadowLevel) * u_shadowPCFOffset;
+    at = clamp(at, vec2(edge), vec2(1.0 - edge));
+    return vec2(at.x, .5 * (at.y + shadowLayer));
+}
+
+// How much a receiver at position (world) takes from the near map: all of it well inside, none within NEAR_MARGIN of
+// its texels from its edge (the widest tent's reach on its coarsest level), blended across NEAR_BAND of its side
+// between, so no edge shows.
+const float NEAR_MARGIN = 32.0, NEAR_BAND = .05;
+float shadowNear(vec3 position) {
+    vec4 projected = u_shadowMapProjViewTrans * vec4(position, 1.0);
+    vec2 uv = projected.xy / projected.w * .5 + .5;
+    float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+    float margin = NEAR_MARGIN * 2.0 * u_shadowPCFOffset;
+    return smoothstep(margin, margin + NEAR_BAND, edge);
+}
+
+// One map's coordinates at position (world), as the vertex stage's v_shadowMapUv; that map current.
+vec3 shadowLayerUv(float layer, vec3 position) {
+    shadowLayer = layer;
+    vec4 projected = shadowMatrix() * vec4(position, 1.0);
+    vec3 uv = projected.xyz / projected.w * .5 + .5;
+    uv.z = min(uv.z, .998);
+    return uv;
+}
+
+// surfaceVisibility's fixed tent at position, from one map.
+float shadowFixedLayer(float layer, vec3 position) {
+    vec3 uv = shadowLayerUv(layer, position);
+    shadowPlaneDrift = shadowDrift();
+    shadowPlaneLimit = 0.0;
+    float lit = shadowTent(uv, vec2(0.0), 1.5, false);
+    shadowLayer = 0.0;
+    return lit;
+}
+
+// The fixed tent at position: from the near map, the outer one, or both across the band.
+float shadowFixed(vec3 position) {
+    float near = shadowNear(position);
+    float far = near < 1.0 ? shadowFixedLayer(1.0, position) : 1.0;
+    float close = near > 0.0 ? shadowFixedLayer(0.0, position) : 1.0;
+    return shadowVisibility(mix(far, close, near));
+}
+
+// Medium's one bilinear comparison at position (the ice's), from one map.
+float shadowSingleLayer(float layer, vec3 position) {
+    vec3 uv = shadowLayerUv(layer, position);
+    float lit = textureLod(u_shadowTexture, vec3(shadowAtlas(uv.xy), uv.z), 0.0);
+    shadowLayer = 0.0;
+    return lit;
+}
+
+float shadowSingle(vec3 position) {
+    float near = shadowNear(position);
+    float far = near < 1.0 ? shadowSingleLayer(1.0, position) : 1.0;
+    float close = near > 0.0 ? shadowSingleLayer(0.0, position) : 1.0;
+    return mix(far, close, near);
+}
+
 // One hardware comparison at at (shadow-map coordinates), against the receiver's plane there and depth further along
 // it, on level shadowLevel. An explicit level lets taps sit in branches. A comparison's texels lie up to one of its
 // level's texels from it, 2^level of the finest, while the casters' slope bias (shadow-depth.frag) covers one: on a
 // coarser level the receiver's plane stands the rest of its slope nearer the sun, so a slope never shadows itself.
 float shadowTap(vec3 uv, vec2 slope, vec2 at, float depth) {
     float slack = (exp2(shadowLevel) - 1.0) * (abs(slope.x) + abs(slope.y)) * 2.0 * u_shadowPCFOffset;
-    return textureLod(u_shadowTexture, vec3(at, uv.z + depth - slack + shadowPlane(at - uv.xy, slope)), shadowLevel);
+    return textureLod(u_shadowTexture, vec3(shadowAtlas(at), uv.z + depth - slack + shadowPlane(at - uv.xy, slope)),
+          shadowLevel);
 }
 
 // Two adjacent texels' tent weights, first and first + 1 (texel centres at whole numbers of p), as one bilinear
@@ -76,9 +151,9 @@ float shadowMapSize() { return .5 / u_shadowPCFOffset; }
 // The map's depth per unit across it at one distance from the sun: none for depth along the light; for height across
 // the casters' slab (GpuShadowLight.SlabCamera) the drift shadow-depth.frag leaves out of the casters' slope bias.
 vec2 shadowDrift() {
-    vec3 across = vec3(u_shadowMapProjViewTrans[0][0], u_shadowMapProjViewTrans[1][0], u_shadowMapProjViewTrans[2][0]);
-    vec3 up = vec3(u_shadowMapProjViewTrans[0][1], u_shadowMapProjViewTrans[1][1], u_shadowMapProjViewTrans[2][1]);
-    vec3 row = vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2], u_shadowMapProjViewTrans[2][2]);
+    vec3 across = vec3(shadowMatrix()[0][0], shadowMatrix()[1][0], shadowMatrix()[2][0]);
+    vec3 up = vec3(shadowMatrix()[0][1], shadowMatrix()[1][1], shadowMatrix()[2][1]);
+    vec3 row = vec3(shadowMatrix()[0][2], shadowMatrix()[1][2], shadowMatrix()[2][2]);
     return vec2(dot(row, across) / dot(across, across), dot(row, up) / dot(up, up));
 }
 
@@ -255,9 +330,7 @@ vec3 skyReflection(vec3 normal, vec3 view, float roughness, vec3 f0, vec3 ground
 // itself: the casters' slope bias covers the box. The comparisons follow only the map's drift, which that bias leaves out.
 float surfaceVisibility() {
 #ifdef shadowMapFlag
-    shadowPlaneDrift = shadowDrift();
-    shadowPlaneLimit = 0.0;
-    return shadowVisibility(shadowTent(v_shadowMapUv, vec2(0.0), 1.5, false));
+    return shadowFixed(v_cloudPosition);
 #else
     return 1.0;
 #endif
@@ -280,8 +353,8 @@ const float RECEIVER_PLANE_METRES = 1.0;
 // One texel of the shadow map, in world units, along each of its axes: the fit (GpuTerrainShadows) stretches the
 // square map over a view's footprint, so a low sun's map can be twice as fine along one.
 vec2 shadowTexels() {
-    vec3 across = vec3(u_shadowMapProjViewTrans[0][0], u_shadowMapProjViewTrans[1][0], u_shadowMapProjViewTrans[2][0]);
-    vec3 up = vec3(u_shadowMapProjViewTrans[0][1], u_shadowMapProjViewTrans[1][1], u_shadowMapProjViewTrans[2][1]);
+    vec3 across = vec3(shadowMatrix()[0][0], shadowMatrix()[1][0], shadowMatrix()[2][0]);
+    vec3 up = vec3(shadowMatrix()[0][1], shadowMatrix()[1][1], shadowMatrix()[2][1]);
     return 4.0 * u_shadowPCFOffset / max(vec2(length(across), length(up)), 1e-6);
 }
 
@@ -295,7 +368,7 @@ float shadowTexel() { return shadowTexels().x; }
 // view's fit) only softens the shadows a finer one shows, and adds none.
 vec3 shadowLookup(vec3 position, vec3 normal, vec3 light, float texel) {
     float skim = 1.0 - abs(dot(normal, light));
-    vec4 lifted = u_shadowMapProjViewTrans * vec4(position + normal * texel * (.5 + 1.5 * skim) + light * texel * 1.5,
+    vec4 lifted = shadowMatrix() * vec4(position + normal * texel * (.5 + 1.5 * skim) + light * texel * 1.5,
           1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;
     shadowUv.z = min(shadowUv.z, .998);
@@ -310,8 +383,8 @@ vec3 shadowLookup(vec3 position, vec3 normal, vec3 light, float texel) {
 vec2 receiverPlane(vec3 shadowUv, vec3 light, float metre, out float depthPerUnit) {
     vec3 du = dFdx(shadowUv), dv = dFdy(shadowUv);
     float det = du.x * dv.y - du.y * dv.x;
-    depthPerUnit = .5 * abs(dot(vec3(u_shadowMapProjViewTrans[0][2], u_shadowMapProjViewTrans[1][2],
-          u_shadowMapProjViewTrans[2][2]), light));
+    depthPerUnit = .5 * abs(dot(vec3(shadowMatrix()[0][2], shadowMatrix()[1][2],
+          shadowMatrix()[2][2]), light));
     shadowPlaneLimit = RECEIVER_PLANE_METRES * metre * depthPerUnit;
     shadowPlaneDrift = shadowDrift();
     return abs(det) > 1e-14 ? vec2(dv.y * du.z - du.y * dv.z, du.x * dv.z - dv.x * du.z) / det : vec2(0.0);
@@ -390,8 +463,10 @@ float contactShadow(vec3 shadowUv, vec2 slope, float depthPerUnit, float narrowe
 
 // metre: world units per metre. lift: how far the visible surface stands out along normal from the mesh, its relief
 // (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first.
-float sculptShadow(vec3 normal, vec3 light, float metre, float lift, bool receivesSun) {
+// One map's sculptShadow (shadowLayer): its derivatives always, its comparisons only where receivesSun.
+float sculptShadowLayer(float layer, vec3 normal, vec3 light, float metre, float lift, bool receivesSun) {
 #ifdef shadowMapFlag
+    shadowLayer = layer;
     float texel = shadowTexel();
     vec3 receiver = v_cloudPosition + normal * lift;
 #ifdef impostorFlag
@@ -406,11 +481,24 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, bool receiv
     if (!receivesSun) return 1.0;
 #ifdef mediumQualityFlag
     // One bilinear comparison, without looking for what casts the shadow.
-    return shadowVisibility(textureLod(u_shadowTexture, shadowUv, 0.0));
+    return shadowVisibility(textureLod(u_shadowTexture, vec3(shadowAtlas(shadowUv.xy), shadowUv.z), 0.0));
 #else
     // From one texel: the map resolves no finer.
     return contactShadow(shadowUv, slope, depthPerUnit, 1.0);
 #endif
+#else
+    return 1.0;
+#endif
+}
+
+// Both maps' derivatives in uniform control flow, each map's comparisons only where the receiver takes it (shadowNear).
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift, bool receivesSun) {
+#ifdef shadowMapFlag
+    float near = shadowNear(v_cloudPosition + normal * lift);
+    float far = sculptShadowLayer(1.0, normal, light, metre, lift, receivesSun && near < 1.0);
+    float close = sculptShadowLayer(0.0, normal, light, metre, lift, receivesSun && near > 0.0);
+    shadowLayer = 0.0;
+    return mix(far, close, near);
 #else
     return 1.0;
 #endif

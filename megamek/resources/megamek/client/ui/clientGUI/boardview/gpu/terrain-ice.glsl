@@ -132,7 +132,7 @@ void iceOptics(vec3 normal, vec3 geometric, float roughness, vec3 f0, out vec3 l
 #if numDirectionalLights > 0
 #if defined(mediumQualityFlag) && defined(shadowMapFlag)
     // One bilinear comparison, as Medium's ground.
-    float visibility = shadowVisibility(textureLod(u_shadowTexture, v_shadowMapUv, 0.0));
+    float visibility = shadowVisibility(shadowSingle(v_cloudPosition));
 #else
     float visibility = surfaceVisibility();
 #endif

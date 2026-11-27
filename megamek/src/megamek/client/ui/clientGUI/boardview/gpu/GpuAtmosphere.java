@@ -1137,7 +1137,7 @@ final class GpuAtmosphere implements Disposable {
             fogShader.setUniformf("u_hasGeometryShadow", geometryShadow == null ? 0 : 1);
             if (geometryShadow != null) {
                 geometryShadow.getDepthMap().texture.bind(2);
-                fogShader.setUniformMatrix("u_geometryProjection", geometryShadow.getProjViewTrans());
+                fogShader.setUniformMatrix("u_geometryProjection", GpuShadowLight.fogProjection(geometryShadow));
             }
         }
         quad.render(fogShader, GL20.GL_TRIANGLES);

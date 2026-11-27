@@ -631,7 +631,7 @@ class GpuShadingNormalSmokeTest {
         var blocker = new ModelBuilder().createBox(100, 100, 4,
               new Material(ColorAttribute.createDiffuse(Color.WHITE)),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
-        var shadow = new GpuShadowLight(512, 512, 160, 160, 1, 500);
+        var shadow = new GpuShadowLight(512, 160, 160, 1, 500);
         var depthField = GpuTerrain.class.getDeclaredField("depthBatch");
         depthField.setAccessible(true);
         var depth = (ModelBatch) depthField.get(preview); // Borrowed from the real terrain shadow provider.
