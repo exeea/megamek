@@ -443,9 +443,28 @@ public final class UiKit {
      * quarter scale (S1), so the font's scale is multiplied in.
      */
     public static void size(Label label, String font, float size) {
+        com.badlogic.gdx.graphics.g2d.BitmapFont sized = UiTheme.sizedFor(label.getStyle().font, size);
+        if (sized != null) {
+            // Rasterised at that size (UiTheme#sizedFor): drawn at its own scale, which a new display scale keeps.
+            if (label.getStyle().font != sized) {
+                Label.LabelStyle style = new Label.LabelStyle(label.getStyle());
+                style.font = sized;
+                label.setStyle(style);
+            }
+            return;
+        }
         float tableSize = UiTheme.HUD_FONTS.stream().filter(entry -> entry.name().equals(font)).findFirst()
               .orElseThrow().size();
         label.setFontScale(label.getStyle().font.getScaleX() * size / tableSize);
+    }
+
+    /** Every widget under {@code root} lays itself out again: its fonts' glyphs changed (UiTheme#settle). */
+    public static void relayout(com.badlogic.gdx.scenes.scene2d.Group root) {
+        for (Actor child : root.getChildren()) {
+            if (child instanceof com.badlogic.gdx.scenes.scene2d.utils.Layout layout) { layout.invalidate(); }
+            if (child instanceof com.badlogic.gdx.scenes.scene2d.Group group) { relayout(group); }
+        }
+        if (root instanceof com.badlogic.gdx.scenes.scene2d.utils.Layout layout) { layout.invalidateHierarchy(); }
     }
 
     /** A label in a Token v0 type style ({@link UiTheme#TYPE_STYLES}) in the color of {@code role}. */
@@ -644,8 +663,8 @@ public final class UiKit {
     /**
      * A dialog as {@link #dialog(String, Runnable)}; with {@code token}, the Token v0 dialog card: the token panel
      * padded xl above the header and xxl elsewhere, and a header with the title in the {@code headline} type (upper
-     * case in game mode) and a compact close button, xl above the body. Its owner makes it dialog.sm (420) wide or
-     * wider.
+     * case in game mode) and a compact close button (none when {@code close} is null), xl above the body. Its owner
+     * makes it dialog.sm (420) wide or wider.
      */
     public Table dialog(String title, Runnable close, boolean token) {
         if (!token) {
@@ -653,7 +672,9 @@ public final class UiKit {
         }
         Table dialog = panel(true);
         dialog.pad(space("xl"), space("xxl"), space("xxl"), space("xxl"));
-        Table header = tokenHeader(title, null, "headline", closeButton(close, true));
+        // A dialog that wants one of its own buttons has no close button
+        Table header = close == null ? tokenHeader(title, null, "headline")
+              : tokenHeader(title, null, "headline", closeButton(close, true));
         header.padBottom(space("xl"));
         dialog.add(header).growX().row();
         return dialog;

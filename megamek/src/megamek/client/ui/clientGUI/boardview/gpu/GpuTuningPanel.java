@@ -148,7 +148,8 @@ final class GpuTuningPanel implements GpuHud.Component {
         }
         if (!metrics.equals(sized)) {
             sized = metrics;
-            float top = GpuUtilityBar.HEIGHT + GpuUtilityBar.DEV_HEIGHT + 3 * metrics.gap();
+            // One gap below the developer's Tuning pill, which hangs GpuUtilityBar.GAP under the utility plate.
+            float top = 2 * metrics.gap() + GpuUtilityBar.HEIGHT + GpuUtilityBar.GAP + GpuUtilityBar.DEV_HEIGHT;
             root.pad(top, 0, 0, metrics.gap());
             panelCell.width(Math.min(WIDTH, metrics.width() - 2 * metrics.gap()))
                   .maxHeight(metrics.height() - top - BOTTOM);

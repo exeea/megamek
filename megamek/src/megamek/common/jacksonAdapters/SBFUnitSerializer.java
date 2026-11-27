@@ -36,10 +36,13 @@ package megamek.common.jacksonAdapters;
 import static megamek.common.jacksonAdapters.MMUReader.*;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Locale;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.strategicBattleSystems.SBFUnit;
 
 /**
@@ -52,6 +55,11 @@ import megamek.common.strategicBattleSystems.SBFUnit;
  */
 public class SBFUnitSerializer extends StdSerializer<SBFUnit> {
 
+    static final String ENVIRONMENT_SPECIALIZATION = "environmentspecialization";
+    static final String ENEMY_SPECIALIZATION = "enemyspecialization";
+    static final String TACTICAL_SPECIALIZATION = "tacticalspecialization";
+    static final String INITIATIVE_ABILITIES = "initiativeabilities";
+    static final String COMMAND_TIER = "commandtier";
     static final String SBF_TYPE = "sbftype";
     static final String ELEMENTS = "elements";
     static final String PV = "pv";
@@ -77,6 +85,21 @@ public class SBFUnitSerializer extends StdSerializer<SBFUnit> {
         jsonGenerator.writeStringField(TYPE, SBF_UNIT);
         jsonGenerator.writeStringField(GENERAL_NAME, unit.getName());
 
+        if (unit.getEnvironmentSpecialization() != null) {
+            jsonGenerator.writeObjectField(ENVIRONMENT_SPECIALIZATION, unit.getEnvironmentSpecialization());
+        }
+        if (unit.getEnemySpecialization() != null) {
+            jsonGenerator.writeObjectField(ENEMY_SPECIALIZATION, unit.getEnemySpecialization());
+        }
+        if (unit.getTacticalSpecialization() != null) {
+            jsonGenerator.writeObjectField(TACTICAL_SPECIALIZATION, unit.getTacticalSpecialization());
+        }
+        if (!unit.getInitiativeAbilities().isEmpty()) {
+            jsonGenerator.writeObjectField(INITIATIVE_ABILITIES, unit.getInitiativeAbilities());
+        }
+        if (unit.getCommandTier() > 0) {
+            jsonGenerator.writeNumberField(COMMAND_TIER, unit.getCommandTier());
+        }
         if (!hasElements || writeFullStats) {
             if (unit.getSkill() != 4) {
                 jsonGenerator.writeNumberField(SKILL, unit.getSkill());
@@ -105,6 +128,15 @@ public class SBFUnitSerializer extends StdSerializer<SBFUnit> {
             jsonGenerator.writeNumberField(PV, unit.getPointValue());
         }
 
+        if (unit.hasAnySUAOf(BattleForceSUA.COM, BattleForceSUA.LEAD, BattleForceSUA.SCOM)) {
+            jsonGenerator.writeArrayFieldStart("status");
+            for (var role : List.of(BattleForceSUA.COM, BattleForceSUA.LEAD, BattleForceSUA.SCOM)) {
+                if (unit.hasSUA(role)) {
+                    jsonGenerator.writeString(role.name().toLowerCase(Locale.ROOT));
+                }
+            }
+            jsonGenerator.writeEndArray();
+        }
         if (hasElements) {
             provider.defaultSerializeField(ELEMENTS, unit.getElements(), jsonGenerator);
         }

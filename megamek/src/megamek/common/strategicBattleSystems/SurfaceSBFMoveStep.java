@@ -33,17 +33,43 @@
 
 package megamek.common.strategicBattleSystems;
 
+import java.util.Arrays;
+import java.util.List;
+
 import megamek.client.commands.ClientCommand;
 import megamek.common.Hex;
-import megamek.common.Player;
-import megamek.common.board.BoardLocation;
 import megamek.common.units.Terrains;
+import megamek.common.board.BoardLocation;
 
 /**
  * This is an SBF move step that happens on the surface of a hex, i.e. on the ground or, if the destination has water,
  * on the water surface. This means that the elevation at start and end is considered to be 0.
  */
 public class SurfaceSBFMoveStep extends SBFMoveStep {
+
+    private boolean roadBonusEligible;
+    private boolean hostileDeparture;
+    private int arrivalSide = -1;
+
+    int arrivalSide() {
+        return arrivalSide;
+    }
+
+    SurfaceSBFMoveStep fromPassage(SBFGame game, int entrance) {
+        var result = new SurfaceSBFMoveStep(formationId);
+        result.startingPoint = startingPoint;
+        result.destination = destination;
+        result.compile(game, entrance);
+        return result;
+    }
+
+    boolean hadHostileDeparture() {
+        return hostileDeparture;
+    }
+
+    boolean earnsRoadBonus() {
+        return roadBonusEligible;
+    }
 
     protected SurfaceSBFMoveStep(int formationId) {
         super(formationId);
@@ -66,6 +92,10 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
 
     @Override
     protected void compile(SBFGame game) {
+        compile(game, -1);
+    }
+
+    private void compile(SBFGame game, int entrance) {
         super.compile(game);
         if (isIllegal) {
             // A step that is already illegal from basic tests does not need any further treatment
@@ -73,63 +103,72 @@ public class SurfaceSBFMoveStep extends SBFMoveStep {
         }
 
         SBFFormation formation = game.getFormation(formationId).orElseThrow();
-        boolean isNaval = formation.getMovementMode().isDeepWater();
-        boolean isHover = formation.getMovementMode().isHover();
-        boolean isWige = formation.getMovementMode() == SBFMovementMode.WIGE;
-        boolean wheeledOrHover = isHover || formation.getMovementMode().isWheeled();
-
-        boolean isInfantry = formation.isAnyTypeOf(SBFElementType.CI, SBFElementType.BA);
-        boolean isMek = formation.isType(SBFElementType.BM);
-        boolean isVehicle = formation.isType(SBFElementType.V);
-
-        mpUsed = startingPoint.coords().distance(destination.coords());
-        Hex startingHex = game.getBoard(startingPoint.boardId()).getHex(startingPoint.coords());
-        Hex destinationHex = game.getBoard(destination.boardId()).getHex(destination.coords());
-        int levelDifference = Math.abs(destinationHex.getLevel() - startingHex.getLevel());
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.WOODS)) {
-            int woodsLevel = destinationHex.terrainLevel(Terrains.WOODS);
-            mpUsed += wheeledOrHover ? 2 : woodsLevel;
-            mpUsed -= isInfantry ? 1 : 0;
-            isIllegal |= (woodsLevel > 1) && isVehicle;
-            isIllegal |= (woodsLevel == 3) && !isInfantry;
+        Hex from = game.getBoard(startingPoint.boardId()).getHex(startingPoint.coords());
+        Hex to = game.getBoard(destination.boardId()).getHex(destination.coords());
+        List<SBFTerrainMovement> movers = SBFTerrainMovement.of(formation).toList();
+        roadBonusEligible = SBFTerrainMovement.isPaved(from) && SBFTerrainMovement.isPaved(to);
+        int direction = startingPoint.coords().direction(destination.coords());
+        int incoming = (direction + 3) % 6;
+        arrivalSide = to.hasStrategicPassageAt(incoming) ? incoming : -1;
+        boolean leavesPassage = from.hasStrategicPassageAt(entrance) && entrance != direction
+              && !from.hasStrategicPassage(Hex.strategicPassage(entrance, direction));
+        Hex entryTerrain = arrivalSide < 0 ? to : terrainAlongPassage(to);
+        Hex departureTerrain = leavesPassage ? terrainAlongPassage(from) : from;
+        int levels = Math.abs(to.getLevel() - from.getLevel());
+        int elevationCost = 0;
+        // Terrain Modifiers on Movement, p. 166. Each modifier uses the most restrictive mover; a bonus needs them all.
+        var bonuses = SBFTerrainMovement.Bonuses.of(movers);
+        int[] terrain = new int[SBFTerrainMovement.PARTS];
+        for (SBFTerrainMovement mover : movers) {
+            int elevation = mover.elevationCost(levels, game);
+            int[] cost = mover.terrainCost(from, entryTerrain, direction, game, bonuses);
+            if (leavesPassage && cost != null) {
+                // Entering by a cleared side waived the vegetation cost. Pay it once if turning into the woods.
+                int[] wooded = mover.terrainCost(from, from, direction, game, bonuses);
+                int[] clear = mover.terrainCost(from, departureTerrain, direction, game, bonuses);
+                if (wooded == null) {
+                    cost = null;
+                } else if (clear != null) {
+                    for (int part = 0; part < cost.length; part++) {
+                        cost[part] += wooded[part] - clear[part];
+                    }
+                }
+            }
+            if (cost == null || elevation == SBFTerrainMovement.PROHIBITED) {
+                isIllegal = true;
+                return;
+            }
+            elevationCost = Math.max(elevationCost, elevation);
+            for (int part = 0; part < cost.length; part++) {
+                terrain[part] = Math.max(terrain[part], cost[part]);
+            }
+            roadBonusEligible &= mover.earnsRoadBonus();
         }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.JUNGLE)) {
-            int jungleLevel = destinationHex.terrainLevel(Terrains.JUNGLE);
-            mpUsed += wheeledOrHover ? 2 : jungleLevel + 1;
-            isIllegal |= (jungleLevel > 1) && isVehicle;
-            isIllegal |= (jungleLevel == 3) && !isInfantry;
-        }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.RUBBLE)) {
+        mpUsed = Math.max(mpUsed, Arrays.stream(terrain).sum()) + elevationCost;
+        if (to.hasStrategicInferno() && !formation.isAirVehicle()) {
             mpUsed++;
         }
-
-        if (destinationHex.containsAnyTerrainOf(Terrains.ROUGH)) {
-            mpUsed += (wheeledOrHover) ? 2 : 1;
-        }
-
-        if ((destinationHex.terrainLevel(Terrains.WATER) == 0) && isNaval) {
-            isIllegal = true;
-        }
-
-        if (destinationHex.terrainLevel(Terrains.WATER) >= 1) {
-            isIllegal = !isHover && !isNaval && !isWige;
-        }
-
-        mpUsed += levelDifference;
-        isIllegal |= (levelDifference > 2) || ((levelDifference == 2) && !isMek);
-
-        final Player owner = game.getPlayer(formation.getOwnerId());
-        if (game.getActiveFormationsAt(startingPoint).stream().anyMatch(f -> game.areHostile(f, owner))) {
+        isIllegal |= movers.isEmpty();
+        hostileDeparture = game.isHostileActiveFormationAt(startingPoint, formation);
+        if (hostileDeparture) {
             mpUsed++;
         }
     }
 
+    private static Hex terrainAlongPassage(Hex wooded) {
+        Hex clear = wooded.duplicate();
+        clear.removeTerrain(Terrains.WOODS);
+        clear.removeTerrain(Terrains.JUNGLE);
+        clear.removeTerrain(Terrains.FOLIAGE_ELEV);
+        return clear;
+    }
+
     @Override
     public SBFMoveStep copy() {
-        SBFMoveStep step = new SurfaceSBFMoveStep(formationId);
+        SurfaceSBFMoveStep step = new SurfaceSBFMoveStep(formationId);
+        step.roadBonusEligible = roadBonusEligible;
+        step.hostileDeparture = hostileDeparture;
+        step.arrivalSide = arrivalSide;
         step.startingPoint = startingPoint;
         step.destination = destination;
         step.mpUsed = mpUsed;

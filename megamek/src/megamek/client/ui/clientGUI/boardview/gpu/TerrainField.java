@@ -20,20 +20,30 @@ import org.lwjgl.opengl.GL31C;
  * chunk build adds to its solid layer in place of today's sculpted ground ({@code GpuTerrain#collectTile}); a hex's
  * {@link BoardSurface} is an adapter over its block. This class is the GPU side: the vertex layout, the materials, the
  * morph's program text (field-morph.glsl, only in field programs) and its per-draw weights.
- * The field takes dry natural hexes (no water, roads, paving, ramps or bridges, which keep today's geometry).
+ * The field takes dry natural hexes, their roads and rails included (no water, paving or bridges, which keep today's
+ * geometry).
  */
 final class TerrainField {
     static final boolean ON = Boolean.getBoolean("megamek.gpu.terrainField");
     /** A field material's id marker: its meshes are in {@link #LAYOUT}. */
-    private static final String FIELD = "~field";
+    private static final String FIELD = "~field", DRAPED = "~draped";
     /**
      * The field's vertex layout: today's sculpted attributes, then the step role and rockiness (four normalized bytes)
      * and the morph's coarse parent (offset x, y, z; packed normal and neighbour). Written by {@link ChunkMesh}.
+     * libGDX keys a mesh's attributes by usage and unit: each generic one has its own unit, its location's number.
      */
     static final VertexAttributes LAYOUT = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.ColorPacked(),
           VertexAttribute.Normal(), VertexAttribute.TexCoords(0),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 4, GL20.GL_UNSIGNED_BYTE, true, "a_fieldRole"),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_fieldParent"));
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, GL20.GL_UNSIGNED_BYTE, true, "a_fieldRole", 13),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_fieldParent", 14));
+    /**
+     * A field hex with cover weights (FieldCover, ChunkMesh#COVER_FLOATS): LAYOUT and three of four normalized bytes,
+     * the weights on the draw's entries, the coarse parent's, and the cut (authored transition, foot entries).
+     */
+    static final VertexAttributes COVER_LAYOUT = new VertexAttributes(VertexAttribute.Position(),
+          VertexAttribute.ColorPacked(), VertexAttribute.Normal(), VertexAttribute.TexCoords(0), bytes("a_fieldRole", 13),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_fieldParent", 14), bytes("a_fieldCover", 11),
+          bytes("a_fieldCoverParent", 9), bytes("a_fieldCoverCut", 10));
     /**
      * The binding of the morph's block (FieldMorph, std140, three vec4 a draw). Uniform-block bindings so far: 1 and 2
      * the material cache's page tables (GpuMaterialCache), 3 the compact ground's table (GroundFamilies), 7 this. Part 2
@@ -42,6 +52,8 @@ final class TerrainField {
     static final int MORPH_BINDING = 7;
     /** The prefix of a field program: its flag and the field attributes' fixed locations (one numbering, design 5). */
     static final String PREFIX = "#define fieldMorphFlag\n#define FIELD_ROLE_LOCATION 13\n#define FIELD_PARENT_LOCATION 14\n";
+    private static final String COVER_PREFIX = "#define FIELD_COVER_LOCATION 11\n#define FIELD_COVER_PARENT_LOCATION 9\n"
+          + "#define FIELD_COVER_CUT_LOCATION 10\n";
     private static final Pattern POSITION = Pattern.compile("\\ba_position\\b"), NORMAL = Pattern.compile("\\ba_normal\\b");
 
     private TerrainField() { }
@@ -53,7 +65,37 @@ final class TerrainField {
         return copy;
     }
 
+    /**
+     * {@code material} for what is draped on chunk {@code chunk}'s field hexes (FieldDrape): a field material whose
+     * meshes keep their own layout and add a_fieldParent ({@link #layout}).
+     */
+    static Material draped(Material material, int chunk) {
+        Material copy = new Material(material);
+        copy.id = material.id + DRAPED + FIELD + chunk;
+        return copy;
+    }
+
+    /** A field material's layout: the ground's, or a draped layer's own {@code attributes} and a_fieldParent. */
+    static VertexAttributes layout(Material material, VertexAttributes attributes) {
+        if (!material.id.contains(DRAPED)) { return material.has(GpuSurfaceBlend.TYPE) ? COVER_LAYOUT : LAYOUT; }
+        VertexAttribute[] all = new VertexAttribute[attributes.size() + 1];
+        for (int i = 0; i < attributes.size(); i++) { all[i] = attributes.get(i).copy(); }
+        // libGDX tells generic attributes apart by their unit: this one takes its location as its unit.
+        all[attributes.size()] = new VertexAttribute(VertexAttributes.Usage.Generic, FieldDrape.FLOATS, "a_fieldParent", 14);
+        return new VertexAttributes(all);
+    }
+
     static boolean isField(Material material) { return material.id.contains(FIELD); }
+
+    /** A program's field prefix: none, the field's, or with cover weights (a blend palette) the cover's too. */
+    static String prefix(Material material) {
+        if (!isField(material)) { return ""; }
+        return material.has(GpuSurfaceBlend.TYPE) ? PREFIX + COVER_PREFIX : PREFIX;
+    }
+
+    private static VertexAttribute bytes(String name, int location) {
+        return new VertexAttribute(VertexAttributes.Usage.Generic, 4, GL20.GL_UNSIGNED_BYTE, true, name, location);
+    }
 
     /** The chunk a field material draws (its weights' record), or -1. */
     static int chunk(Material material) {
@@ -74,7 +116,8 @@ final class TerrainField {
         int body = source.indexOf('{', main) + 1;
         String start = "\n\tvec3 fieldPosition = a_position;\n\tfloat fieldWeight = fieldMorphWeight(fieldPosition, FIELD_EYE);\n"
               + "\tfieldPosition += a_fieldParent.xyz * (1.0 - fieldWeight);\n#if defined(normalFlag) && !defined(fieldDepthOnly)\n"
-              + "\tvec3 fieldNormal = normalize(mix(fieldParentNormal(uint(a_fieldParent.w)), a_normal, fieldWeight));\n#endif\n";
+              + "\tvec3 fieldNormal = normalize(mix(fieldParentNormal(uint(a_fieldParent.w)), a_normal, fieldWeight));\n#endif\n"
+              + "#ifdef FIELD_COVER_LOCATION\n\tfieldCoverWeights(fieldWeight);\n#endif\n";
         String rest = NORMAL.matcher(POSITION.matcher(source.substring(body)).replaceAll("fieldPosition")).replaceAll("fieldNormal");
         return source.substring(0, main) + GpuShaderSource.read("field-morph.glsl") + "\n" + source.substring(main, body)
               + start + rest;

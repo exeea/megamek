@@ -69,7 +69,7 @@ public enum BattleForceSUA {
     CRW, CR, DUN, EE, FC, FF, MTN, OVL, PAR, TSMX, RCA, RFA, HTC, TRN, SUBS, SUBW, JMPS, JMPW,
     CAP, SCAP, FUEL, MSL,
     // SBF
-    AC3, COM, SBF_OMNI,
+    AC3, COM, SCOM, SBF_OMNI,
     // Placeholder for STD (Standard) damage on large AS elements with firing arcs:
     STD,
     // Placeholders for additional unit info not otherwise present in the AS element
@@ -92,7 +92,7 @@ public enum BattleForceSUA {
         // This is used for parsing an SUA from a string such as "JMPS2" where JMP would also match the text start
 
         AS_SUA_SORTED = Arrays.stream(values())
-              .filter(sua -> !sua.isAnyOf(AC3, COM, SBF_OMNI))
+              .filter(sua -> !sua.isAnyOf(AC3, COM, SCOM, SBF_OMNI))
               .map(BattleForceSUA::name)
               .sorted(Comparator.comparingInt(String::length).reversed())
               .toArray(String[]::new);

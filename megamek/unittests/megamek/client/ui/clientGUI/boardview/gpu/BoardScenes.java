@@ -76,12 +76,18 @@ final class BoardScenes {
               List.of(), List.of(), liquid, null);
     }
 
-    static BoardScene scene(Function<Coords, BoardScene.Tile> tiles) {
+    static BoardScene scene(Function<Coords, BoardScene.Tile> tiles) { return scene(0, tiles); }
+
+    /**
+     * A board of its own. A game's reeds are its first scene's (GpuBoardState keeps them per board id and size): a
+     * terrain shown another ground under the same id keeps the first one's planting.
+     */
+    static BoardScene scene(int boardId, Function<Coords, BoardScene.Tile> tiles) {
         List<BoardScene.Tile> result = new ArrayList<>();
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 9; y++) { result.add(tiles.apply(new Coords(x, y))); }
         }
-        return new BoardScene(0, 9, 9, result, List.of(), List.of(), -1, "", List.of());
+        return new BoardScene(boardId, 9, 9, result, List.of(), List.of(), -1, "", List.of());
     }
 
     static BoardScene.Tile tile(Coords coords, BoardRoad.Kind road, int exits, int level, BoardScene.Surface family) {
@@ -922,7 +928,7 @@ final class BoardScenes {
           BoardBackdrop backdrop, MinimapTerrain minimap, int roadCuts, megamek.common.board.RailRoute.Cuts railCuts) {
         return new BoardScene.Tile(coords, new BoardScene.Tile.Ground(elevation, waterDepth, frozen, roadExits,
               surface, liquid, road, biome, cliffTopExits, bare, groundCover, ultraSublevel, appearance,
-              deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, roadCuts, railCuts),
+              deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, roadCuts, railCuts, false),
               features, cover, barren, blackIce, text, tileset, tilesetScenery, fireSmoke, impassable, minimap);
     }
 }

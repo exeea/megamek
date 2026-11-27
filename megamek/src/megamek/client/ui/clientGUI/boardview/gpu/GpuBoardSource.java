@@ -31,9 +31,13 @@ import javax.swing.Timer;
 import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardViewsContainer;
+import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
+import megamek.client.ui.clientGUI.MegaMekGUI;
+import megamek.client.ui.clientGUI.SBFClientGUI;
 import megamek.client.ui.clientGUI.UnitOwnerColors;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -43,7 +47,6 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.TacticalStyle;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentHelper;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -185,6 +188,10 @@ final class GpuBoardSource implements BoardSource {
     private long collapseHeldSince;
     private final Timer timer;
     private final GameListenerAdapter gameListener;
+    /** An SBF game's formations, status and reports; null for a Total Warfare game. */
+    private final @Nullable GpuSbfCapture sbf;
+    /** The SBF client GUI whose keys this board forwards; null for a Total Warfare game. */
+    private final @Nullable SBFClientGUI sbfGui;
     private final BoardListenerAdapter boardListener;
     private final IPreferenceChangeListener preferenceListener = event -> {
         if (ClientPreferences.MAP_TILESET.equals(event.getName())) {
@@ -569,6 +576,14 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public GpuBoardSource(BoardClientState view, Supplier<JComponent> phasePanel) {
+        this(view, phasePanel, null);
+    }
+
+    /** The board of an SBF game when {@code sbfGui} is given: its formations stand in for the game's units. */
+    public GpuBoardSource(BoardClientState view, Supplier<JComponent> phasePanel, @Nullable SBFClientGUI sbfGui) {
+        this.sbfGui = sbfGui;
+        sbf = sbfGui == null ? null : new GpuSbfCapture(sbfGui.getClient().getGame(),
+              () -> sbfGui.getClient().getLocalPlayerNumber());
         requireSwingThread();
         this.view = view;
         this.phasePanel = phasePanel;
@@ -743,14 +758,11 @@ final class GpuBoardSource implements BoardSource {
         };
         // Everything that registers a listener comes last, next to the failure cleanup below.
         preview = new GpuFirePreview(view.game, this::refresh, this::acceptsInput, GpuFirePreview.SLICE_NANOS);
-        chat = new GpuChat(this);
+        chat = new GpuChat(this, sbfGui == null ? null : sbfGui.getClient());
         view.game.addGameListener(gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
         preferences.addPreferenceChangeListener(preferenceListener);
-        timer = new Timer(100, event -> {
-            this.view.advanceOverlays(100);
-            refresh();
-        });
+        timer = new Timer(100, event -> refresh());
         timer.setCoalesce(true);
         try {
             refresh();
@@ -1785,6 +1797,9 @@ final class GpuBoardSource implements BoardSource {
                 }
             }
         }
+        if (sbf != null) {
+            units.addAll(sbf.units(view.getBoardId()));
+        }
         if (GpuUnitModels.ENABLED && GUIPreferences.getInstance().getShowWrecks()) {
             // BoardClientState already owns which removed units leave wrecks, including infantry/CVEP exceptions.
             var live = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
@@ -1825,7 +1840,8 @@ final class GpuBoardSource implements BoardSource {
         MovePath path = panel instanceof MovementDisplay movement ? movement.getPlannedMovement() : null;
         int actorId = actions.actorId();
         GameTurn activeTurn = activeTurn();
-        GpuBattleStatus.Snapshot status = battleStatus.capture(view.game, view.getLocalPlayer(), activeTurn,
+        GpuBattleStatus.Snapshot status = sbf != null ? sbf.status(actorId)
+              : battleStatus.capture(view.game, view.getLocalPlayer(), activeTurn,
               actorId, this::visible, this::identified,
               entity -> unitImage(entity, -1, !identified(entity), usedImages));
         unitImages.keySet().retainAll(usedImages.keySet());
@@ -1834,18 +1850,25 @@ final class GpuBoardSource implements BoardSource {
         List<BoardScene.Command> nextGlobal = new ArrayList<>(actions.globalCommands());
         if (view.getClientgui() != null) {
             var gui = view.getClientgui();
-            List<BoardScene.Command> boards = gui.boardStates().stream().map(boardView -> new BoardScene.Command(
-                  "Map " + boardView.getBoardId(), true, () -> SwingUtilities.invokeLater(() -> {
-                      if (acceptsInput()) {
-                          gui.showBoardView(boardView.getBoardId());
-                          refresh();
-                      }
-                  }))).toList();
+            // Each map by its board's name, with its number and, for an embedded board, where it lies (as the map tabs)
+            List<BoardScene.Command> boards = gui.boardStates().stream().map(boardView -> {
+                int boardId = boardView.getBoardId();
+                String name = gui.getClient().getGame().getBoard(boardId).getBoardName();
+                return new BoardScene.Command("Map " + boardId,
+                      name == null || name.isBlank() ? "Map " + boardId : name,
+                      BoardViewsContainer.boardDetail(gui.getClient().getGame(), boardId), true, false, List.of(),
+                      () -> SwingUtilities.invokeLater(() -> {
+                          if (acceptsInput()) {
+                              gui.showBoardView(boardId);
+                              refresh();
+                          }
+                      }));
+            }).toList();
             nextGlobal.add(new BoardScene.Command("boards", "Maps", "", true, false, boards, () -> { }));
         }
         HoverPoint pointer = hoverPoint;
         Coords tipHex = contextCoords == null ? pointer.coords() : contextCoords;
-        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(tipHex));
+        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(tipHex, sbf == null));
         String nextDetails = tipHex != null && board.contains(tipHex)
               ? hexDetails(board.getHex(tipHex), view.getClientgui(), view.getBoardId()) : "";
         // The movement plan before the tactical capture, which leaves out what the plan draws (G4).
@@ -1871,7 +1894,7 @@ final class GpuBoardSource implements BoardSource {
               view.electronicWarfare(), designations(), starShells());
         captureWorkGhosts(board, units);
         // The report log before the chat, whose round lines read it with the status (plan O6).
-        GpuReportLog.Snapshot log = captureReports();
+        GpuReportLog.Snapshot log = sbf != null ? sbf.reports() : captureReports();
         chat.roundLines(status, log);
         // The other HUD panels, in this order. The fire preview follows the own focus unit, else the acting unit; the
         // fire orders show its draft read-only on another player's turn.
@@ -1904,11 +1927,15 @@ final class GpuBoardSource implements BoardSource {
             nextContext = new BoardScene.Context(contextCoords, contextUnitId,
                   actions.contextCommands(contextCoords, contextUnitId, tools), contextSelectionCleared);
         }
-        status = battleStatus.arcs(arcTarget(status, hover, panels));
+        if (sbf == null) {
+            // The enemy's arcs are the TW status's own (an SBF formation has no facing)
+            status = battleStatus.arcs(arcTarget(status, hover, panels));
+        }
         Entity actor = view.game.getEntity(actorId);
         boolean knownActor = actor != null && identified(actor);
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip, nextDetails,
-              view.getCenterRequest(), boardGeneration, knownActor ? actor.getShortName() : "",
+              view.getCenterRequest(), boardGeneration,
+              sbf != null ? sbf.name(actorId) : knownActor ? actor.getShortName() : "",
               atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), log, status, panels, view.getGpuBoardState());
     }
 
@@ -2062,7 +2089,7 @@ final class GpuBoardSource implements BoardSource {
     /** EDT: the log of the game's reports, with the artillery rounds in the air the Rounds in the Air window lists. */
     private GpuReportLog.Snapshot captureReports() {
         return reports.capture(view.game.getAllReports(), view.game.getRoundCount(), view.game.getPhase(),
-              RoundsInAirDialog.rows(view.game), this::reportIcon);
+              RoundsInAir.rows(view.game, view.getLocalPlayer()), this::reportIcon);
     }
 
     /** EDT: {@code id} while that unit exists and passes {@code check} now, else {@code Entity.NONE}. */
@@ -2204,11 +2231,12 @@ final class GpuBoardSource implements BoardSource {
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 
-    /** Raise the Legacy 2D unit overview's SELECT_UNIT event; the phase display decides what selecting means. */
+    /** Raise the SELECT_UNIT board event; the phase display decides what selecting means. */
     void selectUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
-            if (entity != null && identified(entity)) {
+            boolean formation = acceptsInput() && sbf != null && !sbf.name(id).isEmpty();
+            if (formation || entity != null && identified(entity)) {
                 view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, id));
                 requestedCenter();
                 refresh();
@@ -2216,7 +2244,7 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
-    /** Centre on an own or visible unit as the Legacy 2D unit overview does; an own unit's other board is shown. */
+    /** Centre on an own or visible unit; an own unit's other board is shown. */
     void locateUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
@@ -2747,11 +2775,13 @@ final class GpuBoardSource implements BoardSource {
 
     public void key(int keyCode, boolean down, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && view.getClientgui() != null && !view.getClientgui().shouldIgnoreHotKeys()) {
-                KeyEvent event = new KeyEvent(view.getClientgui().getFrame(),
+            AbstractClientGUI owner = view.getClientgui() != null ? view.getClientgui() : sbfGui;
+            if (acceptsInput() && owner != null && !owner.shouldIgnoreHotKeys()) {
+                KeyEvent event = new KeyEvent(owner.getFrame(),
                       down ? KeyEvent.KEY_PRESSED : KeyEvent.KEY_RELEASED, System.currentTimeMillis(), modifiers,
                       keyCode, KeyEvent.CHAR_UNDEFINED);
-                var controller = view.getClientgui().controller;
+                var controller = view.getClientgui() != null ? view.getClientgui().controller
+                      : MegaMekGUI.getKeyDispatcher();
                 boolean handled = controller != null && controller.dispatchKeyEvent(event);
                 // The HUD's chat field takes the typed text; a key no binding handled may be a menu accelerator.
                 if (down && !handled) {
@@ -2767,6 +2797,8 @@ final class GpuBoardSource implements BoardSource {
             var gui = view.getClientgui();
             if (gui != null && gui.controller != null) {
                 gui.controller.stopAllRepeating();
+            } else if (sbfGui != null && MegaMekGUI.getKeyDispatcher() != null) {
+                MegaMekGUI.getKeyDispatcher().stopAllRepeating();
             }
         });
     }
@@ -2776,7 +2808,8 @@ final class GpuBoardSource implements BoardSource {
      * A hex's lines of MegaMek's hex tooltip below its terrain ({@link HexTooltip#getHexTip}): its building, bridge or
      * fuel tank with height and CF, minefields, objects on the ground, clearing and bridge-building work; one a line.
      */
-    static String hexDetails(Hex hex, ClientGUI gui, int boardId) {
+    static String hexDetails(@Nullable Hex hex, ClientGUI gui, int boardId) {
+        if (hex == null) { return ""; }
         return GpuBoardActions.plainText(HexTooltip.getHexTip(hex, gui == null ? null : gui.getClient(), boardId))
               .lines().map(String::strip).filter(line -> !line.isEmpty()).collect(Collectors.joining("\n"));
     }
@@ -2836,6 +2869,9 @@ final class GpuBoardSource implements BoardSource {
     public GpuAtmosphereControls atmosphere() { return atmosphere; }
 
     public boolean isGameplay() { return true; }
+
+    /** Whether this is an SBF game's board, whose every left click is MegaMek's board click on its hex. */
+    boolean strategic() { return sbf != null; }
 
     @Override
     public List<BoardScene.Unit> reserveUnits() { return reserve; }

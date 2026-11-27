@@ -65,6 +65,7 @@ public class TriggerDeserializer extends StdDeserializer<Trigger> {
     private static final String TYPE_UNIT_POSITION = "position";
     private static final String TYPE_UNITS_POSITION = "positions";
     private static final String TYPE_BATTLEFIELD_CONTROL = "battlefieldcontrol";
+    private static final String OBJECTIVE = "objective";
     private static final String PLAYER = "player";
     private static final String COUNT = "count";
     private static final String AT_MOST = "atmost";
@@ -110,6 +111,10 @@ public class TriggerDeserializer extends StdDeserializer<Trigger> {
             case TYPE_KILLED_UNITS -> parseKilledUnitsTrigger(node);
             case TYPE_KILLED_UNIT -> parseKilledUnitTrigger(node);
             case TYPE_BATTLEFIELD_CONTROL -> new BattlefieldControlTrigger();
+            case "objectivecaptured" -> {
+                requireFields("Objective captured", node, OBJECTIVE);
+                yield new SBFObjectiveCapturedTrigger(node.get(OBJECTIVE).asText(), node.path(PLAYER).asText());
+            }
             case TYPE_UNIT_POSITION -> parseUnitPositionTrigger(node);
             case TYPE_UNITS_POSITION -> parseUnitsPositionTrigger(node);
             case NOT -> parseNotTrigger(node);

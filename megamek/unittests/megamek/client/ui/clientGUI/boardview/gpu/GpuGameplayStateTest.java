@@ -20,14 +20,10 @@ import javax.swing.Timer;
 import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
-import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -74,13 +70,25 @@ class GpuGameplayStateTest {
     }
 
     @Test
+    void unloadedTerrainHasAnEmptyTooltip() throws Exception {
+        var preferences = GUIPreferences.getInstance();
+        boolean previous = preferences.getShowMapHexPopup();
+        Game game = new Game();
+        game.setBoard(0, new Board(3, 3));
+        try (var state = new BoardClientState(game, null, null, 0, null)) {
+            preferences.setShowMapHexPopup(true);
+            assertEquals("", state.getHexTooltip(new Coords(1, 1)));
+            assertEquals("", state.getHexTooltip(new Coords(4, 4)));
+            assertEquals("", GpuBoardSource.hexDetails(game.getBoard().getHex(1, 1), null, 0));
+        } finally {
+            preferences.setShowMapHexPopup(previous);
+        }
+    }
+
+    @Test
     void gameplayCaptureSelectionMovementAndTooltipsConstructNoLegacy2DRenderer() throws Exception {
         onClient(() -> {
-            try (var views = mockConstruction(BoardView.class);
-                  var panels = mockConstruction(BoardViewPanel.class);
-                  var units = mockConstruction(EntitySprite.class);
-                  var isometric = mockConstruction(IsometricSprite.class);
-                  var session = Session.create()) {
+            try (var session = Session.create()) {
                 var state = session.state();
                 assertEquals(1, session.source().takeFrame().scene().units().size());
                 state.select(session.unit().getPosition());
@@ -95,17 +103,17 @@ class GpuGameplayStateTest {
                 session.game().processGameEvent(new GameEntityChangeEvent(session.game(), session.unit()));
                 session.source().refresh();
                 assertNotNull(session.source().takeFrame().scene());
-                assertTrue(views.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
-                assertTrue(units.constructed().isEmpty());
-                assertTrue(isometric.constructed().isEmpty());
+
+
+
+
             }
             return null;
         });
     }
 
     @Test
-    void closingLegacy2DRendererRetainsSharedSelectionListenersAndTacticalState() throws Exception {
+    void refreshRetainsSharedSelectionListenersAndTacticalState() throws Exception {
         onClient(() -> {
             try (var session = Session.create()) {
                 var state = session.state();
@@ -114,10 +122,8 @@ class GpuGameplayStateTest {
                 var listener = mock(BoardViewListenerAdapter.class);
                 state.addBoardViewListener(listener);
                 long revision = state.getRevision();
-                BoardView legacy2D = new BoardView(state, null, state.getClientgui());
-                legacy2D.getPanel().repaint();
-                assertEquals(revision, state.getRevision(), "Swing repaint must not invalidate native tactical state");
-                legacy2D.dispose();
+                session.source().refresh();
+                assertEquals(revision, state.getRevision());
                 assertFalse(state.isClosed());
                 assertEquals(selected, state.getSelected());
                 state.select(new Coords(5, 4));
@@ -147,7 +153,7 @@ class GpuGameplayStateTest {
     void nativeVisibilityRefreshesWhenTerrainChangesWithoutALegacy2DRenderer() throws Exception {
         try (var options = new GpuFieldOfViewTest.Options()) {
             onClient(() -> {
-                try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
+                try (var session = Session.create()) {
                     var board = session.game().getBoard();
                     var target = new Coords(6, 3);
                     session.state().select(session.unit().getPosition());
@@ -167,7 +173,7 @@ class GpuGameplayStateTest {
                     session.source().refresh();
                     assertEquals(BoardFieldOfView.Visibility.BLOCKED,
                           GpuFieldOfViewTest.at(session.source().takeFrame().scene().fieldOfView(), target).visibility());
-                    assertTrue(views.constructed().isEmpty());
+
                 }
                 return null;
             });
@@ -278,10 +284,6 @@ class GpuGameplayStateTest {
             try (var session = Session.create();
                   var replacement = new BoardClientState(session.game(), null, session.state().getClientgui(), 0,
                         session.state().getTilesetManager())) {
-                var oldOverlay = mock(IDisplayable.class);
-                var newOverlay = mock(IDisplayable.class);
-                session.state().addOverlay(oldOverlay);
-                replacement.addOverlay(newOverlay);
                 long generation = session.source().takeFrame().boardGeneration();
                 when(session.state().getClientgui().getCurrentBoardState()).thenReturn(Optional.of(replacement));
                 session.source().refresh();
@@ -289,8 +291,6 @@ class GpuGameplayStateTest {
                 for (var tick : timer.getActionListeners()) {
                     tick.actionPerformed(null);
                 }
-                verify(newOverlay).setIdleTime(100, true);
-                verify(oldOverlay, never()).setIdleTime(anyLong(), anyBoolean());
                 assertTrue(session.source().takeFrame().boardGeneration() > generation,
                       "State replacement must reject old input even when the Board object is unchanged");
             }
@@ -337,22 +337,6 @@ class GpuGameplayStateTest {
         } finally {
             onClient(() -> { session.close(); return null; });
         }
-    }
-
-    @Test
-    void printableExportUsesSharedArtworkAndLeavesInteractiveStateIntact() throws Exception {
-        onClient(() -> {
-            try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
-                var before = session.source().takeFrame().scene();
-                var image = session.state().getEntireBoardImage(false);
-                assertEquals((8 - 1) * 63 + 84, image.getWidth());
-                assertTrue(image.getHeight() >= 8 * 72);
-                assertTrue(views.constructed().isEmpty());
-                session.source().refresh();
-                assertSame(before.units().getFirst().annotations(), session.source().takeFrame().scene().units().getFirst().annotations());
-            }
-            return null;
-        });
     }
 
     private static Timer captureTimer(GpuBoardSource source) throws ReflectiveOperationException {

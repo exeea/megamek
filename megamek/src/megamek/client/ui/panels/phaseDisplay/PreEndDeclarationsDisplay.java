@@ -1208,7 +1208,6 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
                     .map(building -> (InfantryActionStrengths.defends(localPlayer, building) ? "defends "
                           : "attacks ") + building.getShortName())
                     .toList());
-        clientgui.maybeShowUnitDisplay();
         setTarget(null);
         selectingDeployBridgeHex = false;
 

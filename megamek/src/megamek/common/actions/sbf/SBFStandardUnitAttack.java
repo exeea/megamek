@@ -33,11 +33,13 @@
 
 package megamek.common.actions.sbf;
 
+import java.util.List;
 import java.util.Optional;
 
 import megamek.common.alphaStrike.ASRange;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFUnit;
 import megamek.logging.MMLogger;
 import megamek.server.sbf.SBFActionHandler;
 import megamek.server.sbf.SBFGameManager;
@@ -46,6 +48,10 @@ import megamek.server.sbf.SBFStandardUnitAttackHandler;
 public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
     private static final MMLogger logger = MMLogger.create(SBFStandardUnitAttack.class);
 
+    public enum WeaponMode { STANDARD, INDIRECT, TORPEDO, TAG }
+
+    private final WeaponMode weaponMode;
+    private final int spotterId;
     private final int unitNumber;
     private final ASRange range;
 
@@ -58,7 +64,14 @@ public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
      * @param targetId    The target's ID
      */
     public SBFStandardUnitAttack(int formationId, int unitNumber, int targetId, ASRange range) {
+        this(formationId, unitNumber, targetId, range, WeaponMode.STANDARD, -1);
+    }
+
+    public SBFStandardUnitAttack(int formationId, int unitNumber, int targetId, ASRange range, WeaponMode weaponMode,
+          int spotterId) {
         super(formationId, targetId);
+        this.weaponMode = weaponMode;
+        this.spotterId = weaponMode == WeaponMode.INDIRECT ? spotterId : -1;
         this.unitNumber = unitNumber;
         this.range = range;
     }
@@ -73,8 +86,45 @@ public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
         return unitNumber;
     }
 
+    public WeaponMode getWeaponMode() {
+        return weaponMode == null ? WeaponMode.STANDARD : weaponMode;
+    }
+
+    @Override
+    public List<Integer> referencedIds() {
+        return getWeaponMode() == WeaponMode.INDIRECT ? List.of(getTargetId(), getSpotterId()) : List.of(getTargetId());
+    }
+
+    public int getSpotterId() {
+        return spotterId;
+    }
+
     public ASRange getRange() {
         return range;
+    }
+
+    /** IO:BF pp. 170, 173: a Unit's attack value at range, including its current critical and morale effects. */
+    public static int damageAtRange(SBFFormation attacker, SBFUnit unit, ASRange range, int round) {
+        if (range == ASRange.EXTREME) {
+            return Math.max(0, unit.getCurrentDamage().L().damage - 1);
+        }
+        int damage = unit.getCurrentDamage().getDamage(range).damage;
+        return damage + (((range == ASRange.SHORT) && attacker.hasEnragedDamageBonus(round)) ? 1 : 0);
+    }
+
+    /** Standard underwater weapons engage only at Medium or longer and inflict half damage (IO:BF p. 171). */
+    public static int standardWeaponDamage(SBFGame game, SBFFormation attacker, SBFUnit unit, ASRange range) {
+        int damage = damageAtRange(attacker, unit, range, game.getCurrentRound());
+        return unit.isUnderwater(game, attacker) ? (range == ASRange.SHORT ? 0 : damage / 2) : damage;
+    }
+
+    public int weaponDamage(SBFGame game, SBFFormation attacker, SBFUnit unit, ASRange actualRange) {
+        return switch (getWeaponMode()) {
+            case TAG -> 0;
+            case INDIRECT -> Math.max(0, unit.getIF().damage - unit.getDamageCrits());
+            case TORPEDO -> Math.max(0, unit.getTOR().getDamage(actualRange).damage - unit.getDamageCrits());
+            case STANDARD -> standardWeaponDamage(game, attacker, unit, actualRange);
+        };
     }
 
     @Override
@@ -98,6 +148,8 @@ public class SBFStandardUnitAttack extends AbstractSBFAttackAction {
         } else if ((getUnitNumber() >= possibleAttacker.get().getUnits().size())
               || (getUnitNumber() < 0)) {
             logger.error("SBF Unit not found! {}", this);
+            return false;
+        } else if (possibleAttacker.get().isEmbarked() || possibleTarget.get().isEmbarked()) {
             return false;
         } else if (possibleTarget.get().getUnits().isEmpty()) {
             logger.error("Target has no units! {}", this);

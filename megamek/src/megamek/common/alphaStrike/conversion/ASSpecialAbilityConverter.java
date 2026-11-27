@@ -149,6 +149,9 @@ public class ASSpecialAbilityConverter {
             assign(misc, ECM);
             assign(misc, LPRB);
         } else if (miscType.isAnyOf(Sensor.BAP, Sensor.BAPP, Sensor.CLAN_AP)) {
+            if (miscType.is(Sensor.CLAN_AP)) {
+                element.setClanActiveProbe(true);
+            }
             assign(misc, PRB);
         } else if (miscType.isAnyOf(Sensor.CL_IMPROVED, Sensor.IS_IMPROVED)) {
             assign(misc, RCN);

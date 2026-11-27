@@ -66,6 +66,8 @@ import org.w3c.dom.NodeList;
  */
 public class SkinXMLHandler {
     private static final MMLogger logger = MMLogger.create(SkinXMLHandler.class);
+    /** Components the game no longer has, which skins written before still name: the 2D board's border. */
+    private static final Set<String> RETIRED_COMPONENTS = Set.of("BoardViewBorder");
 
     public static String SKIN_FOOTER = "</skin>";
     public static String SKIN_HEADER;
@@ -121,7 +123,6 @@ public class SkinXMLHandler {
     public static final String RIGHT_LINE = "line_right";
     public static final String LEFT_LINE = "line_left";
     public static final String BACKGROUND_IMAGE = "background_image";
-    public static final String SHOW_SCROLL_BARS = "show_scroll_bars";
     public static final String SHOULD_BOLD = "should_bold_mouseover";
     public static final String FONT_NAME = "font_name";
     public static final String FONT_SIZE = "font_size";
@@ -272,12 +273,6 @@ public class SkinXMLHandler {
                     }
                 }
 
-                // Parse show scroll bars
-                Element showScrollEle = (Element) borderList.getElementsByTagName(SHOW_SCROLL_BARS).item(0);
-                if (showScrollEle != null) {
-                    skinSpec.showScrollBars = Boolean.parseBoolean(showScrollEle.getTextContent());
-                }
-
                 // Parse show should bold
                 Element shouldBoldEle = (Element) borderList.getElementsByTagName(SHOULD_BOLD).item(0);
                 if (shouldBoldEle != null) {
@@ -312,7 +307,9 @@ public class SkinXMLHandler {
                     skinSpec.tileBackground = Boolean.parseBoolean(tileBGEle.getTextContent());
                 }
 
-                if (UIComponents.getUIComponent(name) == null) {
+                if (RETIRED_COMPONENTS.contains(name)) {
+                    logger.debug("Skipping the retired UI component {}", name);
+                } else if (UIComponents.getUIComponent(name) == null) {
                     logger.error("Unable to add unrecognized UI component: {}", name);
                 } else {
                     skinSpecs.put(name, skinSpec);
@@ -719,10 +716,6 @@ public class SkinXMLHandler {
             out.write("</" + FONT_COLOR + ">\n");
         }
 
-        // Write show scroll bars
-        out.write("\t\t<" + SHOW_SCROLL_BARS + ">");
-        out.write(((Boolean) skinSpec.showScrollBars).toString());
-        out.write("</" + SHOW_SCROLL_BARS + ">\n");
 
         // Write should bold mouseover
         out.write("\t\t<" + SHOULD_BOLD + ">");

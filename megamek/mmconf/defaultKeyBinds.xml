@@ -64,30 +64,30 @@
     </KeyBind>
 
     <KeyBind>
-        <command>turnLeft</command> <!-- Shift+A -->
+        <command>turnLeft</command> <!-- Ctrl+A -->
         <keyCode>65</keyCode>
-        <modifier>64</modifier>
+        <modifier>128</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 
     <KeyBind>
-        <command>turnRight</command> <!-- Shift+D -->
+        <command>turnRight</command> <!-- Ctrl+D -->
         <keyCode>68</keyCode>
-        <modifier>64</modifier>
+        <modifier>128</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 
     <KeyBind>
-        <command>twistLeft</command> <!-- Shift+A -->
+        <command>twistLeft</command> <!-- Ctrl+A -->
         <keyCode>65</keyCode>
-        <modifier>64</modifier>
+        <modifier>128</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 
     <KeyBind>
-        <command>twistRight</command> <!-- Shift+D -->
+        <command>twistRight</command> <!-- Ctrl+D -->
         <keyCode>68</keyCode>
-        <modifier>64</modifier>
+        <modifier>128</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 
@@ -491,8 +491,8 @@
     </KeyBind>
 
     <KeyBind>
-        <command>toggleUnitDisplay</command> <!-- Ctrl+D -->
-        <keyCode>68</keyCode>
+        <command>toggleUnitDisplay</command> <!-- Ctrl+I -->
+        <keyCode>73</keyCode>
         <modifier>128</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>

@@ -11,16 +11,18 @@ import javax.swing.SwingUtilities;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.common.units.Entity;
 
 /** EDT service for the toast stack: the client's newest toasts with their level and duration. */
 final class GpuToasts {
+    /** The most toasts shown at once. */
+    static final int MAX_VISIBLE = 5;
+
     /** One toast; {@code icon} is null when it has none. */
     record Toast(long id, ToastLevel level, String text, BoardScene.Pixels icon, int durationMs) { }
 
-    /** The newest toasts, oldest first: at most the Swing toast overlay's stack depth. */
+    /** The newest toasts, oldest first: at most {@link #MAX_VISIBLE}. */
     record Snapshot(List<Toast> toasts) {
         static final Snapshot EMPTY = new Snapshot(List.of());
 
@@ -49,7 +51,7 @@ final class GpuToasts {
 
     /**
      * Any thread: keeps a toast that {@link ClientGUI#addToast} shows, so the player's toast setting already applies.
-     * Keeps the newest {@link BoardToastOverlay#MAX_VISIBLE} toasts, each with its level's duration taken now (a new
+     * Keeps the newest {@link #MAX_VISIBLE} toasts, each with its level's duration taken now (a new
      * toast pushes the oldest out of a full stack, whereas the Swing overlay starts fading the oldest and drops a toast
      * that arrives while five drawn ones are shown). The icon is the unit's upright tileset icon, kept only for a unit
      * the local player may identify. A toast that repeats one still showing (same level, text and unit), such as a
@@ -72,7 +74,7 @@ final class GpuToasts {
         int durationMs = level.getDefaultDurationMs();
         toasts.add(new Toast(++lastId, level, text, image == null ? null : BoardScene.Pixels.copy(image),
               durationMs));
-        snapshot = new Snapshot(toasts.subList(Math.max(0, toasts.size() - BoardToastOverlay.MAX_VISIBLE),
+        snapshot = new Snapshot(toasts.subList(Math.max(0, toasts.size() - MAX_VISIBLE),
               toasts.size()));
         shown.add(new Shown(lastId, level, text, entityId, now + durationMs));
         Set<Long> ids = snapshot.toasts().stream().map(Toast::id).collect(Collectors.toSet());

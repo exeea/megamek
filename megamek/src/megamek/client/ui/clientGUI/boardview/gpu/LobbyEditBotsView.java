@@ -72,7 +72,10 @@ final class LobbyEditBotsView {
         return DesignTokens.shipped().space().get(name);
     }
 
-    /** One seat: its player and type tag on top, then its actions, bot settings and saved settings. */
+    /**
+     * One seat: its player and type tag on top, then its actions, then its bot settings and saved settings on a line
+     * of their own, so a seat fits the card whatever the labels' length.
+     */
     private Table seat(UiKit kit, Row row, int index, Host host) {
         Table card = kit.panel(true);
         card.setName("bots-seat-" + index);
@@ -90,14 +93,15 @@ final class LobbyEditBotsView {
               .map(action -> Messages.getString(action.key())).toArray(String[]::new));
         actions.setName("bots-action-" + index);
         actions.select(row.actions().indexOf(row.action()));
-        controls.add(actions).growX();
+        controls.add(actions).growX().row();
+        Table buttons = new Table();
         UiButton settings = null;
         UiButton restore = null;
         TextTooltip settingsTip = null;
         if (row.kind() != EditBotsForm.Kind.REMOTE_BOT) {
             settings = kit.button("button-secondary", null, Messages.getString("EditBotsDialog.config"), null);
             settings.setName("bots-settings-" + index);
-            controls.add(settings).padLeft(space("sm"));
+            buttons.add(settings);
             UiKit.onChange(settings, () -> {
                 if (row.configurable()) {
                     host.settings(row, chosen -> {
@@ -113,11 +117,14 @@ final class LobbyEditBotsView {
             restore = kit.button("button-secondary", null, Messages.getString("EditBotsDialog.configAvailable"),
                   null);
             restore.setName("bots-restore-" + index);
-            controls.add(restore).padLeft(space("xs"));
+            buttons.add(restore).padLeft(space("xs"));
             UiKit.onChange(restore, () -> {
                 row.restore();
                 refresh();
             });
+        }
+        if (buttons.hasChildren()) {
+            controls.add(buttons).padTop(space("xs"));
         }
         card.add(controls).growX().padTop(space("sm")).row();
         UiKit.onChange(actions, () -> {

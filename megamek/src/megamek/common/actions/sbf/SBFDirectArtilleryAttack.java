@@ -35,18 +35,16 @@
 package megamek.common.actions.sbf;
 
 import megamek.common.alphaStrike.BattleForceSUA;
-import megamek.server.sbf.SBFActionHandler;
-import megamek.server.sbf.SBFGameManager;
+import megamek.common.board.BoardLocation;
 
-@Deprecated(since = "0.51.0", forRemoval = true)
 public class SBFDirectArtilleryAttack extends SBFArtilleryAttack {
 
     public SBFDirectArtilleryAttack(int entityId, int targetId, BattleForceSUA artilleryType) {
         super(entityId, targetId, artilleryType);
     }
 
-    @Override
-    public SBFActionHandler getHandler(SBFGameManager gameManager) {
-        return null;
+    public SBFDirectArtilleryAttack(int entityId, int targetId, BattleForceSUA artilleryType, BoardLocation aim,
+          Integer spotterId) {
+        super(entityId, targetId, artilleryType, aim, spotterId);
     }
 }

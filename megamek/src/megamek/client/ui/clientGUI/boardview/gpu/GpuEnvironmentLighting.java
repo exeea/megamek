@@ -30,7 +30,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** Physical apparent solar radius; the moon uses the same angular source footprint. */
     static final float SOURCE_RADIUS_SINE = (float) Math.sin(Math.toRadians(.266));
     /** The {@link #flags} bits: the features below, then the program key of the switches ({@link #SWITCH_SHIFT}). */
-    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, CRYSTAL_TRANSMISSION = 32;
+    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, CELL_WALLS = 16,
+          CRYSTAL_TRANSMISSION = 32, CANOPY = 64;
     /** The switches' program key takes the int's top bits (BoardSwitches.KEY_BITS); the features stay below them. */
     private static final int SWITCH_SHIFT = Integer.SIZE - BoardSwitches.KEY_BITS;
     private final Color sky = new Color(), horizon = new Color();
@@ -58,6 +59,17 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** The board has biomes (GpuBiomeSurface.mark): biomeMaskFlag. */
     boolean biomes;
     /**
+     * The board has a family whose walls read in four cells, or the editor may paint one (GpuTerrain#cellWallStage):
+     * its generic ground programs compile that branch (GroundFamilies.Rule.WALL_CELLS). A feature of the key, as
+     * biomes. True unless a terrain says its board has none: previews and swatches keep the branch.
+     */
+    boolean cellWalls = true;
+    /**
+     * The board has woods, or the editor may plant them (GpuTerrain#canopyStage): its sculpted ground compiles the
+     * canopy's tint (canopyFlag, terrain-canopy.glsl). A feature of the key, as biomes.
+     */
+    boolean canopy;
+    /**
      * The program key of the switches its owner last applied (applySwitches, BoardSwitches#programKey): their defines
      * (GpuCloudShadow.prefix) and the programs their draws take.
      */
@@ -68,7 +80,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** The features this lighting carries, as a program key's part beside its environment's mask. */
     int flags() {
         return (cloudShadow != null ? CLOUD_SHADOW : 0) | (ambientOcclusion != null ? AMBIENT_OCCLUSION : 0)
-              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0)
+              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (cellWalls ? CELL_WALLS : 0)
+              | (canopy ? CANOPY : 0)
               | (crystals != null ? CRYSTAL_TRANSMISSION : 0) | switches << SWITCH_SHIFT;
     }
 
@@ -197,6 +210,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     static void register(DefaultShader shader) {
         GpuCrystalTransmission.register(shader);
         GpuSkyVisibility.register(shader);
+        GpuShadowLight.registerFar(shader);
         shader.register("u_shadowStrength", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
@@ -284,7 +298,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         copy.original = original != null ? original : this;
         copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;
         copy.crystals = crystals;
-        copy.biomes = biomes; copy.switches = switches;
+        copy.biomes = biomes; copy.cellWalls = cellWalls; copy.canopy = canopy; copy.switches = switches;
         return copy;
     }
     @Override public int hashCode() { return 31 * super.hashCode() + flags(); }

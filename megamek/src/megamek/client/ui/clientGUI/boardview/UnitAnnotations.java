@@ -886,8 +886,8 @@ public final class UnitAnnotations {
 
     /**
      * Whether the unit's target movement modifier means something to show in {@code phase}: once the unit has moved
-     * in the movement phase, and in the firing phase; never for a static unit or an aerospace unit. Both boards use
-     * it: the Legacy 2D label's pips (with its pip-mode preference) and the Tactical View's chevrons.
+     * in the movement phase, and in the firing phase; never for a static unit or an aerospace unit. The HUD's
+     * unit status ({@code GpuBattleStatus}) and the label's pips (with their pip-mode preference) use it.
      */
     public static boolean tmmShown(Entity entity, GamePhase phase) {
         return !UnitStatusWords.isStaticEntity(entity) && !entity.isAero()
@@ -896,8 +896,7 @@ public final class UnitAnnotations {
 
     /**
      * The facing the unit fires from beside its body's: the opposite facing with its arms flipped, else its secondary
-     * facing (a torso twist, a turret); -1 for none. The Tactical View's twist notch shows it for every unit; the
-     * Legacy 2D label leaves out a Mek's torso twist.
+     * facing (a torso twist, a turret); -1 for none. The Tactical View's twist notch shows it for every unit.
      */
     public static int twistFacing(Entity entity) {
         return entity.getArmsFlipped() ? (entity.getFacing() + 3) % 6 : entity.getSecondaryFacing();

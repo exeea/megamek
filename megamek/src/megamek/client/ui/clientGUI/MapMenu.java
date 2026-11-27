@@ -512,7 +512,6 @@ public class MapMenu extends JPopupMenu {
         item.addActionListener(evt -> {
             try {
                 selectedEntity = game.getEntity(Integer.parseInt(evt.getActionCommand()));
-                GUIPreferences.getInstance().setUnitDisplayEnabled(true);
                 gui.getUnitDisplayState().displayEntity(selectedEntity);
             } catch (Exception ex) {
                 logger.error(ex, "");
@@ -2180,7 +2179,7 @@ public class MapMenu extends JPopupMenu {
         }
     }
 
-    /** Applies the inspected target only when an action is chosen (or the Legacy 2D popup is shown). */
+    /** Applies the inspected target only when an action is chosen (or the popup is shown). */
     public void selectTarget() {
         if (client.isMyTurn() && myEntity != null) {
             findTarget();

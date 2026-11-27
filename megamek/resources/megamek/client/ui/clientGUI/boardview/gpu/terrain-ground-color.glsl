@@ -14,11 +14,6 @@ vec3 authoredPigmentGain(vec3 gain) {
     return 1.0 + change * (2.2 + change * (1.32 + .088 * change));
 }
 
-vec3 groundFields(vec3 world) {
-    return vec3(texture(u_surfaceNoise, rainNoiseAt(world.xy / 700.0)).g * .6 + texture(u_surfaceNoise, rainNoiseAt(world.xy / 430.0 + .19)).b * .4,
-          texture(u_surfaceNoise, rainNoiseAt(world.xy / 160.0 + .41)).b, texture(u_surfaceNoise, rainNoiseAt(world.xy / 2600.0 + .73)).r);
-}
-
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
 // Downhill every eased level darkens the ground by an eighth of its reflectance: 12.5% at level -1, building to

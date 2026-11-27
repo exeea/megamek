@@ -42,8 +42,8 @@ final class BoardRoadCut {
 
     private interface Triangles { void triangle(Point a, Point b, Point c, int source); }
 
-    /** The sweep's segments, split at every crossing, and the rows they leave. */
-    private record Sweep(List<Segment> segments, List<Float> rows, List<Part> parts) { }
+    /** The sweep's segments, split at every crossing, and its parts. */
+    private record Sweep(List<Segment> segments, List<Part> parts) { }
 
     /** A part of a sweep row between two segments, all of one source, as classified at its middle. */
     private record Part(float bottom, float top, Segment left, Segment right, int source) {
@@ -125,16 +125,61 @@ final class BoardRoadCut {
             // (BoardRoadBank splits the ground there), so the two meet vertex for vertex.
             List<Segment> sides = new ArrayList<>();
             outline(piece.area(), sides, epsilon);
-            for (Segment side : sides) { stations(side, segments); }
-            for (float[] line : piece.grade().creases()) { crease(piece.area(), line); }
+            List<float[]> creases = piece.grade().creases();
+            for (Segment side : sides) {
+                boolean climbing = climbing(piece.grade(), side);
+                for (float[] station : stations(side, segments)) {
+                    if (climbing) { tie(piece, station[0], station[1], creases, sides); }
+                }
+            }
+            for (float[] line : creases) { crease(piece.area(), line); }
         }
+    }
+
+    /** Whether a side of a piece runs level, along the sweep's rows, while the grade climbs along it. */
+    private boolean climbing(BoardRoadGrade grade, Segment side) {
+        return Math.abs(side.by() - side.ay()) <= epsilon && Math.abs(grade.height(side.ax(), side.ay())
+              - grade.height(side.bx(), side.by())) >= .001f * BoardGeometry.hexScale();
+    }
+
+    /**
+     * The sweep's rows run level, so a grid vertex of a level side climbing across an eased ramp stands on the curved
+     * grade with no partner on the rows beside it, where the mesh runs straight between the ramp's rows: the faces
+     * between would fold. A run from it along the grade's fall into the piece, to the nearest of the ramp's rows or the
+     * piece's sides, gives every row on the way a vertex there, on the grade.
+     */
+    private void tie(Piece piece, float x, float y, List<float[]> creases, List<Segment> sides) {
+        float[] fall = piece.grade().fall(x, y);
+        if (fall == null) { return; }
+        float reach = BoardGeometry.TILE_WIDTH * BoardGeometry.hexScale(), probe = 4 * epsilon;
+        float best = Float.POSITIVE_INFINITY, tx = 0, ty = 0;
+        for (int sign = -1; sign <= 1; sign += 2) {
+            float dx = sign * fall[0] * reach, dy = sign * fall[1] * reach;
+            if (!piece.area().contains(x + dx / reach * probe, y + dy / reach * probe)) { continue; }
+            float near = Float.POSITIVE_INFINITY;
+            for (float[] line : creases) {
+                float[] hit = intersection(x, y, x + dx, y + dy, line[0], line[1], line[2], line[3]);
+                if (hit != null && hit[0] * reach > probe) { near = Math.min(near, hit[0]); }
+            }
+            for (Segment side : sides) {
+                float[] hit = intersection(x, y, x + dx, y + dy, side.ax(), side.ay(), side.bx(), side.by());
+                if (hit != null && hit[0] * reach > probe) { near = Math.min(near, hit[0]); }
+            }
+            if (near < best) {
+                best = near;
+                tx = x + dx * near;
+                ty = y + dy * near;
+            }
+        }
+        if (best < Float.POSITIVE_INFINITY) { segments.add(new Segment(x, y, tx, ty)); }
     }
 
     /**
      * A segment split where it crosses the world's grid (BoardRoadBank#GRID), into {@code into}: on the grid plane
-     * exactly, where the bank puts its own vertex.
+     * exactly, where the bank puts its own vertex. Returns the points it was split at.
      */
-    private void stations(Segment s, List<Segment> into) {
+    private List<float[]> stations(Segment s, List<Segment> into) {
+        List<float[]> points = new ArrayList<>();
         float px = s.ax(), py = s.ay();
         for (float[] cut : crossings(s.ax(), s.ay(), s.bx(), s.by())) {
             float t = cut[0];
@@ -142,11 +187,13 @@ final class BoardRoadCut {
             float qy = cut[1] == 1 ? cut[2] : s.ay() + (s.by() - s.ay()) * t;
             if (Math.hypot(qx - px, qy - py) > epsilon && Math.hypot(s.bx() - qx, s.by() - qy) > epsilon) {
                 into.add(new Segment(px, py, qx, qy));
+                points.add(new float[] { qx, qy });
                 px = qx;
                 py = qy;
             }
         }
         into.add(new Segment(px, py, s.bx(), s.by()));
+        return points;
     }
 
     /**
@@ -297,27 +344,152 @@ final class BoardRoadCut {
         if (pieces.isEmpty()) { return; }
         Map<Point, Vector3>[] vertices = vertexMaps(pieces.size() + 1);
         Classifier classifier = this::source;
-        Sweep sweep = sweep(segments, epsilon, classifier, (a, b, c, source) -> {
-            var map = vertices[source + 1];
-            add(faces, vertex(map, a, source), vertex(map, b, source), vertex(map, c, source));
-        });
-        float probe = 4 * epsilon, tolerance = .001f * BoardGeometry.hexScale();
+        List<List<Point[]>> triangles = new ArrayList<>();
+        for (int i = 0; i <= pieces.size(); i++) { triangles.add(new ArrayList<>()); }
+        Sweep sweep = sweep(segments, epsilon, classifier, (a, b, c, source) -> triangles.get(source + 1).add(new Point[] { a, b, c }));
+        Map<Float, List<Float>> ends = new HashMap<>();
         for (Segment s : sweep.segments()) {
-            for (float[] piece : rowPieces(s, sweep.rows())) {
-                float ax = piece[0], ay = piece[1], bx = piece[2], by = piece[3];
-                float length = (float) Math.hypot(bx - ax, by - ay);
-                float nx = -(by - ay) / length, ny = (bx - ax) / length, mx = (ax + bx) / 2, my = (ay + by) / 2;
-                int left = source(mx + nx * probe, my + ny * probe), right = source(mx - nx * probe, my - ny * probe);
-                if (left == right || left == OUTSIDE || right == OUTSIDE) { continue; }
-                float la = height(left, ax, ay), lb = height(left, bx, by);
-                float ra = height(right, ax, ay), rb = height(right, bx, by);
-                if (Math.abs(la - ra) < tolerance && Math.abs(lb - rb) < tolerance) { continue; }
-                boolean leftHigher = la + lb > ra + rb;
-                wall.wall(new Vector3(ax, ay, Math.max(la, ra)), new Vector3(ax, ay, Math.min(la, ra)),
-                      new Vector3(bx, by, Math.max(lb, rb)), new Vector3(bx, by, Math.min(lb, rb)),
-                      leftHigher ? -nx : nx, leftHigher ? -ny : ny);
+            ends.computeIfAbsent(s.ay(), key -> new ArrayList<>()).add(s.ax());
+            ends.computeIfAbsent(s.by(), key -> new ArrayList<>()).add(s.bx());
+        }
+        // A crossing where the grade bends along the side, for any source meeting there, holds the road's shape: it stays.
+        Set<Point> bends = new HashSet<>();
+        for (int source = 0; source < triangles.size(); source++) {
+            for (Point[] t : triangles.get(source)) {
+                for (Point p : t) {
+                    if (!bends.contains(p) && !end(p, ends) && bends(p, source - 1, sweep.segments())) { bends.add(p); }
+                }
             }
         }
+        // A crossing whose rejoined faces would leave the grade, in any source, stays in every source.
+        Set<Point> keep = new HashSet<>(bends);
+        List<List<Point[]>> kept = new ArrayList<>();
+        for (boolean again = true; again; ) {
+            Set<Point> failed = new HashSet<>();
+            kept.clear();
+            for (int source = 0; source < triangles.size(); source++) {
+                kept.add(withoutRowCrossings(triangles.get(source), ends, keep, source - 1, failed));
+            }
+            again = keep.addAll(failed);
+        }
+        for (int source = 0; source < triangles.size(); source++) {
+            var map = vertices[source];
+            for (Point[] t : kept.get(source)) {
+                add(faces, vertex(map, t[0], source - 1), vertex(map, t[1], source - 1), vertex(map, t[2], source - 1));
+            }
+        }
+        float probe = 4 * epsilon, tolerance = .001f * BoardGeometry.hexScale();
+        for (Segment s : sweep.segments()) {
+            float ax = s.ax(), ay = s.ay(), bx = s.bx(), by = s.by();
+            float length = (float) Math.hypot(bx - ax, by - ay);
+            float nx = -(by - ay) / length, ny = (bx - ax) / length, mx = (ax + bx) / 2, my = (ay + by) / 2;
+            int left = source(mx + nx * probe, my + ny * probe), right = source(mx - nx * probe, my - ny * probe);
+            if (left == right || left == OUTSIDE || right == OUTSIDE) { continue; }
+            float la = height(left, ax, ay), lb = height(left, bx, by);
+            float ra = height(right, ax, ay), rb = height(right, bx, by);
+            if (Math.abs(la - ra) < tolerance && Math.abs(lb - rb) < tolerance) { continue; }
+            boolean leftHigher = la + lb > ra + rb;
+            wall.wall(new Vector3(ax, ay, Math.max(la, ra)), new Vector3(ax, ay, Math.min(la, ra)),
+                  new Vector3(bx, by, Math.max(lb, rb)), new Vector3(bx, by, Math.min(lb, rb)),
+                  leftHigher ? -nx : nx, leftHigher ? -ny : ny);
+        }
+    }
+
+    /**
+     * The sweep's triangles of one source without the points where a row crosses a side between the side's own ends: the
+     * ground beside a road, cut along that side, has no vertex there. Such a point's triangles fan from one of its
+     * neighbours along the side to the other; they are cut again ear by ear without it, in plan, where the road and the
+     * top are height fields. A point the source surrounds keeps its triangles.
+     */
+    private List<Point[]> withoutRowCrossings(List<Point[]> triangles, Map<Float, List<Float>> ends, Set<Point> bends,
+          int source, Set<Point> failed) {
+        List<Point[]> result = new ArrayList<>(triangles);
+        Set<Point> points = new java.util.LinkedHashSet<>();
+        for (Point[] t : triangles) { points.addAll(List.of(t)); }
+        for (Point v : points) {
+            if (end(v, ends) || bends.contains(v)) { continue; }
+            Map<Point, Point> next = new HashMap<>();
+            List<Point[]> fan = new ArrayList<>();
+            for (Point[] t : result) {
+                for (int i = 0; i < 3; i++) {
+                    if (t[i].equals(v)) {
+                        next.put(t[(i + 1) % 3], t[(i + 2) % 3]);
+                        fan.add(t);
+                    }
+                }
+            }
+            Point start = next.keySet().stream().filter(w -> !next.containsValue(w)).findFirst().orElse(null);
+            List<Point> ring = new ArrayList<>();
+            for (Point w = start; w != null && ring.size() <= fan.size(); w = next.get(w)) { ring.add(w); }
+            if (ring.size() != fan.size() + 1) {
+                failed.add(v);
+                continue;
+            }
+            List<Point[]> joined = new ArrayList<>();
+            while (ring.size() > 2) {
+                int size = ring.size(), ear = -1;
+                for (int i = 0; i < size && ear < 0; i++) {
+                    Point a = ring.get((i + size - 1) % size), b = ring.get(i), c = ring.get((i + 1) % size);
+                    if (cross(a, b, c) <= 1e-9f * ((c.x() - a.x()) * (c.x() - a.x()) + (c.y() - a.y()) * (c.y() - a.y()))) { continue; }
+                    boolean empty = true;
+                    for (Point o : ring) {
+                        empty &= o == a || o == b || o == c || cross(a, b, o) < 0 || cross(b, c, o) < 0 || cross(c, a, o) < 0;
+                    }
+                    if (empty) { ear = i; }
+                }
+                if (ear < 0) { break; }
+                joined.add(new Point[] { ring.get((ear + size - 1) % size), ring.get(ear), ring.get((ear + 1) % size) });
+                ring.remove(ear);
+            }
+            if (ring.size() != 2 || !flat(joined, source)) {
+                failed.add(v);
+                continue;
+            }
+            result.removeAll(fan);
+            result.addAll(joined);
+        }
+        return result;
+    }
+
+    /** Whether faces lie on a source's surface: at their middles and the middles of their edges, within .001 of a hex. */
+    private boolean flat(List<Point[]> faces, int source) {
+        float tolerance = .001f * BoardGeometry.hexScale();
+        for (Point[] t : faces) {
+            float ha = height(source, t[0].x(), t[0].y()), hb = height(source, t[1].x(), t[1].y());
+            float hc = height(source, t[2].x(), t[2].y());
+            for (float[] w : new float[][] { { 1 / 3f, 1 / 3f }, { .5f, 0 }, { 0, .5f }, { .5f, .5f } }) {
+                float x = t[0].x() + w[0] * (t[1].x() - t[0].x()) + w[1] * (t[2].x() - t[0].x());
+                float y = t[0].y() + w[0] * (t[1].y() - t[0].y()) + w[1] * (t[2].y() - t[0].y());
+                if (Math.abs(height(source, x, y) - (ha + w[0] * (hb - ha) + w[1] * (hc - ha))) > tolerance) { return false; }
+            }
+        }
+        return true;
+    }
+
+    /** Whether a point of the sweep is one of its segments' own ends (else a row's crossing of a side). */
+    private boolean end(Point p, Map<Float, List<Float>> ends) {
+        return ends.getOrDefault(p.y(), List.of()).stream().anyMatch(x -> Math.abs(x - p.x()) <= 4 * epsilon);
+    }
+
+    /**
+     * Whether a source's surface bends along the side through a row's crossing: its height there departs from the straight
+     * line between the side's own ends.
+     */
+    private boolean bends(Point p, int source, List<Segment> sides) {
+        for (Segment s : sides) {
+            if (s.ay() == s.by() || p.y() <= s.low() || p.y() >= s.high() || Math.abs(s.x(p.y()) - p.x()) > 4 * epsilon) {
+                continue;
+            }
+            float u = (p.y() - s.ay()) / (s.by() - s.ay());
+            float straight = height(source, s.ax(), s.ay()) + u * (height(source, s.bx(), s.by()) - height(source, s.ax(), s.ay()));
+            return Math.abs(height(source, p.x(), p.y()) - straight) > .001f * BoardGeometry.hexScale();
+        }
+        return true;
+    }
+
+    /** Twice the signed area of a triangle in plan: positive counter-clockwise, as the sweep emits. */
+    private static float cross(Point a, Point b, Point c) {
+        return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
     }
 
     @SuppressWarnings("unchecked")
@@ -404,9 +576,7 @@ final class BoardRoadCut {
             }
             // A face standing upright on the outline the reserved ground shares with the lattice is probed just inside
             // this hex, where the ground it bounds lies: on the outline itself, which side holds it is arbitrary.
-            float upright = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-            float longest = Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
-            float nudge = Math.abs(upright) < 1e-4f * longest ? 4 * epsilon : 0;
+            float nudge = upright(a, b, c) ? 4 * epsilon : 0;
             float mx = (a.x + b.x + c.x) / 3, my = (a.y + b.y + c.y) / 3, md = (float) Math.hypot(cx - mx, cy - my);
             float ox = md > 0 ? (cx - mx) / md * nudge : 0, oy = md > 0 ? (cy - my) / md * nudge : 0;
             // The face's heights against the road's: above its surface, and for a natural top below it too, up to its
@@ -498,7 +668,8 @@ final class BoardRoadCut {
                 if (!reserved.at(1 / 3f, 1 / 3f)) { result.add(face); }
                 continue;
             }
-            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road, natural);
+            clipFace(face, chords, region, reserved, relief, result, wall, natural ? concrete : wall, welded, road,
+                  natural, !top);
         }
         return result;
     }
@@ -668,9 +839,10 @@ final class BoardRoadCut {
 
     private static final int KEPT = 0, RESERVED = 1;
 
+    /** {@code under}: the face keeps what passes under the road (a slope or cliff, see #clip). */
     private void clipFace(BoardSurface.Face face, List<Segment> chords, Area region, Reserved reserved, BoardRelief relief,
           List<BoardSurface.Face> result, WallBuilder wall, WallBuilder concrete, Map<List<Long>, Vector3> welded,
-          List<BoardSurface.Face> road, boolean natural) {
+          List<BoardSurface.Face> road, boolean natural, boolean under) {
         Vector3 a = face.a(), b = face.b(), c = face.c();
         List<Segment> segments = new ArrayList<>(chords);
         segments.add(new Segment(0, 0, 1, 0));
@@ -707,6 +879,8 @@ final class BoardRoadCut {
             if (same != null) {
                 // Every later copy then finds the same point in its own cell.
                 welded.putIfAbsent(weld, same);
+                // A point first cut in an unshaded face (a water bed) takes its shading from the first shaded one.
+                if (relief.shade(same) == null) { relief.interpolateShade(a, b, c, 1 - s - t, s, t, same); }
                 return same;
             }
             relief.interpolateShade(a, b, c, 1 - s - t, s, t, v);
@@ -715,7 +889,7 @@ final class BoardRoadCut {
         });
         // Twice the face's area in plan; an upright face has none (see #clip).
         float plan = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        boolean upright = Math.abs(plan) < 1e-4f * Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
+        boolean upright = upright(a, b, c);
         Sweep sweep = sweep(segments, e, classifier, (p, q, r, source) -> {
             if (source != KEPT) { return; }
             // The sweep emits counter-clockwise in (s, t); keep the face's own winding in space.
@@ -755,15 +929,18 @@ final class BoardRoadCut {
             boolean rightReserved = region.contains(a.x + rs * (b.x - a.x) + rt * (c.x - a.x), a.y + rs * (b.y - a.y) + rt * (c.y - a.y));
             if (leftReserved == rightReserved) {
                 // On the reserved ground, natural ground kept over the road's headroom meets the part that gave way
-                // below it: a cut face from its edge down to the road closes it, so the overhang stands on the verge.
+                // below it: a cut face from its edge down to the road closes it, so the overhang stands on the verge. A
+                // slope's part passing under the road gave way just under its surface: its edge closes up to the road
+                // as a fill does, so none opens a slit beside the road's edge.
                 if (natural && leftReserved && left != OUTSIDE && right != OUTSIDE && (left == KEPT) != (right == KEPT)) {
                     Vector3 p = vertex.apply(new Point(s.ax(), s.ay())), q = vertex.apply(new Point(s.bx(), s.by()));
                     float rp = roadHeight(road, p.x, p.y, Float.NaN), rq = roadHeight(road, q.x, q.y, Float.NaN);
                     float above = BoardRoadGrade.CLEARANCE * BoardGeometry.level() / 2;
-                    if (p.z - rp > above && q.z - rq > above) {
+                    boolean overhang = p.z - rp > above && q.z - rq > above;
+                    if (overhang || under) {
                         float gs = left == KEPT ? rs : ls, gt = left == KEPT ? rt : lt;
                         curtain(p, q, new Vector3(a).mulAdd(new Vector3(b).sub(a), gs).mulAdd(new Vector3(c).sub(a), gt),
-                              region, wall, concrete, road, false, natural);
+                              region, wall, concrete, road, !overhang, natural);
                     }
                 }
                 continue;
@@ -777,6 +954,21 @@ final class BoardRoadCut {
             curtain(vertex.apply(new Point(s.ax(), s.ay())), vertex.apply(new Point(s.bx(), s.by())), null, region, wall,
                   concrete, road, left == right, natural);
         }
+    }
+
+    /**
+     * Whether a face stands upright: next to no area in plan against its extent in plan. Not in space: a steep face
+     * stands tall over a narrow plan, but has a side there, and its chords cut faces under them.
+     */
+    private boolean upright(Vector3 a, Vector3 b, Vector3 c) {
+        float plan = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        float extent = Math.max(Math.max(planDst2(a, b), planDst2(b, c)), Math.max(planDst2(c, a), epsilon * epsilon));
+        return Math.abs(plan) <= 1e-4f * extent;
+    }
+
+    /** The squared distance between two points in plan. */
+    private static float planDst2(Vector3 p, Vector3 q) {
+        return (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
     }
 
     /**
@@ -881,6 +1073,12 @@ final class BoardRoadCut {
     static final float PANEL = 2.5f;
 
     /**
+     * One panel of a containment wall: its place (its back's two ends x, y; the unit way its face looks x, y; its
+     * thickness; the road's height at the two ends) and its faces.
+     */
+    record Panel(float[] place, List<BoardSurface.Face> faces) { }
+
+    /**
      * Precast containment walls where this hex's natural {@code ground} still stands over a road's edge along the walled
      * runs of the slopes beside it (BoardRelief#walled), and a panel on past either end, over the slope's fall to the road
      * there: straight panels just inside the edge, each from below the road to a capped top in half-metre steps, a metre
@@ -889,6 +1087,15 @@ final class BoardRoadCut {
      */
     void containmentWalls(List<BoardSurface.Face> ground, List<BoardSurface.Face> road, BoardRelief relief,
           List<BoardSurface.Face> into) {
+        containmentWalls((x, y) -> BoardSurface.sampleHeight(ground, x, y, Float.NaN), road, relief, into, null);
+    }
+
+    /**
+     * As above over any ground: the height field asks with its own height (FieldRoads#walls). {@code places}, where
+     * given, takes each panel.
+     */
+    void containmentWalls(BoardRelief.Ground ground, List<BoardSurface.Face> road, BoardRelief relief,
+          List<BoardSurface.Face> into, List<Panel> places) {
         float m = BoardRelief.metres(1), probe = .1f * BoardGeometry.hexScale();
         Area region = region();
         PathIterator path = region.getPathIterator(null, .02f * BoardGeometry.hexScale());
@@ -927,12 +1134,12 @@ final class BoardRoadCut {
                               ? Float.NaN : roadHeight(road, x + nx * probe, y + ny * probe,
                                     grade.height(x + nx * probe, y + ny * probe));
                         float cut = Float.isNaN(bed) || relief.walled(x, y) < .5f ? Float.NaN
-                              : Math.min(BoardSurface.sampleHeight(ground, x - nx * probe, y - ny * probe, Float.NaN) - bed,
+                              : Math.min(ground.height(x - nx * probe, y - ny * probe) - bed,
                                     BoardRoadBank.WALL * BoardGeometry.level());
                         samples.add(new float[] { x, y, nx, ny, bed, cut >= WALL_CUT * m ? cut : Float.NaN });
                     }
                 }
-                walls(samples, into);
+                walls(samples, into, places);
             }
             path.next();
         }
@@ -942,7 +1149,7 @@ final class BoardRoadCut {
      * Containment walls along a closed outline's samples {x, y, nx, ny, road, cut}: over each run of retained samples,
      * and a panel on past either end along the same road's edge while it keeps its heading.
      */
-    private static void walls(List<float[]> samples, List<BoardSurface.Face> into) {
+    private static void walls(List<float[]> samples, List<BoardSurface.Face> into, List<Panel> places) {
         int n = samples.size();
         float reach = PANEL * BoardRelief.metres(1);
         boolean[] retained = new boolean[n], wall = new boolean[n];
@@ -970,15 +1177,15 @@ final class BoardRoadCut {
             if (wall[i]) {
                 run.add(retained[i] ? sample : new float[] { sample[0], sample[1], sample[2], sample[3], sample[4], 0 });
             } else {
-                panels(run, into);
+                panels(run, into, places);
                 run.clear();
             }
         }
-        panels(run, into);
+        panels(run, into, places);
     }
 
     /** Panels along a run of outline samples {x, y, nx, ny, road, cut}; see {@link #containmentWalls}. */
-    private static void panels(List<float[]> run, List<BoardSurface.Face> into) {
+    private static void panels(List<float[]> run, List<BoardSurface.Face> into, List<Panel> places) {
         float m = BoardRelief.metres(1), width = PANEL * m, joint = .05f * m, thick = .2f * m, step = .5f * m;
         float cap = .25f * m, lip = .08f * m, footing = .3f * m, gap = .05f * m;
         float[] along = new float[run.size()];
@@ -1024,11 +1231,27 @@ final class BoardRoadCut {
             Vector3 backA = new Vector3(a[0] + fx * bow, a[1] + fy * bow, 0), backB = new Vector3(b[0] + fx * bow, b[1] + fy * bow, 0);
             Vector3 frontA = new Vector3(backA).add(fx * thick, fy * thick, 0);
             Vector3 frontB = new Vector3(backB).add(fx * thick, fy * thick, 0);
+            int first = into.size();
             box(into, frontA, frontB, backA, backB, low - footing, top, fx, fy);
             // The cap overhangs the panel's face a little.
             box(into, new Vector3(frontA).add(fx * lip, fy * lip, 0), new Vector3(frontB).add(fx * lip, fy * lip, 0),
                   backA, backB, top, top + cap, fx, fy);
+            if (places != null) {
+                places.add(new Panel(new float[] { backA.x, backA.y, backB.x, backB.y, fx, fy, thick,
+                      road(run, along, from), road(run, along, to) }, List.copyOf(into.subList(first, into.size()))));
+            }
         }
+    }
+
+    /** A run's road height at a distance along it. */
+    private static float road(List<float[]> run, float[] along, float distance) {
+        for (int i = 1; i < run.size(); i++) {
+            if (distance <= along[i] || i == run.size() - 1) {
+                float u = Math.clamp((distance - along[i - 1]) / Math.max(1e-6f, along[i] - along[i - 1]), 0, 1);
+                return run.get(i - 1)[4] + (run.get(i)[4] - run.get(i - 1)[4]) * u;
+            }
+        }
+        return run.getFirst()[4];
     }
 
     /** The position at a distance along a run of outline samples with the given cumulative lengths. */
@@ -1078,7 +1301,7 @@ final class BoardRoadCut {
      * horizontal sides kept, so no T junctions arise.
      */
     private static Sweep sweep(List<Segment> segments, float epsilon, Classifier classifier, Triangles out) {
-        List<Segment> split = split(segments, epsilon);
+        List<Segment> split = rows(split(segments, epsilon), epsilon);
         TreeMap<Float, List<Float>> levels = new TreeMap<>();
         for (Segment s : split) {
             levels.computeIfAbsent(s.ay(), key -> new ArrayList<>()).add(s.ax());
@@ -1115,7 +1338,7 @@ final class BoardRoadCut {
                 }
             }
         }
-        return new Sweep(split, rows, parts);
+        return new Sweep(split, parts);
     }
 
     /**
@@ -1158,6 +1381,43 @@ final class BoardRoadCut {
             if (x > from + epsilon && x < to - epsilon) { result.add(new Point(x, y)); }
         }
         if (to - from > epsilon) { result.add(new Point(to, y)); }
+        return result;
+    }
+
+    /**
+     * The segments with every end within the tolerance of a grid plane (BoardRoadBank#GRID) moved onto it, any other
+     * within the tolerance above a lower end's row onto that row, and those left coincident or of no length dropped:
+     * Area's outlines put one level edge a float step either side of a row, and a row that thin between them would hold
+     * only upright slivers.
+     */
+    private static List<Segment> rows(List<Segment> segments, float epsilon) {
+        java.util.TreeSet<Float> ys = new java.util.TreeSet<>();
+        for (Segment s : segments) {
+            ys.add(s.ay());
+            ys.add(s.by());
+        }
+        Map<Float, Float> row = new HashMap<>();
+        float grid = BoardRoadBank.GRID * BoardGeometry.hexScale(), start = Float.NaN;
+        for (float y : ys) {
+            // A row within the tolerance of a grid plane lies on it, as a hex's level borders do in both hexes.
+            long k = Math.round(y / grid);
+            float plane = k * grid;
+            if (Math.abs(y - plane) <= epsilon) {
+                row.put(y, plane);
+                continue;
+            }
+            if (Float.isNaN(start) || y - start > epsilon) { start = y; }
+            row.put(y, start);
+        }
+        List<Segment> result = new ArrayList<>(segments.size());
+        Set<List<Float>> seen = new HashSet<>();
+        for (Segment s : segments) {
+            float ay = row.get(s.ay()), by = row.get(s.by());
+            if (s.ax() == s.bx() && ay == by) { continue; }
+            boolean forward = s.ax() < s.bx() || s.ax() == s.bx() && ay < by;
+            if (!seen.add(forward ? List.of(s.ax(), ay, s.bx(), by) : List.of(s.bx(), by, s.ax(), ay))) { continue; }
+            result.add(ay == s.ay() && by == s.by() ? s : new Segment(s.ax(), ay, s.bx(), by));
+        }
         return result;
     }
 
@@ -1235,24 +1495,4 @@ final class BoardRoadCut {
         return point;
     }
 
-    /** A segment split where it crosses the sweep's rows, so its pieces meet the meshed vertices exactly. */
-    private static List<float[]> rowPieces(Segment s, List<Float> rows) {
-        List<Float> ts = new ArrayList<>(List.of(0f, 1f));
-        if (s.ay() != s.by()) {
-            int index = Collections.binarySearch(rows, s.low());
-            for (int i = index >= 0 ? index : -index - 1; i < rows.size(); i++) {
-                float y = rows.get(i);
-                if (y >= s.high()) { break; }
-                if (y > s.low()) { ts.add((y - s.ay()) / (s.by() - s.ay())); }
-            }
-        }
-        ts.sort(null);
-        List<float[]> result = new ArrayList<>();
-        for (int k = 1; k < ts.size(); k++) {
-            float t0 = ts.get(k - 1), t1 = ts.get(k);
-            result.add(new float[] { s.ax() + (s.bx() - s.ax()) * t0, s.ay() + (s.by() - s.ay()) * t0,
-                  s.ax() + (s.bx() - s.ax()) * t1, s.ay() + (s.by() - s.ay()) * t1 });
-        }
-        return result;
-    }
 }

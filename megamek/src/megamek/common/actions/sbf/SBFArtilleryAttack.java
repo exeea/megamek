@@ -33,9 +33,17 @@
 
 package megamek.common.actions.sbf;
 
+import java.util.List;
+
+import megamek.common.Player;
 import megamek.common.alphaStrike.BattleForceSUA;
+import megamek.common.board.BoardLocation;
+import megamek.common.strategicBattleSystems.SBFArtilleryAmmo;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.logging.MMLogger;
+import megamek.server.sbf.SBFActionHandler;
+import megamek.server.sbf.SBFArtillery;
+import megamek.server.sbf.SBFGameManager;
 
 /**
  * This is a base class for SBF artillery attacks, indirect, against hexes, units or fortifications or direct. IO:BF
@@ -45,10 +53,64 @@ public abstract class SBFArtilleryAttack extends AbstractSBFAttackAction {
     private static final MMLogger logger = MMLogger.create(SBFArtilleryAttack.class);
 
     private final BattleForceSUA artilleryType;
+    private final BoardLocation aim;
+    private final Integer spotterId;
+    private final boolean homing;
+    private SBFArtilleryAmmo ammunition;
 
     public SBFArtilleryAttack(int entityId, int targetId, BattleForceSUA artilleryType) {
+        this(entityId, targetId, artilleryType, null, null);
+    }
+
+    protected SBFArtilleryAttack(int entityId, int targetId, BattleForceSUA artilleryType, BoardLocation aim,
+          Integer spotterId) {
+        this(entityId, targetId, artilleryType, aim, spotterId, false);
+    }
+
+    protected SBFArtilleryAttack(int entityId, int targetId, BattleForceSUA artilleryType, BoardLocation aim,
+          Integer spotterId, boolean homing) {
         super(entityId, targetId);
+        this.homing = homing;
+        this.aim = aim;
+        this.spotterId = spotterId;
         this.artilleryType = artilleryType;
+    }
+
+    public BattleForceSUA artilleryType() {
+        return artilleryType;
+    }
+
+    public BoardLocation aim(SBFGame game) {
+        return aim == null ? game.getFormation(getTargetId()).map(f -> f.getPosition()).orElse(null) : aim;
+    }
+
+    public boolean homing() {
+        return ammo().requiresTag();
+    }
+
+    public SBFArtilleryAmmo ammo() {
+        return ammunition == null ? (homing ? SBFArtilleryAmmo.HOMING : SBFArtilleryAmmo.STANDARD) : ammunition;
+    }
+
+    public void setAmmo(SBFArtilleryAmmo ammo) {
+        ammunition = ammo;
+    }
+
+    public Integer spotterId() {
+        return spotterId;
+    }
+
+    @Override
+    public List<Integer> referencedIds() {
+        if (getTargetId() == Player.PLAYER_NONE) {
+            return spotterId == null ? List.of() : List.of(spotterId);
+        }
+        return spotterId == null ? List.of(getTargetId()) : List.of(getTargetId(), spotterId);
+    }
+
+    @Override
+    public SBFActionHandler getHandler(SBFGameManager manager) {
+        return new SBFArtillery(this, manager);
     }
 
     @Override

@@ -3,6 +3,7 @@
 #ifdef modelSurfaceFlag
 uniform float u_modelPaintMask; // Albedo alpha selects paint rather than opacity, in lit and unlit views.
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
+uniform vec2 u_modelEmissionView; // the emission's fall with the view: scale, offset; 0 none (GpuModelMaterial)
 uniform vec3 u_buildingPaint; // Placement colour on explicitly paintable building surfaces; white elsewhere.
 in vec2 v_modelUV;
 uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit material previews.
@@ -89,6 +90,8 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
 #ifdef normalTextureFlag
             if (u_normalMaps > .5) {
                 vec3 mapped = textureGrad(u_normalTexture, v_modelUV + modelShift, ux, uy).xyz * 2.0 - 1.0;
+                // A two-channel (BC5) normal map reads blue 0: z from x and y (GpuTextureCompression).
+                mapped.z = mapped.z < -.99 ? sqrt(max(0.0, 1.0 - dot(mapped.xy, mapped.xy))) : mapped.z;
                 normal = normalize(mat3(tangent, bitangent, normal) * mapped);
             }
 #endif
@@ -113,10 +116,7 @@ vec3 rubySun(vec3 position, vec3 direction, float roughness) {
     float lobe = .5 * concentration * exp(concentration * (dot(direction, sunDirection()) - 1.0));
     vec3 light = sunColor() * lobe;
 #ifdef shadowMapFlag
-    vec4 projected = u_shadowMapProjViewTrans * vec4(position, 1.0);
-    vec3 uv = projected.xyz / projected.w * .5 + .5;
-    uv.z = min(uv.z, .998);
-    light *= shadowVisibility(shadowTent(uv, vec2(0.0), 1.5, false));
+    light *= shadowFixed(position);
 #endif
 #ifdef cloudShadowFlag
     light *= cloudTransmission(position);
@@ -177,16 +177,30 @@ uniform float u_metre; // world units per metre (modelVisibility)
 // contactShadow) on the receiver's plane, so a building's or a unit's shadow on another model softens with the distance
 // between them; at Medium the fixed tent (surfaceVisibility). Its narrowest is that fixed tent's: narrower, a model's
 // straight edges show the map's texel steps.
-float modelVisibility(vec3 geometric, bool transmits) {
+float modelVisibilityLayer(float layer, vec3 geometric, bool transmits, bool taps) {
 #if defined(shadowMapFlag) && !defined(mediumQualityFlag)
     vec3 light = sunDirection();
+    shadowLayer = layer;
     float texel = shadowTexel(), depthPerUnit;
     vec3 shadowUv = shadowLookup(v_cloudPosition, geometric, light, texel);
     vec2 slope = receiverPlane(shadowUv, light, u_metre, depthPerUnit);
     // Derivatives above remain defined across the light horizon. A face turned from the sun takes no direct light
     // unless it transmits it (shadeSurface): it needs no comparisons.
-    if (!transmits && dot(geometric, light) <= 0.0) return 1.0;
+    if (!taps || !transmits && dot(geometric, light) <= 0.0) return 1.0;
     return contactShadow(shadowUv, slope, depthPerUnit, 1.5);
+#else
+    return surfaceVisibility();
+#endif
+}
+
+// Over both maps, as sculptShadow: each map's derivatives always, its comparisons where the face takes that map.
+float modelVisibility(vec3 geometric, bool transmits) {
+#if defined(shadowMapFlag) && !defined(mediumQualityFlag)
+    float near = shadowNear(v_cloudPosition);
+    float far = modelVisibilityLayer(1.0, geometric, transmits, near < 1.0);
+    float close = modelVisibilityLayer(0.0, geometric, transmits, near > 0.0);
+    shadowLayer = 0.0;
+    return mix(far, close, near);
 #else
     return surfaceVisibility();
 #endif
@@ -205,6 +219,7 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     }
     // Godot's emission: the map times its tint, plus the constant glow.
     emission = emission * u_modelEmission + u_modelGlow;
+    if (u_modelEmissionView.x > 0.0) emission *= clamp(u_modelEmissionView.x * (dot(geometric, view) - u_modelEmissionView.y), 0.0, 1.0);
 #endif
     // Apply light controls after combining glTF emission and the shared material's glow.
     if (u_modelLight.x > 0.0) { emission *= u_modelLight.y; }

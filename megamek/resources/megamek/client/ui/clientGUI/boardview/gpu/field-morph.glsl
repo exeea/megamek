@@ -49,3 +49,20 @@ float fieldMorphWeight(vec3 position, vec3 eye) {
     }
     return m;
 }
+
+#ifdef FIELD_COVER_LOCATION
+// A field hex with a cover border (FieldCover, ChunkMesh): its weights on the draw's palette, an entry a slot of
+// today's blend (GpuSurfaceBlend, terrain-blend.vert's varyings), and its coarse parent's, morphed as the position.
+// The cut's x: the authored transition's share; y: which entries are a wall's foot share, a bit each (footCover cuts
+// them by height); z: the parent's share.
+layout(location = FIELD_COVER_LOCATION) in vec4 a_fieldCover;
+layout(location = FIELD_COVER_PARENT_LOCATION) in vec4 a_fieldCoverParent;
+layout(location = FIELD_COVER_CUT_LOCATION) in vec4 a_fieldCoverCut;
+
+void fieldCoverWeights(float weight) {
+    v_coverWeights = mix(a_fieldCoverParent, a_fieldCover, weight);
+    int feet = int(a_fieldCoverCut.y * 255.0 + .5);
+    v_coverFoot = v_coverWeights * vec4(feet & 1, (feet >> 1) & 1, (feet >> 2) & 1, (feet >> 3) & 1);
+    v_coverInterpolation = mix(a_fieldCoverCut.z, a_fieldCoverCut.x, weight);
+}
+#endif

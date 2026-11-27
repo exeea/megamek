@@ -82,7 +82,6 @@ import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
-import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.randomArmy.AbstractRandomArmyDialog;
 import megamek.client.ui.dialogs.randomArmy.MMMainMenuRandomArmyDialog;
 import megamek.client.ui.dialogs.releaseNotes.ReleaseNotes;
@@ -550,9 +549,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             server.die();
             server = null;
             return;
-        }
-        if (request.recordGif() != null && client.getGame() instanceof Game clientGame) {
-            MinimapPanel.recordGifRecordingDecision(clientGame, request.recordGif(), false);
         }
         gameManager.calculatePlayerInitialCounts();
 

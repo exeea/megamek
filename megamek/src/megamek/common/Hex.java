@@ -78,6 +78,79 @@ public class Hex implements Serializable {
     private String theme;
     private final String originalTheme;
     private int fireTurn;
+    private boolean strategicInferno;
+    private boolean strategicRoadDamaged;
+    // Each bit pair denotes one route through a wooded hex; intersecting passages retain their own endpoints.
+    private Set<Integer> strategicPassages;
+    // Strategic BattleForce: width in TW hexes of the water in a hex that also has ground terrain; 0 = not rolled
+    private int strategicWaterWidth;
+
+    public static int strategicPassage(int firstSide, int secondSide) {
+        if (firstSide < 0 || firstSide > 5 || secondSide < 0 || secondSide > 5 || firstSide == secondSide) {
+            throw new IllegalArgumentException("A passage needs two different hexsides from 0 to 5");
+        }
+        return (1 << firstSide) | (1 << secondSide);
+    }
+
+    public boolean hasStrategicPassage(int passage) {
+        return strategicPassages().contains(passage);
+    }
+
+    public Set<Integer> strategicPassages() {
+        return strategicPassages == null || !containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)
+              ? Set.of() : java.util.Collections.unmodifiableSet(strategicPassages);
+    }
+
+    public boolean hasStrategicPassageAt(int side) {
+        return side >= 0 && side < 6 && strategicPassages().stream().anyMatch(p -> (p & (1 << side)) != 0);
+    }
+
+    public void addStrategicPassage(int passage) {
+        if (strategicPassages == null) {
+            strategicPassages = new HashSet<>();
+        }
+        strategicPassages.add(passage);
+    }
+
+    public void clearStrategicPassages() {
+        strategicPassages = null;
+    }
+
+
+    public boolean isStrategicRoadDamaged() {
+        return strategicRoadDamaged && containsTerrain(Terrains.ROAD);
+    }
+
+    public void damageStrategicRoad() {
+        strategicRoadDamaged = true;
+    }
+
+    public int getStrategicWaterWidth() {
+        return strategicWaterWidth;
+    }
+
+    public void setStrategicWaterWidth(int width) {
+        strategicWaterWidth = width;
+    }
+
+    private Integer strategicIlluminationEnd;
+
+    public boolean hasStrategicInferno() {
+        return strategicInferno;
+    }
+
+    public void igniteStrategicInferno() {
+        strategicInferno = true;
+    }
+
+    public void illuminateStrategic(int round) {
+        strategicIlluminationEnd = round + 2;
+    }
+
+    public boolean isStrategicallyIlluminated(int round) {
+        return strategicIlluminationEnd != null && round <= strategicIlluminationEnd;
+    }
+
     // Null in historical serialized games. Immutable values can safely be shared by undo snapshots.
     private Map<String, HexAppearance> appearance;
     private List<BoardDecoration> decorations;
@@ -907,6 +980,13 @@ public class Hex implements Serializable {
             terrainCopy[i] = new Terrain(terrains.get(i));
         }
         Hex copy = new Hex(level, terrainCopy, theme, coords);
+        copy.strategicInferno = strategicInferno;
+        copy.strategicRoadDamaged = strategicRoadDamaged;
+        copy.strategicWaterWidth = strategicWaterWidth;
+        if (strategicPassages != null) {
+            copy.strategicPassages = new HashSet<>(strategicPassages);
+        }
+        copy.strategicIlluminationEnd = strategicIlluminationEnd;
         copy.appearance = appearance;
         copy.decorations = decorations;
         copy.buildingReference = buildingReference;

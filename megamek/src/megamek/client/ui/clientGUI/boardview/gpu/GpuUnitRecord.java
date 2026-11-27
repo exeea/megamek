@@ -158,17 +158,18 @@ final class GpuUnitRecord {
      * location), jammed, or unusable for any reason ({@code crippled}: {@code Mounted.isCrippled}, which adds jams, an
      * empty magazine and a fired one-shot); whether it fired this round ({@code Mounted.isUsedThisRound}); and while
      * the sheet is open, the weapon display's statistics with its loaded ammunition (for no target, so a Centurion
-     * Weapon System's longer range against a susceptible target is left out; null while the sheet is closed), a bay's
-     * weapons, its quirks ("" without) and, for an own weapon that can switch ammunition, the bins it may load
-     * ({@code WeaponDisplayData.ammoChoices}) and the loaded one's index among them (-1: none).
+     * Weapon System's longer range against a susceptible target is left out; null while the sheet is closed), its
+     * quirks ("" without) and, for an own weapon that can switch ammunition, the bins it may load
+     * ({@code WeaponDisplayData.ammoChoices}; a bay's first weapon's) and the loaded one's index among them (-1: none),
+     * and for an own bay the same for each weapon type it holds ({@code bayLoads}, the first weapon's type first).
      */
     record RecordWeapon(int eqNum, String name, UnitDisplayData.RowParts row, List<Integer> ranges, boolean destroyed,
           boolean jammed, boolean crippled, boolean fired, @Nullable WeaponDisplayData.WeaponStats stats,
-          List<String> bayMembers, String quirks, List<AmmoChoice> ammoChoices, int loadedAmmo) {
+          String quirks, List<AmmoChoice> ammoChoices, int loadedAmmo, List<BayLoad> bayLoads) {
         RecordWeapon {
             ranges = List.copyOf(ranges);
-            bayMembers = List.copyOf(bayMembers);
             ammoChoices = List.copyOf(ammoChoices);
+            bayLoads = List.copyOf(bayLoads);
         }
 
         String location() {
@@ -178,6 +179,16 @@ final class GpuUnitRecord {
         /** The weapon list's shots, "loaded/total", or "" when the list shows none. */
         String shots() {
             return row.totalShots() < 0 ? "" : row.loadedShots() + "/" + row.totalShots();
+        }
+    }
+
+    /**
+     * The weapons of one type in a bay: the first of them ({@code memberEqNum}), their name with their count, the bins
+     * they may load and the loaded one's index among them (-1: none). Loading a bin loads every weapon of the type.
+     */
+    record BayLoad(int memberEqNum, String name, List<AmmoChoice> ammoChoices, int loadedAmmo) {
+        BayLoad {
+            ammoChoices = List.copyOf(ammoChoices);
         }
     }
 
@@ -728,20 +739,41 @@ final class GpuUnitRecord {
                   .boxed().toList();
             List<AmmoChoice> choices = List.of();
             int loaded = -1;
+            List<BayLoad> bayLoads = List.of();
             if (actions && sheet) {
                 WeaponMounted member = ammoWeapon(weapon);
                 List<AmmoMounted> bins = WeaponDisplayData.ammoChoices(entity, weapon, member).ammo();
                 choices = bins.stream().map(bin -> AmmoChoice.of(entity, bin)).toList();
                 loaded = (member.getLinkedAmmo() == null) ? -1 : bins.indexOf(member.getLinkedAmmo());
+                bayLoads = bayLoads(entity, weapon);
             }
             return new RecordWeapon(entity.getEquipmentNum(weapon), weapon.getPlainDesc(),
                   UnitDisplayData.rowParts(game, weapon), ranges,
                   weapon.isInoperable() || ((loc >= 0) && carrier.isLocationBad(loc)),
                   weapon.isJammed(), weapon.isCrippled(), weapon.isUsedThisRound(),
                   sheet ? WeaponDisplayData.stats(game, entity, weapon, weapon.getLinkedAmmo(), false) : null,
-                  sheet ? weapon.getBayWeapons().stream().map(Mounted::getDesc).toList() : List.of(),
-                  sheet ? weapon.getQuirkList(", ") : "", choices, loaded);
+                  sheet ? weapon.getQuirkList(", ") : "", choices, loaded, bayLoads);
         }).toList();
+    }
+
+    /** A bay's weapon types that can switch ammunition, each with its bins; empty for a weapon that is no bay. */
+    private static List<BayLoad> bayLoads(Entity entity, WeaponMounted bay) {
+        List<BayLoad> loads = new ArrayList<>();
+        if (!(bay.getType() instanceof BayWeapon)) {
+            return loads;
+        }
+        List<WeaponMounted> members = bay.getBayWeapons();
+        for (WeaponMounted member : ammoWeapons(bay)) {
+            List<AmmoMounted> bins = WeaponDisplayData.ammoChoices(entity, bay, member).ammo();
+            if (!bins.isEmpty()) {
+                long count = members.stream().filter(other -> other.getType().equals(member.getType())).count();
+                loads.add(new BayLoad(entity.getEquipmentNum(member),
+                      member.getName() + (count > 1 ? " x" + count : ""),
+                      bins.stream().map(bin -> AmmoChoice.of(entity, bin)).toList(),
+                      (member.getLinkedAmmo() == null) ? -1 : bins.indexOf(member.getLinkedAmmo())));
+            }
+        }
+        return loads;
     }
 
     /**
@@ -751,6 +783,30 @@ final class GpuUnitRecord {
     static WeaponMounted ammoWeapon(WeaponMounted weapon) {
         return ((weapon.getType() instanceof BayWeapon) && !weapon.getBayWeapons().isEmpty())
               ? weapon.getBayWeapon(0) : weapon;
+    }
+
+    /**
+     * The weapons whose ammunition a listed weapon offers: the first weapon of each type a bay holds, in the bay's
+     * order; the weapon itself when it is no bay.
+     */
+    static List<WeaponMounted> ammoWeapons(WeaponMounted weapon) {
+        if (!(weapon.getType() instanceof BayWeapon) || weapon.getBayWeapons().isEmpty()) {
+            return List.of(weapon);
+        }
+        List<WeaponMounted> firsts = new ArrayList<>();
+        for (WeaponMounted member : weapon.getBayWeapons()) {
+            if (firsts.stream().noneMatch(first -> first.getType().equals(member.getType()))) {
+                firsts.add(member);
+            }
+        }
+        return firsts;
+    }
+
+    /** The one of {@link #ammoWeapons} whose ammunition list offers the bin; null when none does. */
+    static @Nullable WeaponMounted ammoWeapon(Entity entity, WeaponMounted weapon, AmmoMounted bin) {
+        return ammoWeapons(weapon).stream()
+              .filter(member -> WeaponDisplayData.ammoChoices(entity, weapon, member).ammo().contains(bin))
+              .findFirst().orElse(null);
     }
 
     /** Every piece of equipment the Systems tab lists with a mode list, as it offers it to the owner. */
@@ -765,7 +821,7 @@ final class GpuUnitRecord {
                 equipment.add(new Equipment(entity.getEquipmentNum(mounted), mounted.getName(),
                       location(entity, mounted), choices.labels(), choices.selectedIndex(),
                       modeIndex(mounted, mounted.curMode()),
-                      // MegaMek's rule for a queued switch (SystemPanel): a pending mode other than "None"
+                      // MegaMek's rule for a queued switch: a pending mode other than "None"
                       mounted.pendingMode().equals(Mounted.MODE_NONE) ? -1 : modeIndex(mounted, mounted.pendingMode()),
                       choices.enabled()));
             }
@@ -915,9 +971,13 @@ final class GpuUnitRecord {
         return bins;
     }
 
-    /** The Extras tab's "Carrying" lines, then its searchlight state when the unit has a searchlight. */
+    /**
+     * What the unit carries: its loaded units, clubs and cargo, its bridge kit or bridge layer with its state, then
+     * its searchlight state when it has a searchlight.
+     */
     private static List<String> carried(Game game, Entity entity) {
         List<String> carried = new ArrayList<>(UnitDisplayData.carried(game, entity));
+        carried.addAll(UnitEquipmentActions.bridgeEquipment(entity));
         String searchlight = UnitDisplayData.searchlightText(entity);
         if (!searchlight.isEmpty()) {
             carried.add(searchlight);
@@ -965,7 +1025,6 @@ final class GpuUnitRecord {
         lines(info, InfoSection.REPAIRS, UnitToolTip.getPartialRepairs(entity, true));
         PilotingRollData roll = entity.getBasePilotingRoll();
         info.add(new InfoRow(InfoSection.PSR, roll.getValueAsString(), roll.getDesc(), Entity.NONE));
-        // The Unit Display's summary shows the unit's hex the same way (SummaryPanel)
         Hex hex = game.getHex(entity.getBoardLocation());
         if (hex != null) {
             lines(info, InfoSection.HEX, HexTooltip.getTerrainTip(hex, entity.getBoardId(), game));
@@ -1048,7 +1107,15 @@ final class GpuUnitRecord {
      * change their bin through the fire orders, which declare the attack again.
      */
     void setAmmo(int unitId, int weaponEqNum, AmmoChoice choice) {
-        source.command(() -> ammo(unitId, weaponEqNum, choice));
+        setAmmo(unitId, weaponEqNum, -1, choice);
+    }
+
+    /**
+     * As {@link #setAmmo(int, int, AmmoChoice)} for a bay's weapons of one type ({@link BayLoad#memberEqNum}; -1: of
+     * its first weapon's type).
+     */
+    void setAmmo(int unitId, int weaponEqNum, int bayMemberEqNum, AmmoChoice choice) {
+        source.command(() -> ammo(unitId, weaponEqNum, bayMemberEqNum, choice));
     }
 
     private void mode(int unitId, int eqNum, int mode) {
@@ -1113,13 +1180,17 @@ final class GpuUnitRecord {
         }
     }
 
-    private void ammo(int unitId, int weaponEqNum, AmmoChoice choice) {
+    private void ammo(int unitId, int weaponEqNum, int bayMemberEqNum, AmmoChoice choice) {
         Entity entity = ownUnit(unitId);
         if ((entity == null) || !(entity.getEquipment(weaponEqNum) instanceof WeaponMounted weapon)
               || !WeaponDisplayData.listedWeapons(entity).contains(weapon)) {
             return;
         }
-        WeaponMounted member = ammoWeapon(weapon);
+        WeaponMounted member = (bayMemberEqNum < 0) ? ammoWeapon(weapon) : weapon.getBayWeapons().stream()
+              .filter(other -> entity.getEquipmentNum(other) == bayMemberEqNum).findFirst().orElse(null);
+        if (member == null) {
+            return;
+        }
         AmmoMounted bin = WeaponDisplayData.ammoChoices(entity, weapon, member).ammo().stream().filter(choice::is)
               .findFirst().orElse(null);
         if ((bin != null) && (bin != member.getLinkedAmmo())) {

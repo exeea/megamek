@@ -59,8 +59,7 @@ final class GpuHintLine implements GpuHud.Component {
     /** When the shown gestures last changed, in TimeUtils milliseconds. */
     private long changedAt;
     /**
-     * The pick's chip: its instructions, the picked hexes once there are some, Done and Cancel, as the Legacy 2D
-     * board's picker dialog shows them.
+     * The pick's chip: its instructions, the picked hexes once there are some, Done and Cancel.
      */
     private final Table chip;
     private final Label instructions;
@@ -188,8 +187,7 @@ final class GpuHintLine implements GpuHud.Component {
 
     /**
      * The line's gestures and what each does now, alternating (the prototype's hintText, plan A.12 L11). While a bot
-     * order picks hexes, the pick's: its instructions and picked hexes, Done and Cancel, as the Legacy 2D board's
-     * picker dialog shows them.
+     * order picks hexes, the pick's: its instructions and picked hexes, Done and Cancel.
      */
     static List<String> items(GpuHud.Inputs inputs) {
         return items(inputs, null);

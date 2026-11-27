@@ -80,8 +80,29 @@ final class GpuSurfaceScars implements Disposable {
         List<VertexAttribute> attributes = new ArrayList<>();
         // By index: a layout's iterator is shared, and a program made while a caller walks this layout must not nest it.
         for (int i = 0; i < source.size(); i++) { attributes.add(source.get(i).copy()); }
-        attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 3, UV, 9));
-        return new VertexAttributes(attributes.toArray(VertexAttribute[]::new));
+        // A program maps the page UV beside its mesh's attributes (layout), so its unit must be no terrain layout's:
+        // requireDistinct fails a clash here, and GpuVertexUnitsTest on every declared layout.
+        attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 3, UV, 12));
+        return requireDistinct(new VertexAttributes(attributes.toArray(VertexAttribute[]::new)));
+    }
+
+    /**
+     * The layout itself, or a failure naming two of its attributes with one libGDX key (usage and unit). A program maps
+     * a mesh's attributes to its inputs by that key (BaseShader), so of two with one key the second takes the first's
+     * data and leaves its own input unbound, reading (0, 0, 0, 1).
+     */
+    static VertexAttributes requireDistinct(VertexAttributes attributes) {
+        // By index, as attributes(): a layout's iterator is shared.
+        for (int i = 1; i < attributes.size(); i++) {
+            for (int j = 0; j < i; j++) {
+                if (attributes.get(i).getKey() == attributes.get(j).getKey()) {
+                    throw new IllegalStateException("Vertex attributes " + attributes.get(j).alias + " and "
+                          + attributes.get(i).alias + " share usage " + attributes.get(i).usage + " and unit "
+                          + attributes.get(i).unit + ": a program would bind one in the other's place");
+                }
+            }
+        }
+        return attributes;
     }
 
     /**

@@ -166,7 +166,8 @@ final class GpuMenuPanel implements GpuHud.Component {
               item(items, ClientGUI.HELP_CONTENTS, "Lobby.menu.helpContents")));
         help.add(entries(item(items, Messages.getString("CommonMenuBar.helpReportBug"), "Lobby.menu.reportBug"),
               item(items, Messages.getString("CommonMenuBar.helpCopySystemData"), null)));
-        help.add(entries(item(items, ClientGUI.HELP_ABOUT, "Lobby.menu.about")));
+        help.add(entries(item(items, Messages.getString("CommonMenuBar.helpReleaseNotes"), null),
+              item(items, ClientGUI.HELP_ABOUT, "Lobby.menu.about")));
         groups.add(entries(item(items, ClientGUI.VIEW_CLIENT_SETTINGS, "Lobby.menu.settings"),
               page(HELP, present(help))));
 

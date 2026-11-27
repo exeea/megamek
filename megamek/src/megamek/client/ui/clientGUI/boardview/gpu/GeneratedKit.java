@@ -35,6 +35,8 @@ import megamek.common.board.TilesetScenery;
 final class GeneratedKit {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Map<String, BoardKit<ConnectedKit.Kit>> KITS = new ConcurrentHashMap<>();
+    private static final Map<String, Double> WALKWAYS = new ConcurrentHashMap<>();
+    private static final Map<String, List<double[]>> OUTLINES = new ConcurrentHashMap<>();
 
     private GeneratedKit() { }
 
@@ -55,9 +57,7 @@ final class GeneratedKit {
         String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant + ":" + footprintScale;
         return KITS.computeIfAbsent(key, ignored -> new BoardKit<>(() -> {
             try {
-                boolean vaulted = variant != null && variant.endsWith(TilesetScenery.VAULTED);
-                JsonNode chosen = resolved(JSON.readTree(spec),
-                      vaulted ? variant.substring(0, variant.length() - TilesetScenery.VAULTED.length()) : variant, vaulted);
+                JsonNode chosen = chosen(spec, variant);
                 if (!chosen.path("pieces").isTextual()) { throw new IllegalArgumentException("a kit names its pieces GLB"); }
                 var modelled = RigidGlb.loadLods(new FileHandle(new File(spec.getParentFile(), chosen.path("pieces").asText())),
                       new File(Configuration.dataDir(), "models").toPath());
@@ -85,6 +85,84 @@ final class GeneratedKit {
                 throw new IllegalArgumentException("Cannot read building kit " + spec + ": " + failure.getMessage(), failure);
             }
         })).get();
+    }
+
+    /**
+     * The width of the walkway the kit of {@code spec} in {@code variant} lays round its ground storey (its sidewalk),
+     * in model units; 0 for none or an unreadable spec.
+     */
+    static double walkway(File spec, String variant) {
+        return WALKWAYS.computeIfAbsent(spec.getAbsolutePath() + "@" + variant, ignored -> {
+            try {
+                return chosen(spec, variant).path("sidewalk").path("width").asDouble(0);
+            } catch (IOException | RuntimeException unreadable) {
+                return 0d;
+            }
+        });
+    }
+
+    /**
+     * A kit's ground outline on a hex, from its spec alone (no model is read): the floor polygons of its footprint's
+     * pieces (KitOutline#footprint) for the sides it links across ({@code links}, a mask of kit directions), and the
+     * outer corners of the walkway the kit lays out from each wall (BayKit: {@code sidewalk.width}, mitred where two
+     * walls meet in an outward corner). Points in model units, their corners not rounded. Null for an unreadable spec.
+     */
+    static List<double[]> outline(File spec, boolean square, String variant, float footprintScale, int links) {
+        String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant + ":" + footprintScale + ":" + links;
+        List<double[]> outline = OUTLINES.computeIfAbsent(key, ignored -> {
+            JsonNode chosen;
+            try {
+                chosen = chosen(spec, variant);
+            } catch (IOException | RuntimeException unreadable) {
+                return List.of();
+            }
+            JsonNode lone = chosen.path("lone");
+            double bandEnd = chosen.path("bandEnd").asDouble(lone.path("bandEnd").asDouble(0));
+            String[] names = KitOutline.DIRECTIONS;
+            List<String> wanted = new ArrayList<>();
+            if (links == 0 || !square && Integer.bitCount(links) == 1) {
+                // A lone building, or an Angled kit's whole-hex band toward its one link.
+                StringBuilder tags = new StringBuilder();
+                for (int d = 0; d < 6; d++) { tags.append((links & 1 << d) != 0 ? "-link-" : "-end-").append(names[d]); }
+                wanted.add(tags.toString());
+            } else {
+                for (int d = 0; d < 6; d++) {
+                    int next = (d + 1) % 6;
+                    wanted.add("-" + ((links & 1 << d) != 0 ? "link" : "end") + "-" + names[d]
+                          + "-" + ((links & 1 << next) != 0 ? "link" : "end") + "-" + names[next]);
+                }
+            }
+            List<double[]> points = new ArrayList<>();
+            List<KitOutline.Wall> walls = new ArrayList<>();
+            for (KitOutline.Piece piece : KitOutline.footprint(square, bandEnd, false, footprintScale)) {
+                if (!wanted.contains(piece.tags())) { continue; }
+                piece.polygons().forEach(points::addAll);
+                walls.addAll(KitOutline.sides(piece.walls()));
+            }
+            double width = chosen.path("sidewalk").path("width").asDouble(0);
+            for (KitOutline.Wall wall : width > 0 ? walls : List.<KitOutline.Wall>of()) {
+                double[] n = KitOutline.normal(wall.p(), wall.q());
+                points.add(new double[] { wall.p()[0] + n[0] * width, wall.p()[1] + n[1] * width });
+                points.add(new double[] { wall.q()[0] + n[0] * width, wall.q()[1] + n[1] * width });
+                for (KitOutline.Wall next : walls) {
+                    double[] m = KitOutline.normal(next.p(), next.q());
+                    // An outward corner (the outline runs counter-clockwise: a left turn): the two strips' mitre.
+                    if (KitOutline.close(wall.q(), next.p()) && n[0] * m[1] - n[1] * m[0] > 1e-6) {
+                        double reach = width / (1 + n[0] * m[0] + n[1] * m[1]);
+                        points.add(new double[] { wall.q()[0] + (n[0] + m[0]) * reach, wall.q()[1] + (n[1] + m[1]) * reach });
+                    }
+                }
+            }
+            return List.copyOf(points);
+        });
+        return outline.isEmpty() ? null : outline;
+    }
+
+    /** The spec of {@code variant} in its file, its shared part resolved in (#resolved). */
+    private static JsonNode chosen(File spec, String variant) throws IOException {
+        boolean vaulted = variant != null && variant.endsWith(TilesetScenery.VAULTED);
+        return resolved(JSON.readTree(spec),
+              vaulted ? variant.substring(0, variant.length() - TilesetScenery.VAULTED.length()) : variant, vaulted);
     }
 
     /**
@@ -234,6 +312,8 @@ final class GeneratedKit {
 
     static void reload() {
         KITS.clear();
+        WALKWAYS.clear();
+        OUTLINES.clear();
         aviationLight = null;
     }
 

@@ -38,7 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 
 import megamek.common.net.enums.PacketCommand;
 import megamek.common.net.packets.Packet;
@@ -64,7 +68,7 @@ class PacketPauseGateTest {
     @DisplayName("When not paused, packets pass straight through")
     void packetsPassWhenNotPaused() {
         assertFalse(pauseGate.holdIfPaused(doneReceivedPacket()), "an unpaused game should not hold a packet");
-        assertTrue(pauseGate.unpause().isEmpty(), "nothing should have been held");
+        assertTrue(unpause().isEmpty(), "nothing should have been held");
     }
 
     @Test
@@ -78,7 +82,7 @@ class PacketPauseGateTest {
         assertTrue(pauseGate.holdIfPaused(firstPacket), "a paused game should hold the packet");
         assertTrue(pauseGate.holdIfPaused(secondPacket), "a paused game should hold the packet");
 
-        List<ReceivedPacket> releasedPackets = pauseGate.unpause();
+        List<ReceivedPacket> releasedPackets = unpause();
 
         assertEquals(2, releasedPackets.size(), "both held packets should be released");
         assertSame(firstPacket, releasedPackets.get(0), "the packets should be released in the order they arrived");
@@ -99,6 +103,46 @@ class PacketPauseGateTest {
         assertFalse(pauseGate.isPaused(), "the lobby should not be paused");
         assertFalse(pauseGate.holdIfPaused(doneReceivedPacket()),
               "a Done press in the lobby should pass straight through");
-        assertTrue(pauseGate.unpause().isEmpty(), "the old game's packets should not be released later");
+        assertTrue(unpause().isEmpty(), "the old game's packets should not be released later");
+    }
+
+    @Test
+    @DisplayName("A packet received while the pause ends is queued after the packets held during the pause")
+    void packetReceivedWhileUnpausingIsQueuedAfterTheHeldPackets() throws InterruptedException {
+        ReceivedPacket heldPacket = doneReceivedPacket();
+        ReceivedPacket newPacket = doneReceivedPacket();
+        pauseGate.pause();
+        pauseGate.holdIfPaused(heldPacket);
+        CountDownLatch releasing = new CountDownLatch(1);
+        List<ReceivedPacket> queue = new CopyOnWriteArrayList<>() {
+            @Override
+            public boolean addAll(Collection<? extends ReceivedPacket> packets) {
+                releasing.countDown();
+                try {
+                    // Another connection's packet arrives while the held packets are being queued
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return super.addAll(packets);
+            }
+        };
+        Thread unpausing = new Thread(() -> pauseGate.unpause(queue));
+        unpausing.start();
+        releasing.await();
+
+        // What the server does with a packet just received
+        if (!pauseGate.holdIfPaused(newPacket)) {
+            queue.add(newPacket);
+        }
+        unpausing.join();
+
+        assertEquals(List.of(heldPacket, newPacket), queue, "the held packet must be processed first");
+    }
+
+    private List<ReceivedPacket> unpause() {
+        List<ReceivedPacket> releasedPackets = new ArrayList<>();
+        pauseGate.unpause(releasedPackets);
+        return releasedPackets;
     }
 }

@@ -72,9 +72,9 @@ class GpuOrchardSmokeTest {
                                   List.of(tree), List.of());
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
-                            int[] triangles = new int[TreeLod.LEVELS];
+                            int[] triangles = new int[RigidGlb.LEVELS];
                             var maps = new HashMap<String, Texture>();
-                            for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
+                            for (int lod = 0; lod < RigidGlb.LEVELS; lod++) {
                                 var model = assets.lodModel(name, lod);
                                 for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                                 for (var material : model.materials) {

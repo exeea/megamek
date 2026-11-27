@@ -35,7 +35,6 @@
 package megamek.common.actions;
 
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.clientGUI.tooltip.EntityActionLog;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.game.Game;
@@ -76,15 +75,14 @@ public interface EntityAction {
     }
 
     /**
-     * Returns a short one-line description of the action that is used in the UI, e.g. on attack arrows in the BoardView
-     * and in the action summary in {@link TurnDetailsOverlay}.
+     * Returns a short one-line description of the action that is used in the UI, e.g. in the turn details of the
+     * board's phase panel.
      *
      * @param game The game object to get information from
      *
      * @return A short String describing the action
      *
      * @see EntityActionLog
-     * @see TurnDetailsOverlay
      */
     default String toSummaryString(Game game) {
         String typeName = this.getClass().getTypeName();

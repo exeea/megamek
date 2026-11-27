@@ -32,151 +32,63 @@
  */
 package megamek.client.ui.clientGUI;
 
-import java.awt.Component;
-import java.awt.GridLayout;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import javax.swing.JPanel;
-import javax.swing.JTabbedPane;
-import javax.swing.event.ChangeEvent;
 
-import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.common.board.Board;
 import megamek.common.game.IGame;
 
 /**
- * The BoardViewsContainer manages the JPanel that contains the BoardView(s) of a ClientGUI. When only one BoardView is
- * present, it is shown by itself. When multiple BoardViews are present, they are arranged as tabs of a TabbedPane. The
- * panel that holds the BoardView(s) is obtained from {@link #getPanel()}.
- * <p>
- * The display contents are not automatically updated. Use {@link #updateMapTabs()} after construction and later to make
- * it reflect the current set of BoardViews.
+ * Keeps which of a client's boards is selected ({@link #getCurrentBoardId()}) and lets only that board's state take
+ * keys. Call {@link #updateMapTabs()} when the client's boards change.
  */
 public class BoardViewsContainer {
 
-    /** The panel that displays the BoardView(s) */
-    private final JPanel boardViewsContainer = new JPanel(new GridLayout(1, 1));
-
-    /** The tabbed pane is used when there are multiple boards to display */
-    private final JTabbedPane mapTabPane = new JTabbedPane();
-
-    /**
-     * The {@link megamek.client.ui.clientGUI.boardview.BoardView} components of the game with the board ID as the map
-     * value. Used to retrieve the active {@link megamek.client.ui.clientGUI.boardview.BoardView}
-     */
-    protected final Map<Component, Integer> shownBoardViews = new HashMap<>();
-
     private final AbstractClientGUI clientGUI;
     private Integer selectedBoardId;
-    private boolean legacy2DEnabled = true;
-    private boolean updatingTabs;
 
     /**
-     * Returns a new BoardViewsContainer. Call {@link #updateMapTabs()} after construction to make it reflect the
-     * current BoardViews. Requires a non-null AbstractClientGUI as parent.
+     * Returns a new BoardViewsContainer, which keeps the selected board of the client's board states. Requires a
+     * non-null AbstractClientGUI as parent.
      *
      * @param clientGUI The AbstractClientGUI parent
      */
     public BoardViewsContainer(AbstractClientGUI clientGUI) {
         this.clientGUI = Objects.requireNonNull(clientGUI);
-        mapTabPane.addChangeListener(this::updateBoardViewKeyStatus);
     }
 
     /**
-     * Returns the JPanel that holds the BoardView(s), either one BoardView by itself or multiple BoardViews in a tabbed
-     * pane. Add this panel to the view area of the ClientGUI.
-     *
-     * @return The panel holding all present BoardViews
-     */
-    public Component getPanel() {
-        return boardViewsContainer;
-    }
-
-    /**
-     * Updates the BoardViewsContainer to reflect the current state of ClientGUI's BoardViews.
+     * Follows the client's board states: keeps the selection on a board that exists and lets only its state take keys.
      */
     public void updateMapTabs() {
         updateSelection();
-        updatingTabs = true;
-        try {
-            boardViewsContainer.removeAll();
-            mapTabPane.removeAll();
-            shownBoardViews.clear();
-            if (legacy2DEnabled) {
-                if (clientGUI.boardViews.size() > 1) {
-                    arrangeMultipleBoardViews();
-                    showBoardView(selectedBoardId);
-                } else if (clientGUI.boardViews.size() == 1) {
-                    arrangeSingleBoardView();
-                }
-            }
-        } finally {
-            updatingTabs = false;
-        }
         updateBoardViewKeyStatus();
-        boardViewsContainer.validate();
-        boardViewsContainer.repaint();
-    }
-
-    /** The native board needs selection, but never needs to construct the legacy map components. */
-    public void setLegacy2DEnabled(boolean enabled) {
-        if (legacy2DEnabled != enabled) {
-            legacy2DEnabled = enabled;
-            updateMapTabs();
-        }
-    }
-
-    private void arrangeMultipleBoardViews() {
-        for (int boardId : clientGUI.boardViews.keySet()) {
-            Component boardComponent = boardView(boardId).getComponent();
-            boardComponent.setName(String.valueOf(boardId));
-            mapTabPane.add(board(boardId).getBoardName(), boardComponent);
-            mapTabPane.setToolTipTextAt(mapTabPane.getTabCount() - 1, getBoardViewTabTooltip(boardId));
-            shownBoardViews.put(boardComponent, boardId);
-        }
-        boardViewsContainer.add(mapTabPane);
-    }
-
-    private void arrangeSingleBoardView() {
-        // The single BoardView does not use the tabbed pane
-        int boardId = clientGUI.boardViews.keySet().iterator().next();
-        Component boardComponent = boardView(boardId).getComponent();
-        boardViewsContainer.add(board(boardId).getBoardName(), boardComponent);
-        shownBoardViews.put(boardComponent, boardId);
-    }
-
-    private String getBoardViewTabTooltip(int boardId) {
-        IGame game = clientGUI.getClient().getGame();
-        String tooltip = String.format("<HTML>%s (Board #%d)", game.getBoard(boardId).getBoardName(), boardId);
-        Optional<Board> enclosingBoard = game.getEnclosingBoard(boardId);
-        if (enclosingBoard.isPresent()) {
-            tooltip += "<BR>Located at %s in %s".formatted(enclosingBoard.get()
-                  .embeddedBoardPosition(boardId)
-                  .getBoardNum(), enclosingBoard.get().getBoardName());
-        }
-        return tooltip;
     }
 
     /**
-     * Returns the selected board independently of the visualization. Legacy 2D tabs reflect this selection only when
-     * enabled; native startup and navigation do not depend on a Swing component being constructed or painted.
+     * A board's name and number and, for a board embedded in another, where it lies there: the 3D board's Maps menu
+     * detail.
+     */
+    public static String boardDetail(IGame game, int boardId) {
+        String detail = String.format("%s (Board #%d)", game.getBoard(boardId).getBoardName(), boardId);
+        Optional<Board> enclosingBoard = game.getEnclosingBoard(boardId);
+        if (enclosingBoard.isPresent()) {
+            detail += "\nLocated at %s in %s".formatted(enclosingBoard.get()
+                  .embeddedBoardPosition(boardId)
+                  .getBoardNum(), enclosingBoard.get().getBoardName());
+        }
+        return detail;
+    }
+
+    /**
+     * Returns the selected board independently of the visualization; the 3D board's startup and navigation do not
+     * depend on a Swing component being constructed.
      *
-     * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}, if any
+     * @return The selected board's id, if any board exists
      */
     public Optional<Integer> getCurrentBoardId() {
         updateSelection();
         return Optional.ofNullable(selectedBoardId);
-    }
-
-    public Optional<IBoardView> getCurrentBoardView() {
-        updateSelection();
-        return Optional.ofNullable(clientGUI.boardViews.get(selectedBoardId));
-    }
-
-    public void setName(String name) {
-        boardViewsContainer.setName(name);
     }
 
     public void showBoardView(int boardId) {
@@ -185,44 +97,6 @@ public class BoardViewsContainer {
         }
         selectedBoardId = boardId;
         updateBoardViewKeyStatus();
-        if (legacy2DEnabled && mapTabPane.getTabCount() > 1) {
-            String componentName = String.valueOf(boardId);
-            for (int i = 0; i < mapTabPane.getTabCount(); i++) {
-                if (componentName.equals(mapTabPane.getComponentAt(i).getName())) {
-                    mapTabPane.setSelectedIndex(i);
-                    return;
-                }
-            }
-        }
-    }
-
-    private Board board(int id) {
-        return clientGUI.getClient().getGame().getBoard(id);
-    }
-
-    private IBoardView boardView(int id) {
-        return clientGUI.boardViews.get(id);
-    }
-
-    /**
-     * Sets the {@link megamek.client.ui.clientGUI.boardview.BoardView}'s that are not shown to ignore key presses from
-     * the MegamekController (Key Dispatcher) and the currently shown
-     * {@link megamek.client.ui.clientGUI.boardview.BoardView} to accept them.
-     *
-     * @param changeEvent The changeEvent (not used)
-     */
-    private void updateBoardViewKeyStatus(ChangeEvent changeEvent) {
-        if (!updatingTabs) {
-            Integer boardId = shownBoardViews.get(mapTabPane.getSelectedComponent());
-            if (boardId != null) {
-                selectedBoardId = boardId;
-                updateBoardViewKeyStatus();
-            }
-        }
-    }
-
-    public boolean isLegacy2DEnabled() {
-        return legacy2DEnabled;
     }
 
     private void updateSelection() {

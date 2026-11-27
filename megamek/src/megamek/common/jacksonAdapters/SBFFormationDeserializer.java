@@ -50,6 +50,7 @@ import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
+import megamek.common.strategicBattleSystems.SBFCapitalSector;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFFormationConverter;
 import megamek.common.strategicBattleSystems.SBFUnit;
@@ -97,6 +98,17 @@ public class SBFFormationDeserializer extends StdDeserializer<SBFFormation> {
             formation.setId(node.get(ID).intValue());
         }
         assignPosition(formation, node);
+        if (node.has(SBFFormationSerializer.CAPITAL_SECTOR)) {
+            if (formation.getPosition() != null || !formation.hasSUA(BattleForceSUA.SPC) || !formation.isAerospace()) {
+                throw new IllegalArgumentException("Capital sector requires an SPC Squadron with no ground position.");
+            }
+            formation.setCapitalSector(SBFCapitalSector.parse(node.get(SBFFormationSerializer.CAPITAL_SECTOR).asText()));
+            formation.setDeployed(true);
+        }
+        formation.setHidden(node.path(SBFFormationSerializer.HIDDEN).asBoolean(false));
+        formation.setSharpShooters(node.path(SBFFormationSerializer.SHARP_SHOOTERS).asBoolean(false));
+        formation.setBrawlers(node.path(SBFFormationSerializer.BRAWLERS).asBoolean(false));
+        formation.setReconFacing(node.path(SBFFormationSerializer.RECON_FACING).asInt(0));
         assignDeploymentRound(formation, node);
         return formation;
     }

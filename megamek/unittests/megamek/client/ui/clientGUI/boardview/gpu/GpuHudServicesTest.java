@@ -239,11 +239,6 @@ class GpuHudServicesTest {
     void menuCommandsCarryTheItemsAcceleratorAndToggleState() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean minimap = preferences.getMinimapEnabled();
-        boolean unitDisplay = preferences.getUnitDisplayEnabled();
-        boolean miniReport = preferences.getMiniReportEnabled();
-        boolean playerList = preferences.getPlayerListEnabled();
-        boolean roundsInAir = preferences.getRoundsInAirEnabled();
-        boolean forceDisplay = preferences.getForceDisplayEnabled();
         ClientGUI gui = mock(ClientGUI.class);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardClientState view = spy(fixture.view);
@@ -272,11 +267,6 @@ class GpuHudServicesTest {
                 SwingUtilities.invokeAndWait(() -> {
                     menus.die();
                     preferences.setMinimapEnabled(minimap);
-                    preferences.setUnitDisplayEnabled(unitDisplay);
-                    preferences.setMiniReportEnabled(miniReport);
-                    preferences.setPlayerListEnabled(playerList);
-                    preferences.setRoundsInAirEnabled(roundsInAir);
-                    preferences.setForceDisplayEnabled(forceDisplay);
                 });
             }
         }

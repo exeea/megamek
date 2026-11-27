@@ -264,7 +264,7 @@ class GpuBattleStatusTest {
             AtomicReference<GpuBoardSource> source = new AtomicReference<>();
             AtomicReference<Player> enemy = new AtomicReference<>();
             AtomicReference<Player> ally = new AtomicReference<>();
-            ClientGUI gui = GpuUnitHudTest.gui(fixture);
+            ClientGUI gui = GpuBoardFixture.gui(fixture);
             when(gui.getClient().isMyTurn()).thenAnswer(invocation -> mine.get() != null);
             when(gui.getClient().getMyTurn()).thenAnswer(invocation -> mine.get());
             SwingUtilities.invokeAndWait(() -> {
@@ -626,7 +626,7 @@ class GpuBattleStatusTest {
             AtomicReference<BoardClientState> other = new AtomicReference<>();
             AtomicReference<BoardClientState> shown = new AtomicReference<>();
             // The real ClientGUI.centerOnUnit runs; the stubs stand in for its board container.
-            ClientGUI gui = GpuUnitHudTest.gui(fixture);
+            ClientGUI gui = GpuBoardFixture.gui(fixture);
             doCallRealMethod().when(gui).centerOnUnit(any());
             doAnswer(invocation -> {
                 shown.set(other.get());

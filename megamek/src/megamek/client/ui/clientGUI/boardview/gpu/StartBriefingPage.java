@@ -33,8 +33,6 @@ import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartScreen.Page;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Role;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ScenarioRequest;
@@ -89,8 +87,6 @@ final class StartBriefingPage {
     private Table conditionsLine;
     private Label conditionsValue;
     private UiButton startButton;
-    /** The answer to recording the summary GIF that Start asked, for the start it resumes; null otherwise. */
-    private Boolean gifAnswer;
 
     StartBriefingPage(GpuStartScreen screen) {
         this.screen = screen;
@@ -629,26 +625,9 @@ final class StartBriefingPage {
             screen.stage.setKeyboardFocus(inputs.portInput);
             return;
         }
-        Boolean recordGif = gifAnswer;
-        gifAnswer = null;
-        if (recordGif == null && GUIPreferences.getInstance().getGifGameSummaryRecording() == GifRecordingMode.ASK) {
-            // Asked here, as the lobby asks at Ready: a scenario skips the lobby, and the minimap would ask mid-game
-            screen.dialogs.yesNo(Messages.getString("MinimapPanel.RecordGifDialog.title"),
-                  List.of(Messages.getString("MinimapPanel.RecordGifDialog.message"),
-                        Messages.getString("MinimapPanel.RecordGifDialog.warning")),
-                  Messages.getString("MinimapPanel.RecordGifDialog.remember"), (record, remember) -> {
-                      if (remember) {
-                          GUIPreferences.getInstance().setGifGameSummaryRecording(record ? GifRecordingMode.ALWAYS
-                                : GifRecordingMode.NEVER);
-                      }
-                      gifAnswer = record;
-                      submitBriefing();
-                  });
-            return;
-        }
         screen.starting(startButton, "StartScreen.starting", this::startFailed);
         screen.window.scenario(new ScenarioRequest(briefing.scenario(), briefing.game(), roles, name,
-              online ? inputs.passwordInput.getText() : "", port, recordGif));
+              online ? inputs.passwordInput.getText() : "", port));
     }
 
     /**

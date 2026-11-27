@@ -34,9 +34,9 @@ public final class BoardRough {
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.ROUGH).toList();
         if (features.isEmpty()) { return List.of(); }
         List<Placement> placements = new ArrayList<>();
-        List<BoardSurface.Face> ground = surface.faces.stream()
+        BoardRelief.Ground ground = surface.relief.ground(surface.faces.stream()
               .filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
-                    && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE).toList();
+                    && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE).toList());
         for (BoardScene.Feature feature : features) {
             BoardShape shape = KIT.get().get(feature.asset());
             float x = BoardGeometry.centerX(surface.tile.coords()) + feature.x() * BoardGeometry.hexScale();
@@ -53,7 +53,7 @@ public final class BoardRough {
                     if (points.containsKey(point)) { continue; }
                     Vector3 placed = new Vector3(point).mul(transform);
                     points.put(point, placed);
-                    float support = BoardSurface.sampleHeight(ground, placed.x, placed.y, Float.NaN);
+                    float support = ground.height(placed.x, placed.y);
                     low = Math.min(low, support);
                     high = Math.max(high, support);
                 }

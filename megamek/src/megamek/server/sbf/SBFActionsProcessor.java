@@ -33,29 +33,50 @@
 
 package megamek.server.sbf;
 
+import java.util.function.Predicate;
+
 import megamek.common.actions.EntityAction;
+import megamek.common.actions.sbf.SBFArtilleryAttack;
 import megamek.common.actions.sbf.SBFAttackAction;
+import megamek.common.actions.sbf.SBFStandardUnitAttack;
 
 public record SBFActionsProcessor(SBFGameManager gameManager) implements SBFGameManagerHelper {
 
-    void handleActions() {
-        addNewHandlers();
-        processHandlers();
+    boolean handleActions() {
+        if (game().getActionHandlers().isEmpty()) {
+            addNewHandlers();
+        }
+        processHandlers(action -> action instanceof SBFStandardUnitAttack shot
+              && shot.getWeaponMode() == SBFStandardUnitAttack.WeaponMode.TAG);
+        processHandlers(SBFArtilleryAttack.class::isInstance);
+        if (!game().artillery().airHits().isEmpty()) {
+            return false;
+        }
+        SBFArtillery.resolveArrivals(gameManager);
+        processHandlers(action -> true);
+        SBFTerrainAttackHandler.resolveClearing(gameManager);
         removeFinishedHandlers();
+        return true;
     }
 
     private void addNewHandlers() {
         for (EntityAction action : game().getActionsVector()) {
-            if (action instanceof SBFAttackAction attack && attack.getHandler(gameManager) != null) {
-                game().addActionHandler(attack.getHandler(gameManager));
+            if (action instanceof SBFAttackAction attack) {
+                var handler = attack.getHandler(gameManager);
+                if (handler != null) {
+                    game().addActionHandler(handler);
+                }
             }
             // Actions that aren't attacks are currently not processed through handlers but maybe in the future?
         }
     }
 
-    private void processHandlers() {
+    private void processHandlers(Predicate<EntityAction> select) {
         for (SBFActionHandler handler : game().getActionHandlers()) {
-            if (handler.cares()) {
+            if (!game().artillery().airHits().isEmpty()) {
+                return;
+            }
+            if (!handler.isFinished() && select.test(handler.getAction()) && handler.cares()) {
                 handler.handle();
             }
         }

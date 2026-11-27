@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputAdapter;
@@ -15,8 +16,15 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
+import com.badlogic.gdx.graphics.Cubemap;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Texture3D;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.scenes.scene2d.ui.TooltipManager;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TransformDrawable;
@@ -362,8 +370,24 @@ public final class GpuHost {
         }
     }
 
+    /**
+     * Drops an ended application from libGDX's managed GL resources. libGDX keeps them in static maps keyed by the
+     * application, to rebuild them after a lost context (Android); desktop GL never loses it, and nothing else removes
+     * an ended application's entries, which would keep it, its window and its last scene.
+     */
+    public static void forget(Application ended) {
+        ShaderProgram.clearAllShaderPrograms(ended);
+        Mesh.clearAllMeshes(ended);
+        Texture.clearAllTextures(ended);
+        Cubemap.clearAllCubemaps(ended);
+        TextureArray.clearAllTextureArrays(ended);
+        Texture3D.clearAllTextureArrays(ended);
+        GLFrameBuffer.clearAllFrameBuffers(ended);
+    }
+
     /** The window's thread, as it ends: ends the scenes it leaves, or opens it again for one asked for meanwhile. */
     private static void closed(Throwable failure) {
+        if (application != null) { forget(application); }
         application = null;
         windowHandle = 0;
         clientBounds = null;

@@ -55,19 +55,19 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 import megamek.client.ui.clientGUI.calculationReport.CalculationReport;
 import megamek.common.alphaStrike.ASCardDisplayable;
 import megamek.common.alphaStrike.ASDamage;
 import megamek.common.alphaStrike.ASDamageVector;
+import megamek.common.alphaStrike.ASRange;
 import megamek.common.alphaStrike.ASUnitType;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.alphaStrike.BattleForceSUA;
 import megamek.common.options.OptionsConstants;
 
 public class SBFUnitConverter {
-
-    //TODO: How do MAS/LMAS/STL work? If all have a mix of them, the unit gets all?
 
     private final List<AlphaStrikeElement> elements;
     private final SBFUnit unit = new SBFUnit();
@@ -102,9 +102,9 @@ public class SBFUnitConverter {
         setMovementMode();
         calcUnitJumpMove();
         calcTransportMove();
-        calcUnitTMM();
         calcUnitArmor();
         calcUnitSpecialAbilities();
+        calcUnitTMM();
 
         unit.setDamage(calcUnitDamage());
         calcUnitSkill();
@@ -161,7 +161,7 @@ public class SBFUnitConverter {
             tmm -= 2;
             calculation += " - 1 (SLG/VLG)";
         }
-        if (unit.hasAnySUAOf(STL, MAS)) {
+        if (unit.hasAnySUAOf(STL, MAS, LMAS)) {
             tmm += 2;
             calculation += " + 2 (STL/MAS)";
         }
@@ -276,15 +276,18 @@ public class SBFUnitConverter {
 
     private void calcUnitSpecialAbilities() {
         report.addLine("Special Abilities:", "");
-        addUnitSUAsIfAny(WAT, PRB, AECM, BHJ2, BHJ3, BH, BT, ECM, HPG, LPRB, LECM, TAG);
-        addUnitSUAsIfHalf(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
-        addUnitSUAsIfAll(AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW, TRN);
+        addUnitSUAs(UNIT_IF_ANY);
+        addUnitSUAs(List.of(TAG));
+        addUnitSUAs(UNIT_IF_HALF);
+        addUnitSUAs(UNIT_IF_ALL);
         sumUnitSUAs(CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
-              VTS, AT, DT, MT, PT, ST, SCR);
+              VTS, AT, ATxD, DT, MT, PT, ST, STxD, SCR);
         sumUnitSUAsDivideBy3(ATAC, BOMB, PNT, IF);
-        sumUnitArtillery(ARTLT, ARTS, ARTT, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12);
+        sumUnitArtillery(ARTAIS, ARTAC, ARTLT, ARTS, ARTT, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12);
         calcMHQ();
         calcRCN();
+        calcTorpedoes();
+        calcHarJel();
         calcSTL();
         calcOMNI();
         calcFLK();
@@ -384,22 +387,40 @@ public class SBFUnitConverter {
         return (int) elements.stream().filter(e -> e.hasSUA(SUA)).count();
     }
 
-    private void addUnitSUAsIfAny(BattleForceSUA... SUAs) {
-        addUnitSUAs(1, SUAs);
+    /** IO:BF p. 261, Step 5A: abilities a Unit has when one, half or all of its Elements have them. */
+    private static final List<BattleForceSUA> UNIT_IF_ANY = List.of(WAT, PRB, AECM, BH, BT, ECM, HPG, LPRB, LECM);
+    private static final List<BattleForceSUA> UNIT_IF_HALF = List.of(AMS, ARM, ARS, BAR, BFC, CR, ENG, RBT, SRCH, SHLD);
+    private static final List<BattleForceSUA> UNIT_IF_ALL = List.of(SPC, AMP, AM, BHJ, XMEC, MCS, UCS, MEC, PAR, SAW,
+          TRN, UMU);
+
+    /** IO:BF p. 261, Step 5A: how many of a Unit's Elements must have the ability before the Unit has it. */
+    private static int minimumCount(BattleForceSUA sua, int elementCount) {
+        if (sua == TAG) {
+            return (elementCount >= 6) ? 2 : 1;
+        } else if (UNIT_IF_HALF.contains(sua)) {
+            return Math.max(1, elementCount / 2);
+        } else if (UNIT_IF_ALL.contains(sua)) {
+            return elementCount;
+        } else if (UNIT_IF_ANY.contains(sua)) {
+            return 1;
+        }
+        throw new IllegalArgumentException(sua + " is not converted from an Element count");
     }
 
-    private void addUnitSUAsIfHalf(BattleForceSUA... SUAs) {
-        addUnitSUAs(Math.max(1, elements.size() / 2), SUAs);
+    /**
+     * IO:BF p. 261, Step 5A: whether a Unit of these Elements has the ability, counting the Elements that pass the
+     * test. The conversion counts Elements with the ability; play also counts Design Quirks ({@link SBFDesignQuirks}).
+     */
+    public static boolean unitHasSUA(BattleForceSUA sua, List<AlphaStrikeElement> elements,
+          Predicate<AlphaStrikeElement> elementHasIt) {
+        return elements.stream().filter(elementHasIt).count() >= minimumCount(sua, elements.size());
     }
 
-    private void addUnitSUAsIfAll(BattleForceSUA... SUAs) {
-        addUnitSUAs(elements.size(), SUAs);
-    }
-
-    private void addUnitSUAs(int minimumCount, BattleForceSUA[] SUAs) {
-        for (BattleForceSUA sua : SUAs) {
+    private void addUnitSUAs(List<BattleForceSUA> suas) {
+        for (BattleForceSUA sua : suas) {
             int count = suaCount(elements, sua);
-            if (count >= minimumCount) {
+            int minimumCount = minimumCount(sua, elements.size());
+            if (unitHasSUA(sua, elements, element -> element.hasSUA(sua))) {
                 report.addLine("",
                       sua + ": " + count + " of " + elements.size() + ", minimum " + minimumCount,
                       sua.toString());
@@ -541,7 +562,7 @@ public class SBFUnitConverter {
     }
 
     private void calcRCN() {
-        long rcnCount = elements.stream().filter(e -> e.hasSUA(RCN) || isConsideredRcn(e)).count();
+        long rcnCount = elements.stream().filter(SBFUnitConverter::isReconElement).count();
         if (rcnCount >= 2) {
             unit.getSpecialAbilities().setSUA(RCN);
             report.addLine("",
@@ -550,16 +571,44 @@ public class SBFUnitConverter {
         }
     }
 
-    private void calcSTL() {
-        if (elements.stream().filter(e -> e.hasAnySUAOf(STL, MAS, LMAS)).count() == elements.size()) {
-            unit.getSpecialAbilities().setSUA(STL);
-            unit.getSpecialAbilities().setSUA(MAS);
-            unit.getSpecialAbilities().setSUA(LMAS);
+    /** IO:BF p. 257: convert each TOR bracket independently, just as for other attack values. */
+    private void calcTorpedoes() {
+        if (elements.stream().noneMatch(element -> element.hasSUA(TOR))) {
+            return;
+        }
+        ToDoubleFunction<ASRange> damage = range -> elements.stream()
+              .mapToDouble(element -> element.getTOR().getDamage(range).asDoubleValue()).sum() / 3;
+        ASDamageVector tor = ASDamageVector.createNormRndDmgNoMin(damage.applyAsDouble(ASRange.SHORT),
+              damage.applyAsDouble(ASRange.MEDIUM), damage.applyAsDouble(ASRange.LONG), damage.applyAsDouble(ASRange.EXTREME));
+        if (tor.hasDamage()) {
+            unit.getSpecialAbilities().setSUA(TOR, tor);
+            report.addLine("TOR", "Total damage at each range / 3, rn", tor.toString());
         }
     }
 
-    private static boolean isConsideredRcn(AlphaStrikeElement el) {
-        return (el.isType(ASUnitType.BM) && el.getSize() <= 2 && el.getPrimaryMovementValue() >= 14)
+    /** IO:BF p. 264: a mixed HarJel Unit counts HarJel III twice toward its HarJel II rating. */
+    private void calcHarJel() {
+        int hj2 = (int) elements.stream().filter(element -> element.hasSUA(BHJ2)).count();
+        int hj3 = (int) elements.stream().filter(element -> element.hasSUA(BHJ3)).count();
+        if (hj2 > 0) {
+            unit.getSpecialAbilities().replaceSUA(BHJ2, hj2 + (2 * hj3));
+        } else if (hj3 > 0) {
+            unit.getSpecialAbilities().replaceSUA(BHJ3, hj3);
+        }
+    }
+
+    /** IO:BF pp. 263, 267-268. Any mimetic armor in an otherwise stealth-equipped Unit determines its armor type. */
+    private void calcSTL() {
+        if (elements.stream().allMatch(e -> e.hasAnySUAOf(STL, MAS, LMAS))) {
+            BattleForceSUA armor = elements.stream().anyMatch(e -> e.hasSUA(MAS)) ? MAS
+                  : elements.stream().anyMatch(e -> e.hasSUA(LMAS)) ? LMAS : STL;
+            unit.getSpecialAbilities().setSUA(armor);
+        }
+    }
+
+    /** Elements that count as Recon when forming an SBF Unit (IO:BF p. 267). */
+    public static boolean isReconElement(AlphaStrikeElement el) {
+        return el.hasSUA(RCN) || (el.isType(ASUnitType.BM) && el.getSize() <= 2 && el.getPrimaryMovementValue() >= 14)
               || (el.isType(ASUnitType.BM, ASUnitType.PM) && el.getJumpMove() >= 12)
               || (el.isGround() && el.getSize() <= 2 && el.getPrimaryMovementValue() >= 18)
               || el.getName().contains("Scout")

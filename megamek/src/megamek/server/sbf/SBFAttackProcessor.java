@@ -33,9 +33,17 @@
 
 package megamek.server.sbf;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
+import megamek.common.Player;
 import megamek.common.actions.EntityAction;
+import megamek.common.actions.sbf.SBFStandardUnitAttack;
+import megamek.common.actions.sbf.SBFStandardUnitAttack.WeaponMode;
+import megamek.common.strategicBattleSystems.SBFCombatOrders;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFToHitData;
 import megamek.logging.MMLogger;
@@ -43,30 +51,150 @@ import megamek.logging.MMLogger;
 record SBFAttackProcessor(SBFGameManager gameManager) implements SBFGameManagerHelper {
     private static final MMLogger logger = MMLogger.create(SBFAttackProcessor.class);
 
-    void processAttacks(List<EntityAction> actions, SBFFormation formation) {
-        if (!validatePermitted(actions, formation)) {
-            return;
+    /**
+     * Executes a formation's submitted attacks. They are checked as a whole and rebuilt on the server with the range
+     * that the formations' positions give; one invalid attack refuses the whole submission.
+     *
+     * @return true when the attacks were accepted, false when they were refused (nothing changed)
+     */
+    boolean processAttacks(List<EntityAction> submittedActions, SBFFormation formation) {
+        Optional<List<SBFStandardUnitAttack>> attacks = validateAndRebuild(submittedActions, formation);
+        if (attacks.isEmpty()) {
+            return false;
         }
 
-        actions.forEach(game()::addAction);
+        attacks.get().forEach(game()::addAction);
+        publishEstablishedSight(formation, attacks.get());
         formation.setDone(true);
         gameManager.sendUnitUpdate(formation);
         gameManager.sendPendingActions();
         gameManager.endCurrentTurn(formation);
+        return true;
     }
 
-    private boolean validatePermitted(List<EntityAction> actions, SBFFormation formation) {
-        if (!game().getPhase().isFiring()) {
-            logger.error("Server got attacks packet in wrong phase!");
-            return false;
-        } else if (formation.isDone()) {
-            logger.error("Formation already done!");
-            return false;
-        } else if (SBFToHitData.targetsOfFormation(formation, game()).size() > 2) {
-            logger.error("Formation targeting too many targets!");
+    /** Supplementary chat declaration on the active player's turn; normal Done orders finish the Formation. */
+    boolean declareWeapon(int playerId, SBFStandardUnitAttack action) {
+        SBFFormation formation = game().getFormation(action.getEntityId()).orElse(null);
+        if ((formation == null) || (game().getTurn() == null) || !game().getTurn().isValid(playerId, formation, game())) {
             return false;
         }
-
+        var accepted = validateAndRebuild(List.of(action), formation);
+        if (accepted.isEmpty()) {
+            return false;
+        }
+        accepted.get().forEach(game()::addAction);
+        publishEstablishedSight(formation, accepted.get());
+        gameManager.sendPendingActions();
+        gameManager.sendPendingPackets();
         return true;
+    }
+
+    private void publishEstablishedSight(SBFFormation formation, List<SBFStandardUnitAttack> attacks) {
+        boolean sightChanged = false;
+        for (SBFStandardUnitAttack shot : attacks) {
+            if (shot.getWeaponMode() == WeaponMode.INDIRECT) {
+                continue;
+            }
+            SBFFormation target = game().getFormation(shot.getTargetId()).orElseThrow();
+            if (SBFCombatOrders.controlsSight(game(), formation, target)) {
+                game().combatOrders().setSight(formation, target, true, true);
+                sightChanged = true;
+            }
+            if (SBFCombatOrders.controlsSight(game(), target, formation)) {
+                game().combatOrders().setSight(target, formation, true, true);
+                sightChanged = true;
+            }
+        }
+        if (sightChanged) {
+            new SBFCombatControl(gameManager).publish();
+        }
+    }
+
+    /**
+     * Checks the attacks against IO:BF p.169 (one standard attack per Unit per turn, at most two enemy Formations as
+     * targets) and p.170 (range). With reconnaissance, a located enemy has a counter in a known hex (p.196).
+     */
+    private Optional<List<SBFStandardUnitAttack>> validateAndRebuild(List<EntityAction> submittedActions,
+          SBFFormation formation) {
+        if (!game().getPhase().isFiring()) {
+            logger.error("Server got attacks packet in wrong phase!");
+            return Optional.empty();
+        } else if (formation.hasSprintedThisTurn()) {
+            logger.error("Sprinted formation cannot attack!");
+            return Optional.empty();
+        } else if (formation.isDone()) {
+            logger.error("Formation already done!");
+            return Optional.empty();
+        }
+
+        Player actingPlayer = game().getPlayer(formation.getOwnerId());
+        if (actingPlayer == null) {
+            logger.error("Attacking formation has no owner!");
+            return Optional.empty();
+        }
+
+        Set<Integer> usedUnitNumbers = new HashSet<>();
+        Set<Integer> torpedoUnits = new HashSet<>();
+        List<EntityAction> declarations = new ArrayList<>(game().getActionsVector());
+        declarations.addAll(submittedActions);
+        for (EntityAction existing : game().getActionsVector()) {
+            if ((existing instanceof SBFStandardUnitAttack attack) && (attack.getEntityId() == formation.getId())) {
+                var used = attack.getWeaponMode() == WeaponMode.TORPEDO ? torpedoUnits : usedUnitNumbers;
+                used.add(attack.getUnitNumber());
+            }
+        }
+
+        Set<Integer> targetIds = new HashSet<>(SBFToHitData.targetsOfFormation(formation, game()));
+        List<SBFStandardUnitAttack> attacks = new ArrayList<>(submittedActions.size());
+        for (EntityAction submittedAction : submittedActions) {
+            if (!(submittedAction instanceof SBFStandardUnitAttack attack)
+                  || (attack.getEntityId() != formation.getId())
+                  || !attack.isDataValid(game())
+                  || !(attack.getWeaponMode() == WeaponMode.TORPEDO ? torpedoUnits : usedUnitNumbers)
+                        .add(attack.getUnitNumber())) {
+                logger.error("Invalid or duplicate SBF standard attack submission!");
+                return Optional.empty();
+            }
+
+            SBFFormation target = game().getFormation(attack.getTargetId()).orElse(null);
+            if ((target == null) || (game().getPlayer(target.getOwnerId()) == null)
+                  || !game().areHostile(target, actingPlayer)
+                  || !game().getVisibility(actingPlayer, target.getId()).isLocated()) {
+                logger.error("Invalid, friendly, or hidden SBF attack target!");
+                return Optional.empty();
+            }
+
+            if (target.isOnRadarMap() && !formation.isOnRadarMap() && game().usesDoubleBlind()
+                  && (formation.getPosition() == null || target.getGroundFlightPath().stream()
+                        .noneMatch(hex -> hex.isSameBoardAs(formation.getPosition())
+                              && hex.coords().distance(formation.getPosition().coords()) <= SBFDetectionHelper.visualRange(game(), formation)))) {
+                return Optional.empty();
+            }
+            if ((attack.getWeaponMode() == WeaponMode.TAG) && (!game().getOptions().booleanOption(
+                  megamek.common.options.SBFRuleOptions.ADVANCED_ARTILLERY) || !formation.occupiesGroundHex()
+                  || !target.occupiesGroundHex() || (formation.getPosition().coords().distance(target.getPosition().coords())
+                  > SBFDetectionHelper.visualRange(game(), formation)))) {
+                return Optional.empty();
+            }
+            SBFToHitData toHit = SBFToHitData.compileToHit(game(), attack, declarations);
+            if (toHit.cannotSucceed()) {
+                logger.error("SBF standard attack is impossible!");
+                return Optional.empty();
+            }
+
+            attacks.add(new SBFStandardUnitAttack(formation.getId(), attack.getUnitNumber(), target.getId(),
+                  toHit.attackRange().orElseThrow(), attack.getWeaponMode(), attack.getSpotterId()));
+            targetIds.add(target.getId());
+        }
+
+        if (usedUnitNumbers.size() > game().combatOrders().standardAttackLimit(formation)) {
+            logger.error("Outmaneuvered Formation declared too many attacks!");
+            return Optional.empty();
+        }
+        if (targetIds.size() > 2) {
+            logger.error("Formation targeting too many targets!");
+            return Optional.empty();
+        }
+        return Optional.of(attacks);
     }
 }

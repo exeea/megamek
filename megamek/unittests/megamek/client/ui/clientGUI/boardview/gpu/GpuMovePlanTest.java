@@ -42,7 +42,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Mode;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Snapshot;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Step;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark.Envelope;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -715,7 +715,7 @@ class GpuMovePlanTest {
             assertTrue(picking.active());
             assertFalse(picking.planner() || picking.canPin() || picking.canUndo());
             assertEquals(Mode.OTHER, picking.mode());
-            assertFalse(onSwing(moving::envelopeSprites).isEmpty(), "MegaMek's board highlights the pick's hexes");
+            assertFalse(onSwing(moving::envelopeMarks).isEmpty(), "MegaMek's board highlights the pick's hexes");
             assertEquals(Map.of(), picking.envelope(), "and shows no movement envelope");
 
             // A command of an older frame is dropped: nothing is plotted and the pick still waits.
@@ -812,8 +812,8 @@ class GpuMovePlanTest {
             scriptTurns(moving, LOCAL, OPPONENT);
             selectEscapePodTank(moving);
             moving.command(MoveCommand.MOVE_LAUNCH_ESCAPE_POD);
-            Set<Coords> pick = onSwing(() -> moving.envelopeSprites().stream()
-                  .map(MovementEnvelopeSprite::getPosition).collect(Collectors.toSet()));
+            Set<Coords> pick = onSwing(() -> moving.envelopeMarks().stream()
+                  .map(Envelope::coords).collect(Collectors.toSet()));
             assertFalse(pick.isEmpty(), "MegaMek's board state highlights the pick's hexes");
             onSwing(() -> {
                 moving.board.source.refresh();

@@ -21,17 +21,8 @@ import megamek.client.Client;
 import megamek.client.CloseClientListener;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
-import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.common.Player;
@@ -41,6 +32,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListener;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -51,29 +43,16 @@ class ClientGUIBoardLifecycleTest {
     @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
     void nativeMapArrivalReplacementAndBoardSelectionNeedNoLegacy2DRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
-            try (var views = mockConstruction(BoardView.class);
-                  var panels = mockConstruction(BoardViewPanel.class);
-                  var rulers = mockConstruction(RulerDialog.class);
-                  var units = mockConstruction(EntitySprite.class);
-                  var isometric = mockConstruction(IsometricSprite.class);
-                  var display = mockConstruction(UnitDisplayPanel.class);
-                  var dialog = mockConstruction(UnitDisplayDialog.class);
-                  var weapons = mockConstruction(WeaponPanel.class);
-                  var sound = mockConstruction(SoundManager.class);
+            try (var sound = mockConstruction(SoundManager.class);
                   var session = Session.create(phase)) {
                 Game game = session.game();
                 ClientGUI gui = session.gui();
-                // Startup preferences and phase rules may request the inspector before the native window exists.
-                gui.setUnitDisplayVisible(true);
-                gui.setUnitDisplayLocation(true);
-                assertNull(gui.getUnitDisplay());
-                assertNull(gui.getUnitDisplayDialog());
                 game.receiveBoard(0, Board.createEmptyBoard(8, 8));
                 BoardClientState first = gui.getBoardState();
                 assertNotNull(first);
                 assertSame(gui.getTilesetManager(), first.getTilesetManager());
-                assertTrue(gui.boardViews().isEmpty());
                 int listeners = game.getGameListeners().size();
+                int callbacks = session.closeListeners().size();
                 for (int i = 0; i < 3; i++) {
                     Board oldBoard = game.getBoard();
                     BoardClientState oldState = gui.getBoardState();
@@ -81,7 +60,8 @@ class ClientGUIBoardLifecycleTest {
                     assertTrue(oldState.isClosed());
                     assertNotSame(oldState, gui.getBoardState());
                     assertEquals(listeners, game.getGameListeners().size(), "Replacing a map must detach old listeners");
-                    assertEquals(1, session.closeListeners().size(), "The old minimap must release its client callback");
+                    assertEquals(callbacks, session.closeListeners().size(),
+                          "Replacing a map must release its client callbacks");
                     assertEquals(List.of(), boardListeners(oldBoard), "Replaced maps must release every subscription");
                     long revision = oldState.getRevision();
                     oldBoard.setHex(new Coords(1, 1), oldBoard.getHex(1, 1).duplicate());
@@ -90,8 +70,6 @@ class ClientGUIBoardLifecycleTest {
                 game.receiveBoard(2, Board.createEmptyBoard(6, 6));
                 gui.showBoardView(2);
                 assertSame(first.getTilesetManager(), gui.getBoardState(2).getTilesetManager());
-                assertSame(gui.getBoardState(2).getOverlay(BoardToastOverlay.class),
-                      gui.getToastOverlay());
                 assertSame(gui.getBoardState(2), gui.getBoardState());
                 BoardClientState removed = gui.getBoardState(2);
                 Board removedBoard = removed.getBoard();
@@ -100,14 +78,8 @@ class ClientGUIBoardLifecycleTest {
                 assertNull(gui.getBoardState(2));
                 assertSame(gui.getBoardState(0), gui.getBoardState());
                 assertEquals(List.of(), boardListeners(removedBoard));
-                assertTrue(views.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
-                assertTrue(rulers.constructed().isEmpty(), "Native startup must not construct a Swing ruler");
-                assertTrue(units.constructed().isEmpty());
-                assertTrue(isometric.constructed().isEmpty());
-                assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");
-                assertTrue(dialog.constructed().isEmpty());
-                assertTrue(weapons.constructed().isEmpty());
+
+
                 gui.die();
                 assertTrue(gui.boardStates().isEmpty());
                 assertTrue(session.closeListeners().isEmpty());
@@ -131,7 +103,6 @@ class ClientGUIBoardLifecycleTest {
         Board server = Board.createEmptyBoard(6, 6);
         try {
             onClient(() -> {
-                resources.push(mockConstruction(UnitDisplayPanel.class));
                 resources.push(mockConstruction(SoundManager.class));
                 // Without a server-built battlefield every preview request rolls a new board from the map settings.
                 var rolls = mockStatic(ServerBoardHelper.class);
@@ -144,7 +115,7 @@ class ClientGUIBoardLifecycleTest {
                 Window frame = gui.getFrame();
                 var gpu = mockStatic(GpuBoardWindow.class);
                 resources.push(gpu);
-                gpu.when(() -> GpuBoardWindow.openLobbyPreview(any(Window.class), any(Board.class), any()))
+                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class), any(PlanetaryConditions.class)))
                       .thenAnswer(call -> {
                           assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby");
                           shown3D.set(call.getArgument(1));
@@ -200,32 +171,6 @@ class ClientGUIBoardLifecycleTest {
                 return null;
             });
         }
-    }
-
-    @Test
-    void switchingRenderersKeepsTheSameStateAndSelection() throws Exception {
-        onClient(() -> {
-            try (var display = mockConstruction(UnitDisplayPanel.class);
-                  var sound = mockConstruction(SoundManager.class);
-                  var session = Session.create()) {
-                session.game().receiveBoard(0, Board.createEmptyBoard(8, 8));
-                ClientGUI gui = session.gui();
-                BoardClientState state = gui.getBoardState();
-                Coords selected = new Coords(3, 4);
-                state.select(selected);
-                for (int i = 0; i < 2; i++) {
-                    gui.setLegacy2DViewEnabled(true);
-                    assertSame(state, gui.getBoardView().getClientState());
-                    assertEquals(selected, state.getSelected());
-                    gui.setLegacy2DViewEnabled(false);
-                    assertSame(state, gui.getBoardState());
-                    assertFalse(state.isClosed());
-                    assertTrue(gui.boardViews().isEmpty());
-                    assertEquals(selected, state.getSelected());
-                }
-            }
-            return null;
-        });
     }
 
     /**

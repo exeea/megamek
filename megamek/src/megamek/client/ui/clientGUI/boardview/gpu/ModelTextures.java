@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
@@ -33,12 +34,31 @@ final class ModelTextures {
     private ModelTextures() { }
 
     /**
+     * A building kit's far atlas map ({@code structures/buildings/<kit>-far_<map>.png}, the kit README's "Far level"): it
+     * draws facades the iso camera sees at a slant, which without anisotropic filtering take a mip level softer than the
+     * near level's own edges at the switch.
+     */
+    private static final Pattern FAR_ATLAS =
+          Pattern.compile(".*[\\\\/]structures[\\\\/]buildings[\\\\/][^\\\\/]+-far_[a-z]+\\.png");
+
+    /**
      * An image as one glTF role reads it: its cache key, whether its RGB is sRGB, whether its alpha is a paint mask
      * ({@link GpuColorTexture#paintLevels}), its pixels and its sampler.
      */
-    private record Role(String key, boolean color, boolean paint, Supplier<Pixmap> pixels, RigidGlb.Image image) {
-        GpuColorTexture.Cutout levels() {
-            return paint ? GpuColorTexture.paintLevels(pixels.get()) : GpuColorTexture.cutoutLevels(pixels.get());
+    private record Role(String key, boolean color, boolean paint, Supplier<Pixmap> pixels, RigidGlb.Image image, int usage) {
+        GpuColorTexture.Cutout levels() { return levels(pixels.get()); }
+
+        GpuColorTexture.Cutout levels(Pixmap image) {
+            return paint ? GpuColorTexture.paintLevels(image) : GpuColorTexture.cutoutLevels(image);
+        }
+
+        /** Its storage when compressed (GpuTextureCompression), else null; on the GL thread. */
+        GpuTextureCompression.Kind compressed() { return GpuTextureCompression.kind(usage, paint); }
+
+        /** Its texture's cache key: a compressed texture is the model's own, never a board draw's texture. */
+        String cacheKey() {
+            var kind = compressed();
+            return kind == null ? key : "bc:" + kind + ":" + key;
         }
     }
 
@@ -88,11 +108,13 @@ final class ModelTextures {
         // next one (a context restore) decodes them again.
         Map<String, CompletableFuture<Pixmap>> ahead = new HashMap<>();
         Map<String, CompletableFuture<GpuColorTexture.Cutout>> aheadColours = new HashMap<>();
+        Map<String, CompletableFuture<GpuTextureCompression.Prepared>> aheadCompressed = new HashMap<>();
         BiFunction<String, Integer, Texture> load = (key, usage) -> {
             var read = role.apply(key, usage);
             if (read == null) { return external.apply(key, color(usage)); }
-            return cache.computeIfAbsent(read.key(), ignored -> {
-                Texture texture = read.color() ? GpuColorTexture.cutout(() -> {
+            return cache.computeIfAbsent(read.cacheKey(), ignored -> {
+                Texture texture = read.compressed() != null ? compressed(read, aheadCompressed.remove(read.cacheKey()))
+                      : read.color() ? GpuColorTexture.cutout(() -> {
                     var started = aheadColours.remove(read.key());
                     return started != null ? GpuAssets.joined(started) : read.levels();
                 }) : GpuColorTexture.create(() -> {
@@ -101,6 +123,9 @@ final class ModelTextures {
                 }, true, false);
                 texture.setFilter(filter(read.image().minFilter()), filter(read.image().magFilter()));
                 texture.setWrap(wrap(read.image().wrapS()), wrap(read.image().wrapT()));
+                if (read.image().file() != null && FAR_ATLAS.matcher(read.image().file()).matches()) {
+                    texture.setAnisotropicFilter(8);
+                }
                 return texture;
             });
         };
@@ -108,8 +133,12 @@ final class ModelTextures {
         try {
             for (var read : reads) {
                 var image = role.apply(read.getKey(), read.getValue());
-                if (image == null || cache.containsKey(image.key())) { continue; }
-                if (image.color()) {
+                if (image == null || cache.containsKey(image.cacheKey())) { continue; }
+                var kind = image.compressed();
+                if (kind != null) {
+                    aheadCompressed.computeIfAbsent(image.cacheKey(),
+                          ignored -> GpuAssets.pooled(() -> GpuTextureCompression.prepare(image.pixels().get(), kind)));
+                } else if (image.color()) {
                     aheadColours.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(image::levels));
                 } else {
                     ahead.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(image.pixels()));
@@ -122,6 +151,10 @@ final class ModelTextures {
             ahead.clear();
             aheadColours.values().forEach(levels -> levels.thenAccept(untaken -> untaken.image().dispose()));
             aheadColours.clear();
+            aheadCompressed.values().forEach(prepared -> prepared.thenAccept(untaken -> {
+                if (untaken.image() != null) { untaken.image().dispose(); }
+            }));
+            aheadCompressed.clear();
         }
         Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN))) {
             private Map<String, MeshPart> partsById;
@@ -241,6 +274,27 @@ final class ModelTextures {
         return model;
     }
 
+    /**
+     * {@code read}'s compressed texture ({@code started}: its preparation on the pool, else null), or today's where its
+     * image stays as it is (GpuTextureCompression#prepare).
+     */
+    private static Texture compressed(Role read, CompletableFuture<GpuTextureCompression.Prepared> started) {
+        var kind = read.compressed();
+        var prepared = started != null ? GpuAssets.joined(started) : GpuTextureCompression.prepare(read.pixels().get(), kind);
+        if (prepared.levels() != null) {
+            return GpuTextureCompression.texture(prepared.levels(),
+                  () -> GpuTextureCompression.levels(read.pixels().get(), kind), read.color());
+        }
+        // The first upload takes the decoded image; a context restore decodes it again.
+        Pixmap[] first = { prepared.image() };
+        Supplier<Pixmap> pixels = () -> {
+            Pixmap image = first[0];
+            first[0] = null;
+            return image != null ? image : read.pixels().get();
+        };
+        return read.color() ? GpuColorTexture.cutout(() -> read.levels(pixels.get())) : GpuColorTexture.create(pixels, true, false);
+    }
+
     /** {@code image} (the model's image {@code key}) as role {@code usage} reads it, {@code painted} its paint masks; GL-free. */
     private static Role role(RigidGlb.Image image, String key, int usage, File textures, Set<String> painted) {
         boolean color = color(usage), paint = usage == ModelTexture.USAGE_DIFFUSE && painted.contains(key);
@@ -249,7 +303,7 @@ final class ModelTextures {
               : image.encoded() == null ? () -> GpuColorTexture.decode(new FileHandle(image.file()))
               : () -> GpuColorTexture.decode(image.encoded());
         return new Role((paint ? "paint:" : color ? "color:" : "data:") + key + (map == null ? "" : map.suffix()), color, paint,
-              pixels, image);
+              pixels, image, usage);
     }
 
     private static boolean color(int usage) {

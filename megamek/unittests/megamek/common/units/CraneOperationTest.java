@@ -56,6 +56,23 @@ class CraneOperationTest {
     private static final int NORTH_EAST = 1;
 
     @Test
+    void unitThatMovesIsNoLongerWaitingInPlace() {
+        Coords waitingHex = new Coords(3, 1);
+        VTOL vtol = new VTOL();
+        vtol.setId(30);
+        vtol.setPosition(waitingHex);
+        CraneOperation loading = CraneOperation.load(vtol.getId(), waitingHex);
+        assertTrue(loading.isWaitingInPlace(vtol), "Still in the hex it declared from");
+
+        vtol.delta_distance = 1;
+        assertFalse(loading.isWaitingInPlace(vtol), "Moved this turn, even if it came back");
+
+        vtol.delta_distance = 2;
+        vtol.setPosition(new Coords(1, 1));
+        assertFalse(loading.isWaitingInPlace(vtol), "Left the hex it declared from");
+    }
+
+    @Test
     @DisplayName("Loading needs four turns after the declaring turn (TW p.90)")
     void loadingTakesFourTurns() {
         CraneOperation operation = CraneOperation.load(12, WAITING_HEX);

@@ -32,7 +32,6 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
@@ -219,12 +218,12 @@ class GpuModalBridgeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<Integer> boardEvents = new CopyOnWriteArrayList<>();
             GpuBoardSource source = onSwing(() -> {
-                BoardView view = new BoardView(fixture.game, null, gui, 0);
+                BoardClientState view = new BoardClientState(fixture.game, null, gui, 0, null);
                 view.setLocalPlayer(fixture.player.getId());
                 // The client shows this board, so its captured commands stay current.
-                when(gui.getCurrentBoardState()).thenReturn(Optional.of(view.getClientState()));
-                recordBoardEvents(view.getClientState(), boardEvents);
-                return new GpuBoardSource(view.getClientState(), () -> fixture.panel);
+                when(gui.getCurrentBoardState()).thenReturn(Optional.of(view));
+                recordBoardEvents(view, boardEvents);
+                return new GpuBoardSource(view, () -> fixture.panel);
             });
             AtomicReference<MockedStatic<UIUtil>> modal = new AtomicReference<>();
             try {

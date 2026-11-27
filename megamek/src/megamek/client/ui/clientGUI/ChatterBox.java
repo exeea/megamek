@@ -57,16 +57,11 @@ import javax.swing.JTextField;
 import megamek.client.Client;
 import megamek.client.commands.ClientCommand;
 import megamek.client.ui.Messages;
-import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.event.GameListenerAdapter;
-import megamek.common.event.GamePhaseChangeEvent;
-import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.event.entity.GameEntityNewEvent;
-import megamek.common.event.entity.GameEntityRemoveEvent;
-import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.preference.PreferenceManager;
 
@@ -97,47 +92,20 @@ public class ChatterBox implements KeyListener {
         clientGUI = clientgui;
         client.getGame().addGameListener(new GameListenerAdapter() {
 
-            private void refreshPlayerListDialog(ClientGUI clientgui) {
-                PlayerListDialog pld = clientgui.getPlayerListDialog();
-                if (pld != null) {
-                    pld.refreshPlayerList(playerList, client);
-                }
-            }
-
             @Override
             public void gamePlayerChat(GamePlayerChatEvent e) {
                 chatArea.append('\n' + e.getMessage());
-                refreshPlayerListDialog(clientgui);
                 moveToEnd();
             }
 
-            @Override
-            public void gamePlayerChange(GamePlayerChangeEvent e) {
-                refreshPlayerListDialog(clientgui);
-            }
 
-            @Override
-            public void gameTurnChange(GameTurnChangeEvent e) {
-                refreshPlayerListDialog(clientgui);
-            }
-
-            @Override
-            public void gamePhaseChange(GamePhaseChangeEvent e) {
-                refreshPlayerListDialog(clientgui);
-            }
 
             @Override
             public void gameEntityNew(GameEntityNewEvent e) {
-                refreshPlayerListDialog(clientgui);
 
                 if (PreferenceManager.getClientPreferences().getPrintEntityChange()) {
                     systemMessage(e.getNumberOfEntities() + " " + Messages.getString("ChatterBox.entitiesAdded"));
                 }
-            }
-
-            @Override
-            public void gameEntityRemove(GameEntityRemoveEvent e) {
-                refreshPlayerListDialog(clientgui);
             }
 
             @Override
@@ -255,6 +223,15 @@ public class ChatterBox implements KeyListener {
         }
     }
 
+    /** Keeps {@code line} first in the chat history (the last {@link #MAX_HISTORY} sent lines). */
+    public void remember(String line) {
+        history.addFirst(line);
+        historyBookmark = -1;
+        if (history.size() > MAX_HISTORY) {
+            history.removeLast();
+        }
+    }
+
     /** The chat's last {@code max} non-blank lines, oldest first. */
     public List<String> lines(int max) {
         List<String> lines = new ArrayList<>();
@@ -293,15 +270,9 @@ public class ChatterBox implements KeyListener {
     @Override
     public void keyPressed(KeyEvent ev) {
         if (ev.getKeyCode() == KeyEvent.VK_ENTER) {
-            history.addFirst(inputField.getText());
-            historyBookmark = -1;
-
+            remember(inputField.getText());
             submit(inputField.getText());
             inputField.setText("");
-
-            if (history.size() > MAX_HISTORY) {
-                history.removeLast();
-            }
         } else if (ev.getKeyCode() == KeyEvent.VK_UP) {
             historyBookmark++;
             fetchHistory();

@@ -63,6 +63,8 @@ import megamek.logging.MMLogger;
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
+    /** How far the route lies over the ground it crosses, in hex radii; a pinned waypoint's number sits on it there. */
+    static final float ROUTE_LIFT = .07f;
     /** The vertices of every route and movement mark (Sink). */
     private static final long VERTICES = VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked;
     // overlay.js:10-12, the selection palette of both views; movement uses the client's colours.
@@ -275,7 +277,7 @@ final class GpuBoardOverlay implements Disposable {
         builds++;
         mover = null;
         arrival = null;
-        pulse.begin(tactical, BoardGeometry.WIDTH / 2);
+        pulse.begin(BoardGeometry.WIDTH / 2);
         if (movementMarkers != null) {
             movementMarkers.model.dispose();
             movementMarkers = null;
@@ -1143,11 +1145,11 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * The plotted route, else the hover preview at half strength while no unit is hovered (overlay.js:40-47,
-     * flat.js:43-47). It follows each step's hex and floor, including vertical steps in one hex, coloured by that
-     * step's band, and ends in the destination ring, facing arrow and waypoints. A jump is one arc from
-     * where it starts to where it lands, as in the prototype, although MegaMek's jump path lists every hex it passes.
-     * A plotted route also places the ghost and hands the pulse its line and marks.
+     * The plotted route, else the hover preview at half strength while no unit is hovered (overlay.js:40-47), the
+     * same in both views: the Tactical View sees it from above. It follows each step's hex and floor, including
+     * vertical steps in one hex, coloured by that step's band, and ends in the destination ring, facing arrow and
+     * waypoints. A jump is one arc from where it starts to where it lands, as in the prototype, although MegaMek's
+     * jump path lists every hex it passes. A plotted route also places the ghost and hands the pulse its line and marks.
      */
     private void route(Sink sink, Sink markers, BoardScene.Unit moving) {
         Coords origin = moving.location().coords();
@@ -1164,7 +1166,7 @@ final class GpuBoardOverlay implements Disposable {
         for (GpuMovePlan.Step step : steps) {
             if (step.boardId() != scene.boardId()
                   || step.coords().equals(points.getLast().coords())
-                        && (tactical || step.level() == points.getLast().elevation())
+                        && step.level() == points.getLast().elevation()
                   || scene.tile(step.coords()) == null) {
                 continue;
             }
@@ -1200,8 +1202,8 @@ final class GpuBoardOverlay implements Disposable {
         List<Vector3> at = new ArrayList<>();
         for (BoardScene.Waypoint point : points) {
             Vector3 center = BoardGeometry.center(point.coords(), point.elevation());
-            at.add(tactical || onGround(point) ? on(scene.tile(point.coords()), center, .07f)
-                  : center.add(0, 0, .07f * radius));
+            at.add(onGround(point) ? on(scene.tile(point.coords()), center, ROUTE_LIFT)
+                  : center.add(0, 0, ROUTE_LIFT * radius));
         }
         float travelled = 0;
         for (int i = 1; i < at.size(); i++) {
@@ -1209,25 +1211,12 @@ final class GpuBoardOverlay implements Disposable {
             Vector3 a = at.get(i - 1);
             Vector3 b = at.get(i);
             float length = a.dst(b) / radius;
-            boolean jump = !tactical && bands.get(i) == GpuMovePlan.Band.JUMP;
-            boolean draped = tactical || onGround(points.get(i - 1)) && onGround(points.get(i));
+            boolean jump = bands.get(i) == GpuMovePlan.Band.JUMP;
+            boolean draped = onGround(points.get(i - 1)) && onGround(points.get(i));
             if (pulsing) {
                 trace(a, b, jump, draped, travelled, length, color);
             }
-            if (tactical) {
-                // flat.js:44: one 3-pixel line dashed 7 on, 5 off along the whole route.
-                float period = 12 * PIXEL;
-                for (float start = (float) Math.floor(travelled / period) * period; start < travelled + length;
-                      start += period) {
-                    float from = Math.max(start, travelled);
-                    float to = Math.min(start + 7 * PIXEL, travelled + length);
-                    if (to > from) {
-                        dash(sink, above(a, b, (from - travelled) / length, draped),
-                              above(a, b, (to - travelled) / length, draped),
-                              1.5f * PIXEL, (from + to) / 2, color, pulsing);
-                    }
-                }
-            } else if (jump) {
+            if (jump) {
                 for (int j = 1; j <= 14; j++) {
                     float t = j / 15f;
                     Vector3 dot = arc(a, b, t);
@@ -1243,23 +1232,17 @@ final class GpuBoardOverlay implements Disposable {
                           travelled + d + .12f, color, pulsing);
                 }
             }
-            if (pulsing && !tactical) {
+            if (pulsing) {
                 // The step's disc at its hex's centre, drawn below.
                 pulse.mark(b, b, .085f, travelled + length, color);
             }
             travelled += length;
         }
-        Color last = moveColor(bands.getLast());
-        if (tactical) {
-            ring(markers, scene.tile(destination.coords()), 3 * PIXEL, .06f - 1.5f * PIXEL, 0, last,
-                  markerCenter(destination, 0).z);
-        } else {
-            for (int i = 1; i < at.size(); i++) {
-                disc(sink, at.get(i), .085f, 16, alpha(moveColor(bands.get(i)), strength));
-            }
-            ring(markers, scene.tile(destination.coords()), .05f, .02f, .02f, alpha(last, strength),
-                  markerCenter(destination, 0).z);
+        for (int i = 1; i < at.size(); i++) {
+            disc(sink, at.get(i), .085f, 16, alpha(moveColor(bands.get(i)), strength));
         }
+        ring(markers, scene.tile(destination.coords()), .05f, .02f, .02f, alpha(moveColor(bands.getLast()), strength),
+              markerCenter(destination, 0).z);
         arrow(markers, destination, facing, strength);
         for (GpuMovePlan.Step pin : move.pins()) {
             BoardScene.Tile tile = scene.tile(pin.coords());
@@ -1267,34 +1250,24 @@ final class GpuBoardOverlay implements Disposable {
                 continue;
             }
             BoardScene.Waypoint point = new BoardScene.Waypoint(pin.coords(), pin.level(), pin.facing());
-            if (tactical) {
-                disc(markers, markerCenter(point, 0), 8 * PIXEL, 24, alpha(Color.WHITE, .95f));
-            } else {
-                ring(markers, tile, .06f, .2f, .02f, alpha(Color.WHITE, .95f), markerCenter(point, 0).z);
-                disc(markers, markerCenter(point, .1f), .16f, 20, alpha(Color.WHITE, .9f));
-            }
+            ring(markers, tile, .06f, .2f, .02f, alpha(Color.WHITE, .95f), markerCenter(point, 0).z);
         }
     }
 
     /**
-     * The facing arrow at the destination: overlay.js:48, a notched white head in 3D; flat.js:101, a plain
-     * triangle in the Tactical View, always at full strength. Terrain must never hide the facing cue.
+     * The facing arrow at the destination: overlay.js:48, a notched white head, in both views. Terrain must never
+     * hide the facing cue.
      */
     private void arrow(Sink sink, BoardScene.Waypoint point, int facing, float strength) {
         Vector3 center = markerCenter(point, .09f);
         float angle = facing * 60 * MathUtils.degreesToRadians;
         Vector3 ahead = new Vector3(MathUtils.sin(angle), MathUtils.cos(angle), 0).scl(radius);
         Vector3 across = new Vector3(ahead.y, -ahead.x, 0);
-        if (tactical) {
-            sink.triangle(point(center, ahead, .85f, across, 0), point(center, ahead, .45f, across, .22f),
-                  point(center, ahead, .45f, across, -.22f), Color.WHITE);
-        } else {
-            Color color = alpha(Color.WHITE, strength);
-            Vector3 tip = point(center, ahead, .9f, across, 0);
-            Vector3 notch = point(center, ahead, .65f, across, 0);
-            sink.triangle(tip, point(center, ahead, .55f, across, .24f), notch, color);
-            sink.triangle(tip, notch, point(center, ahead, .55f, across, -.24f), color);
-        }
+        Color color = alpha(Color.WHITE, strength);
+        Vector3 tip = point(center, ahead, .9f, across, 0);
+        Vector3 notch = point(center, ahead, .65f, across, 0);
+        sink.triangle(tip, point(center, ahead, .55f, across, .24f), notch, color);
+        sink.triangle(tip, notch, point(center, ahead, .55f, across, -.24f), color);
     }
 
     /**
@@ -1306,7 +1279,7 @@ final class GpuBoardOverlay implements Disposable {
         if (!draped) { return point; }
         float ground = UnitLandingSupports.surface(scene, point.x, point.y, surfaces);
         if (Float.isFinite(ground)) {
-            point.z = Math.max(point.z, ground + .07f * radius);
+            point.z = Math.max(point.z, ground + ROUTE_LIFT * radius);
         }
         return point;
     }
@@ -1335,8 +1308,9 @@ final class GpuBoardOverlay implements Disposable {
             float t = step / (float) steps;
             Vector3 point = jump ? arc(a, b, t) : above(a, b, t, draped);
             float ground = draped ? UnitLandingSupports.surface(scene, point.x, point.y, surfaces)
-                  : lerp(a, b, t).z - .07f * radius;
-            pulse.point(point, Float.isFinite(ground) ? ground : point.z - .07f * radius, from + t * length, color);
+                  : lerp(a, b, t).z - ROUTE_LIFT * radius;
+            pulse.point(point, Float.isFinite(ground) ? ground : point.z - ROUTE_LIFT * radius, from + t * length,
+                  color);
         }
     }
 
@@ -1489,7 +1463,7 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     private Vector3 markerCenter(BoardScene.Waypoint point, float dy) {
-        float z = tactical || onGround(point) ? BoardTacticalGeometry.floatingZ(scene, point.coords())
+        float z = onGround(point) ? BoardTacticalGeometry.floatingZ(scene, point.coords())
               : point.elevation() * BoardGeometry.level() + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
         return BoardGeometry.center(point.coords(), 0).add(0, 0, z + dy * radius);
     }

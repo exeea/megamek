@@ -51,7 +51,6 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private final Container<Label> nameLine;
     private final Container<Label> whoLine;
     private final Order order = new Order();
-    private final float nameScale;
     private boolean narrow;
     private GamePhase shownPhase;
 
@@ -62,7 +61,6 @@ final class GpuPhaseHeader implements GpuHud.Component {
         root.setTouchable(Touchable.disabled);
         name = label("hud-phase", NAME_SIZE, UiTheme.TEXT);
         name.setName("phase-name");
-        nameScale = name.getFontScaleX();
         who = label("hud-button", 12, Color.WHITE);
         who.setName("phase-who");
         order.setName("phase-order");
@@ -116,7 +114,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
         GamePhase phase = status.phase();
         if (narrow != inputs.metrics().narrow()) {
             narrow = inputs.metrics().narrow();
-            name.setFontScale(nameScale * (narrow ? NARROW_NAME_SIZE / NAME_SIZE : 1));
+            UiKit.size(name, "hud-phase", narrow ? NARROW_NAME_SIZE : NAME_SIZE);
         }
         name.setText(UiTheme.upper(name(status)));
         GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()

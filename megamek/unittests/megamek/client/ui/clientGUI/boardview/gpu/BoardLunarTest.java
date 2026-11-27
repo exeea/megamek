@@ -280,14 +280,15 @@ class BoardLunarTest {
     }
 
     /**
-     * Faces standing on a flat plain without rough, of the given relief kinds: its field stones (ROCK) and shrubs
-     * (PLANT, LEAF), which also carry units.
+     * What stands on a flat plain without rough, of the given relief kinds: its field stones (ROCK faces, which also
+     * carry units) and its field shrubs (PLANT: the scatter stand's plants, BoardRelief#shrubs, no ground faces).
      */
     private static long standing(BoardScene scene, BoardSurface.Cache surfaces, Predicate<BoardRelief.Kind> kinds) {
         return scene.tiles().stream().mapToLong(tile -> {
             var surface = surfaces.get(scene, tile);
-            return surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.OUTCROP
+            long faces = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.OUTCROP
                   && kinds.test(surface.relief.shade(face.a()).kind())).count();
+            return faces + (kinds.test(BoardRelief.Kind.PLANT) ? surface.relief.shrubs().size() : 0);
         }).sum();
     }
 

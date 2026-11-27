@@ -463,6 +463,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
             annotations = new SpriteBatch();
             hoverLines = new ShapeRenderer();
         }
+        // The shown board's own planting and ground, as the battle view applies its frames' (GpuMapSource#boardState).
+        terrain.setBoardState(frame.boardState());
         atmosphere.configure(conditions);
         display.apply(terrain, atmosphere, ambientOcclusion, width, height, false);
         skyVisibility.update(terrain.environment(), scene, 1);

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.withSettings;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
@@ -22,7 +23,7 @@ class UiCursorCaptureTest {
     /** Without this, a window an earlier test left behind would get the GLFW calls. */
     @BeforeEach
     void setUp() {
-        Gdx.graphics = mock(Graphics.class);
+        Gdx.graphics = mock(Graphics.class, withSettings().stubOnly());
     }
 
     @AfterEach

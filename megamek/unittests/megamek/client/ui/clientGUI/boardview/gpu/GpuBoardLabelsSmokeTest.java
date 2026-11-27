@@ -95,6 +95,7 @@ class GpuBoardLabelsSmokeTest {
         final Table panel;
 
         Labels(GpuHudTestStage hud, BoardCamera camera) {
+            state.contactsPinned = true; // These captures interact with the expanded contact rows.
             GpuBoardSource source = mock(GpuBoardSource.class);
             // The HUD's selection rule inspects an enemy (GpuHud.select): a row's click hands it the row's unit.
             contacts = new GpuContactsPanel(hud.kit, source, state, mock(GpuContextMenu.class),
@@ -146,10 +147,6 @@ class GpuBoardLabelsSmokeTest {
 
         Actor pin(int number) {
             return root.findActor("pin-" + number);
-        }
-
-        Label flatPin(int number) {
-            return root.findActor("pin-flat-" + number);
         }
 
         /** The shown TN badges' texts by the unit under each, found 4 units over its nameplate. */
@@ -242,8 +239,8 @@ class GpuBoardLabelsSmokeTest {
                 Rectangle tip = GpuHudTestStage.bounds(labels.tip());
                 assertEquals(Math.round(destination.x - 56), tip.x + tip.width, 1, "Flipped left of the destination");
                 assertFalse(tip.overlaps(GpuHudTestStage.bounds(labels.panel)), "The flipped tip leaves the column");
-                Vector2 pinHex = board.screen(ground(scene, run.pins().getFirst().coords()));
-                assertCentred(labels.pin(1), pinHex.x, pinHex.y + 22, "Waypoint 1 sits 22 above its hex");
+                Vector2 pinHex = board.screen(onRoute(ground(scene, run.pins().getFirst().coords())));
+                assertCentred(labels.pin(1), pinHex.x, pinHex.y, "Waypoint 1 sits on the route at its hex");
                 assertNull(labels.pin(2));
                 capture(hud, "labels-03", "03-waypoint-route.jpg", new Crop("tip", labels.tip(), 1140, 460),
                       new Crop("pin", labels.pin(1), 1217, 595), new Crop("area", area(hud, 860, 380, 660, 520), 860,
@@ -379,7 +376,7 @@ class GpuBoardLabelsSmokeTest {
                       GpuFireOrders.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 // The Atlas stands 100 units tall on the screen, so the tip's anchor is 90 above the destination.
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(ATLAS, new Rectangle(0, 0, 60, 100)),
-                      Map.of(), Map.of(), null, Entity.NONE, 118);
+                      Map.of(), Map.of(), null, Entity.NONE);
 
                 // Mid-window: right of the anchor, its bottom over the board's Move chip on the same anchor.
                 Rectangle free = tip(hud, board, labels, frame, view, destination, 960, 540);
@@ -426,7 +423,7 @@ class GpuBoardLabelsSmokeTest {
                 Coords third = second.translated(1);
                 Coords elsewhere = second.translated(5);
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(ATLAS, new Rectangle(0, 0, 60, 100)),
-                      Map.of(), Map.of(), null, Entity.NONE, 118);
+                      Map.of(), Map.of(), null, Entity.NONE);
                 frame(board, false, atlas, 118, 960, 675);
 
                 // Two pins: numbered in the plan's order, each 22 above its hex.
@@ -463,32 +460,21 @@ class GpuBoardLabelsSmokeTest {
                       new GpuMovePlan.Step(atlas, scene.boardId(), floor + 2, 0, GpuMovePlan.Band.WALK, false));
                 show(labels, hud, board, view, move(ATLAS, floors, List.of(), floors, Map.of(), true));
                 for (int number : new int[] { 1, 2 }) {
-                    Vector2 centre = board.screen(BoardGeometry.center(atlas, floor + number));
-                    assertCentred(labels.pin(number), centre.x, centre.y + 22,
+                    Vector2 centre = board.screen(onRoute(BoardGeometry.center(atlas, floor + number)));
+                    assertCentred(labels.pin(number), centre.x, centre.y,
                           "Waypoint " + number + " follows its floor");
                 }
 
-                // The Tactical View: the badge above the hex, and the number on the hex's own disc as well.
+                // The Tactical View: the same numbered disc on the route's point at each pin.
                 frame(board, true, atlas, 60.8f, 960, 540);
                 GpuHud.HudView flat = new GpuHud.HudView(true, false, Map.of(ATLAS, new Rectangle(0, 0, 44, 44)),
-                      Map.of(), Map.of(), null, Entity.NONE, 60.8f);
+                      Map.of(), Map.of(), null, Entity.NONE);
                 show(labels, hud, board, flat, route(scene, List.of(first, second, elsewhere),
                       List.of(first, elsewhere)));
-                for (int number : new int[] { 1, 2 }) {
-                    Coords hex = number == 1 ? first : elsewhere;
-                    Vector2 centre = board.screen(ground(scene, hex));
-                    assertPin(labels, board, scene, number, hex);
-                    Label onDisc = labels.flatPin(number);
-                    assertTrue(onDisc.isVisible(), "The number on disc " + number);
-                    assertEquals(String.valueOf(number), onDisc.getText().toString());
-                    assertCentred(onDisc, centre.x, centre.y, "Number " + number + " on its disc");
-                }
+                assertPin(labels, board, scene, 1, first);
+                assertPin(labels, board, scene, 2, elsewhere);
                 opaque();
                 hud.capture("labels-pins-tactical").dispose();
-                frame(board, false, atlas, 118, 960, 675);
-                show(labels, hud, board, view, route(scene, List.of(first, second, elsewhere),
-                      List.of(first, elsewhere)));
-                assertFalse(labels.flatPin(1).isVisible(), "No number on the disc in 3D");
             } finally {
                 labels.dispose();
                 board.dispose();
@@ -773,7 +759,7 @@ class GpuBoardLabelsSmokeTest {
     /** Synthetic facts with the {@code hovered} unit: each unit's head at its rectangle's top centre. */
     private static GpuHud.HudView view(Map<Integer, Rectangle> units, int hovered) {
         GpuHud.HudView view = view(false, units);
-        return new GpuHud.HudView(false, false, view.unitRects(), view.unitHeads(), Map.of(), null, hovered, 118);
+        return new GpuHud.HudView(false, false, view.unitRects(), view.unitHeads(), Map.of(), null, hovered);
     }
 
     /** The share of the pixels in {@code area} that show the .on badge's dark red fill (rgba 60 30 28 .95). */
@@ -983,7 +969,7 @@ class GpuBoardLabelsSmokeTest {
           Labels labels, GpuBoardSource.Frame frame) {
         boolean tactical = board.tactical();
         labels.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
-        overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
+        overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE),
               preferences(), labels.state);
         GpuFireOrders.Snapshot fire = frame.panels().fire();
         board.basesStatus = frame.status();
@@ -1029,14 +1015,14 @@ class GpuBoardLabelsSmokeTest {
                       : new Rectangle(foot.x - .275f * hex, foot.y, .55f * hex, head.y - foot.y));
             }
         });
-        return new GpuHud.HudView(tactical, false, rects, heads, Map.of(), null, Entity.NONE, hex);
+        return new GpuHud.HudView(tactical, false, rects, heads, Map.of(), null, Entity.NONE);
     }
 
     /** Synthetic facts: each unit's rectangle, its head at the rectangle's top centre. */
     private static GpuHud.HudView view(boolean tactical, Map<Integer, Rectangle> units) {
         Map<Integer, Vector2> heads = new HashMap<>();
         units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
-        return new GpuHud.HudView(tactical, false, units, heads, Map.of(), null, Entity.NONE, 118);
+        return new GpuHud.HudView(tactical, false, units, heads, Map.of(), null, Entity.NONE);
     }
 
     /** One frame of the movement plan over the harness board, which frames the board with its camera first. */
@@ -1114,14 +1100,20 @@ class GpuBoardLabelsSmokeTest {
 
     // Assertions over actors and pixels.
 
+    /** Waypoint {@code number}'s disc centred on the route's own point at its hex, in both views. */
     private static void assertPin(Labels labels, GpuBoardSpaceHarness board, BoardScene scene, int number,
           Coords hex) {
         Actor pin = labels.pin(number);
         assertNotNull(pin, "Waypoint " + number);
         assertTrue(pin.isVisible(), "Waypoint " + number + " shows");
         assertEquals(List.of(String.valueOf(number)), texts(pin));
-        Vector2 centre = board.screen(ground(scene, hex));
-        assertCentred(pin, centre.x, centre.y + 22, "Waypoint " + number + " 22 above " + hex);
+        Vector2 centre = board.screen(onRoute(ground(scene, hex)));
+        assertCentred(pin, centre.x, centre.y, "Waypoint " + number + " on the route at " + hex);
+    }
+
+    /** The route's own point over {@code ground}, GpuBoardOverlay.ROUTE_LIFT hex radii up. */
+    private static Vector3 onRoute(Vector3 ground) {
+        return ground.add(0, 0, GpuBoardOverlay.ROUTE_LIFT * BoardGeometry.WIDTH / 2);
     }
 
     private static void assertCentred(Actor actor, float x, float y, String what) {

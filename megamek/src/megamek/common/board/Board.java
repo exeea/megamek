@@ -242,7 +242,7 @@ public class Board implements Serializable {
 
     public boolean isNativeFormat() { return nativeFormat; }
     public boolean requiresNativeFormat() { return nativeFormat || hasThreeDOnlyContent(); }
-    /** True when a hex has placed objects (including groups and maglev routes) or appearance the 2D board ignores. */
+    /** True when a hex has placed objects (including groups and maglev routes) or appearance: native format only. */
     public boolean hasThreeDOnlyContent() {
         return Arrays.stream(data).filter(Objects::nonNull).anyMatch(Hex::hasAppearance);
     }
@@ -2078,10 +2078,9 @@ public class Board implements Serializable {
     }
 
     /**
-     * Fires a board event which typically leads to the {@link megamek.client.ui.clientGUI.boardview.BoardView} and
-     * minimap being redrawn. This is public as the boards and minimaps show some data that is not part of the Board
-     * class and Board has no way of knowing when a change happens. An example of this is arty auto hexes which are
-     * stored in the player class
+     * Fires a board event which typically leads to the board view and minimap being redrawn. This is public as the
+     * boards and minimaps show some data that is not part of the Board class and Board has no way of knowing when a
+     * change happens. An example of this is arty auto hexes which are stored in the player class
      */
     public void processBoardEvent(BoardEvent event) {
         if (boardListeners == null) {

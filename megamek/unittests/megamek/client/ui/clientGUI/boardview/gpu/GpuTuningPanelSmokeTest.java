@@ -491,7 +491,13 @@ class GpuTuningPanelSmokeTest {
                     UiButton utility = hud.find("tuning-button");
                     Rectangle menu = GpuHudTestStage.bounds(hud.find("utility-menu"));
                     Rectangle view = GpuHudTestStage.bounds(hud.find("utility-view"));
-                    assertEquals(size[0] - metrics.gap(), menu.x + menu.width, .5f, "Menu is last at the right gap " + at);
+                    // One plate holds the utilities: it ends at the right gap, the Menu last in it inside its padding.
+                    com.badlogic.gdx.scenes.scene2d.ui.Table plate = hud.find("utility-plate");
+                    Rectangle plateBounds = GpuHudTestStage.bounds(plate);
+                    assertEquals(size[0] - metrics.gap(), plateBounds.x + plateBounds.width, .5f,
+                          "The utility plate is last at the right gap " + at);
+                    assertEquals(plateBounds.x + plateBounds.width - plate.getPadRight(), menu.x + menu.width, .5f,
+                          "Menu is last in the plate " + at);
                     assertNull(hud.hud.stage.getRoot().findActor("utility-help"), "Help is a page of the Menu " + at);
                     assertEquals("", hud.<UiButton>find("utility-menu").getText().toString());
                     Rectangle phase = GpuHudTestStage.bounds(hud.find("phase-header"));
@@ -511,8 +517,9 @@ class GpuTuningPanelSmokeTest {
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
                     assertEquals(360, panel.width, .5f, at);
-                    assertEquals(metrics.gap(), view.y - panel.y - panel.height, .5f,
-                          "one gap below the utilities " + at);
+                    Rectangle pill = GpuHudTestStage.bounds(utility);
+                    assertEquals(metrics.gap(), pill.y - panel.y - panel.height, .5f,
+                          "one gap below the Tuning pill " + at);
                     assertEquals(70, panel.y, .5f, "the long Board page fills down to the bottom margin " + at);
                     assertTrue(hud.<ScrollPane>find("tuning-board").isScrollY(), "and scrolls " + at);
                     assertTrue(hud.hits(panel.x + 3, panel.y + panel.height - 3), "the panel takes its presses");
@@ -626,7 +633,7 @@ class GpuTuningPanelSmokeTest {
             BoardEditorSession editor = editing ? new BoardEditorSession() : null;
             Game game = editor == null ? new Game() : editor.game();
             game.setBoard(Board.createEmptyBoard(9, 9));
-            return new GpuMapSource(game, null, editor, () -> { }, () -> { });
+            return new GpuMapSource(game, null, editor, () -> { });
         });
         SwingUtilities.invokeAndWait(setup);
         GpuMapSource source = setup.get();
@@ -970,11 +977,10 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(readings, right(readingOf(hud, "Time of day")), .5f, "the readings stay in place");
                 GpuBoardTestUi.assertHorizontalBounds(hud.find("tuning-frame"), hud.find("tuning-frame"));
                 // An open list closes with the panel and leaves no keyboard focus to swallow the HUD's keys. Keys
-                // pass no press outside the list, which would close it by itself: the first Esc ends the list's
-                // focus (GpuHud's chain), the second closes the panel.
+                // pass no press outside the list, which would close it by itself: one Esc closes the panel with its
+                // list (GpuHud's chain: the dialog's step closes the list it holds).
                 hud.click("tuning-atmosphere-pressure");
                 assertTrue(hud.find("tuning-choices").isVisible());
-                hud.key(KeyCommandBind.CANCEL);
                 hud.key(KeyCommandBind.CANCEL);
                 assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog);
                 assertFalse(hud.find("tuning-choices").isVisible(), "the list closes with the panel");

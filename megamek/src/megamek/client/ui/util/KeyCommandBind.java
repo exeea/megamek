@@ -64,13 +64,13 @@ public enum KeyCommandBind {
     // Move one hex backward (back up)
     MOVE_STEP_BACKWARD("moveStepBackward", VK_S, SHIFT_DOWN_MASK),
     // Change facing one hex side to the left
-    TURN_LEFT("turnLeft", VK_A, SHIFT_DOWN_MASK),
+    TURN_LEFT("turnLeft", VK_A, CTRL_DOWN_MASK),
     // Change facing one hex side to the right
-    TURN_RIGHT("turnRight", VK_D, SHIFT_DOWN_MASK),
+    TURN_RIGHT("turnRight", VK_D, CTRL_DOWN_MASK),
     // Change facing one hex side to the left
-    TWIST_LEFT("twistLeft", VK_A, SHIFT_DOWN_MASK),
+    TWIST_LEFT("twistLeft", VK_A, CTRL_DOWN_MASK),
     // Change facing one hex side to the right
-    TWIST_RIGHT("twistRight", VK_D, SHIFT_DOWN_MASK),
+    TWIST_RIGHT("twistRight", VK_D, CTRL_DOWN_MASK),
     // Fire the currently selected weapon
     FIRE("fire", VK_F),
     NEXT_WEAPON("nextWeapon", VK_DOWN),
@@ -141,7 +141,7 @@ public enum KeyCommandBind {
     HEX_COORDS(true, "toggleHexCoords", VK_G, CTRL_DOWN_MASK),
     MINIMAP(true, "toggleMinimap", VK_M, CTRL_DOWN_MASK),
     LOS_SETTING(true, "viewLosSetting", VK_L),
-    UNIT_DISPLAY(true, "toggleUnitDisplay", VK_D, CTRL_DOWN_MASK),
+    UNIT_DISPLAY(true, "toggleUnitDisplay", VK_I, CTRL_DOWN_MASK),
     UNIT_OVERVIEW(true, "toggleUnitOverview", VK_U, CTRL_DOWN_MASK),
     KEY_BINDS(true, "toggleKeybinds", VK_K, CTRL_DOWN_MASK),
     PLANETARY_CONDITIONS(true, "togglePlanetaryConditions", VK_P, CTRL_DOWN_MASK),
@@ -169,7 +169,7 @@ public enum KeyCommandBind {
     /** Toggles the objective overlays: control zone outlines and the scheme word on each flag. */
     SHOW_OBJECTS(true, "toggleShowObjects", VK_O),
 
-    // --------- The following binds drive the GPU board's orbit camera; the Legacy 2D board ignores them
+    // --------- The following binds drive the GPU board's orbit camera
     CAMERA_ROTATE_LEFT("cameraRotateLeft", true, VK_Q),
     CAMERA_ROTATE_RIGHT("cameraRotateRight", true, VK_E),
     CAMERA_TILT_UP("cameraTiltUp", true, VK_PAGE_UP),
@@ -177,7 +177,7 @@ public enum KeyCommandBind {
     CAMERA_RESET("cameraReset", VK_HOME),
     CAMERA_FIT_BOARD("cameraFitBoard", VK_END),
 
-    // --------- The following binds are for the GPU board's battle HUD; the Legacy 2D board ignores them. The playback
+    // --------- The following binds are for the GPU board's battle HUD. The playback
     // binds share their keys with CENTER_ON_SELECTED and PREV/NEXT_TARGET, so the HUD tells them apart by phase.
     MOVE_MODE_WALK("moveModeWalk", VK_1),
     MOVE_MODE_RUN("moveModeRun", VK_2),

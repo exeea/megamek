@@ -37,49 +37,103 @@ import static megamek.common.alphaStrike.BattleForceSUA.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import megamek.common.alphaStrike.ASSpecialAbilityCollector;
+import megamek.common.alphaStrike.AlphaStrikeElement;
 
+import megamek.common.board.BoardLocation;
+import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.TargetRollModifier;
+import megamek.common.strategicBattleSystems.SBFDesignQuirks;
 import megamek.common.strategicBattleSystems.SBFElementType;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFUnit;
 
 public class SBFDetectionModifiers extends TargetRoll {
 
-    public SBFDetectionModifiers(SBFFormation viewer, SBFFormation target) {
-        sensorTargetRollModifiers(viewer, target).forEach(this::addModifier);
+    public SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target) {
+        this(game, viewer, target, target.getPosition());
+    }
+
+    SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation position) {
+        this(game, viewer, target, position, false);
+    }
+
+    SBFDetectionModifiers(SBFGame game, SBFFormation viewer, SBFFormation target, BoardLocation position,
+          boolean empField) {
+        sensorTargetRollModifiers(game, viewer, target, position, empField).forEach(this::addModifier);
     }
 
     /**
      * Returns the sensor range for sensor detection, IO:BF p.197
      *
+     * @param game      The game, for the optional Design Quirks rules
      * @param formation The detecting formation
      *
      * @return the sensor range
      */
-    private int sensorRange(SBFFormation formation) {
-        //TODO: this is incomplete as the table is quite unclear
-        int rcnExtension = formation.hasSUA(RCN) ? 2 : 0;
-        if (formation.hasSUA(PRB)) {
-            return 8;
-        } else if (formation.hasSUA(BH)) {
-            return 10;
-        } else if (formation.isType(SBFElementType.BM)) {
-            return 6 + rcnExtension;
-        } else if (formation.isType(SBFElementType.V)) {
-            return 5 + rcnExtension;
-        } else {
-            return 0;
+    static int sensorRange(SBFGame game, SBFFormation formation) {
+        // Summary-only and scenario-authored counters may have only a Formation-level sensor rating.
+        boolean allEquipmentKnown = !formation.getUnits().isEmpty()
+              && formation.getUnits().stream().allMatch(unit -> !unit.getElements().isEmpty());
+        int best = allEquipmentKnown ? 0 : range(formation, formation.getType(), formation.hasSUA(RCN),
+              SBFDesignQuirks.formationHas(game, formation, PRB));
+        for (var unit : formation.getUnits()) {
+            if (unit.getArmor() > 0 && unit.getCurrentArmor() <= 0) {
+                continue;
+            }
+            int unitRange = range(unit, unit.getType(), formation.hasSUA(RCN),
+                  SBFDesignQuirks.unitHas(game, unit, PRB));
+            for (var element : unit.getElements()) {
+                var type = element.getASUnitType() == null ? unit.getType() : SBFElementType.getUnitType(element);
+                unitRange = Math.max(unitRange, range(element, type, formation.hasSUA(RCN),
+                      SBFDesignQuirks.elementHas(game, element, PRB)));
+            }
+            best = Math.max(best, (unitRange > 0) && hasImprovedSensors(game, unit) ? unitRange + 2 : unitRange);
         }
+        return best;
     }
 
-    private List<TargetRollModifier> sensorTargetRollModifiers(SBFFormation viewer, SBFFormation target) {
+    /**
+     * Design Quirks Table, IO:BF p. 228: Improved Sensors "If 50% of Elements in Unit have PQIS, then increase
+     * detection range by 2 hexes". Mobile Structures cannot have it (footnote **).
+     */
+    private static boolean hasImprovedSensors(SBFGame game, SBFUnit unit) {
+        if (!game.usesDesignQuirks()) {
+            return false;
+        }
+        long count = unit.getElements().stream()
+              .filter(e -> SBFDesignQuirks.hasQuirk(e, OptionsConstants.QUIRK_POS_IMPROVED_SENSORS)).count();
+        return (count > 0) && (count * 2 >= unit.getElements().size());
+    }
+
+    /** @param probe whether the sensors have PRB, counting Improved Sensors ({@link SBFDesignQuirks}) */
+    private static int range(ASSpecialAbilityCollector sensors, SBFElementType type, boolean recon, boolean probe) {
+        int basic = basicRange(type);
+        int probeRange = sensors.hasSUA(BH) ? 10 : probe
+              ? (sensors instanceof AlphaStrikeElement element && element.hasClanActiveProbe() ? 9 : 8)
+              : sensors.hasAnySUAOf(LPRB, WAT) ? 7 : 0;
+        return Math.max(basic > 0 && recon ? basic + 2 : basic, probeRange);
+    }
+
+    private static int basicRange(SBFElementType type) {
+        return switch (type) {
+            case BM -> 6;
+            case V, BA -> 5;
+            case null, default -> 0;
+        };
+    }
+
+    private List<TargetRollModifier> sensorTargetRollModifiers(SBFGame game, SBFFormation viewer, SBFFormation target,
+          BoardLocation position, boolean empField) {
         List<TargetRollModifier> result = new ArrayList<>();
-        int range = sensorRange(viewer);
+        int range = sensorRange(game, viewer);
         int distance = viewer.getPosition().coords()
-              .distance(target.getPosition().coords());
+              .distance(position.coords());
         if (distance < range) {
             result.add(new TargetRollModifier(Math.min(4, range - distance), "distance below sensor range"));
-        } else if (distance > range) {
+        } else if ((range == 0) || (distance > range)) {
             result.add(new TargetRollModifier(TargetRoll.CHECK_FALSE, "distance above sensor range"));
         }
         if (target.hasSUA(AECM) && target.hasAnySUAOf(STL, MAS, LMAS)) {
@@ -90,7 +144,7 @@ public class SBFDetectionModifiers extends TargetRoll {
             result.add(new TargetRollModifier(-1, "target has AECM, viewer has BH"));
         } else if (target.hasSUA(AECM)) {
             result.add(new TargetRollModifier(-2, "target has AECM"));
-        } else if (target.hasAnySUAOf(ECM, WAT, LECM) && !viewer.hasSUA(BH)) {
+        } else if ((empField || target.hasAnySUAOf(ECM, WAT, LECM)) && !viewer.hasSUA(BH)) {
             result.add(new TargetRollModifier(-1, "target has ECM, WAT or LECM"));
         }
         return result;

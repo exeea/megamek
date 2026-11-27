@@ -198,7 +198,12 @@ class BoardRoadSlopeTest {
                 for (float t : lod == TerrainLod.FULL ? new float[] { .25f, .5f, .75f } : new float[0]) {
                     // This lower rock lies beneath the neighboring level-two road's supporting bank as well.
                     // Level-one rock can still belong to that transition; the deeper formation must be intact.
+                    // The band below a nearby road's headroom moves away from it as a whole (BoardRelief#roadPush),
+                    // so the native rock at half a level stands where the road's relief moves the rock below it.
                     var rock = nativeSurface.relief.wetCliffContact(example[2], t, .5f * BoardGeometry.level());
+                    var moved = surface.relief.wetCliffContact(example[2], t, .25f * BoardGeometry.level())
+                          .sub(nativeSurface.relief.wetCliffContact(example[2], t, .25f * BoardGeometry.level()));
+                    rock.add(moved.x, moved.y, 0);
                     float nearest = Float.POSITIVE_INFINITY;
                     for (var face : walls) {
                         if (face.landEdge() != example[2]) { continue; }
@@ -514,6 +519,8 @@ class BoardRoadSlopeTest {
             road.addAll(BoardSurface.road(scene, surface.tile));
             var faces = new ArrayList<>(surface.groundFaces());
             faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
+            // Cut faces cast in concrete (beside a bridge's ramp, or a road built in concrete) are drawn with the walls.
+            faces.addAll(surface.pouredWalls);
             for (var face : faces) {
                 if (face.finish() == BoardSurface.Finish.DRESSING || face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
                 all.add(face);
@@ -621,8 +628,10 @@ class BoardRoadSlopeTest {
         UnitMotion movement = new UnitMotion(new BoardScene.Waypoint(BoardScenes.FIRST, 2, 1));
         movement.append(List.of(new BoardScene.Waypoint(BoardScenes.FIRST, 2, 1), new BoardScene.Waypoint(BoardScenes.SECOND, 0, 1)),
               EntityMovementType.MOVE_WALK, 0);
-        movement.advance(movement.remainingSeconds() * 0.4, 1);
+        // Travel sets off at UnitMotion#LAUNCH_SPEED: 30 % of the time is on the upper hex's ramp, 40 % past its edge.
+        movement.advance(movement.remainingSeconds() * 0.3, 1);
         Vector3 moving = movement.surfacePosition(scene);
+        assertTrue(BoardGeometry.contains(BoardScenes.FIRST, moving.x, moving.y), "Sample the walk on the upper hex");
         assertEquals(high.height(moving.x, moving.y), moving.z, 0.01f, "Walking must not sink into the upper road shoulder");
     }
 
@@ -654,11 +663,14 @@ class BoardRoadSlopeTest {
                 movement.append(List.of(new BoardScene.Waypoint(BoardScenes.FIRST, 2, direction),
                       new BoardScene.Waypoint(neighbor, 0, direction)), EntityMovementType.MOVE_WALK, 0);
                 double duration = movement.remainingSeconds();
-                movement.advance(duration * 0.4, 1);
+                // Travel sets off at UnitMotion#LAUNCH_SPEED: 30 % of the time is on the upper hex, 50 % on the lower.
+                movement.advance(duration * 0.3, 1);
                 Vector3 moving = movement.surfacePosition(scene);
+                assertTrue(BoardGeometry.contains(BoardScenes.FIRST, moving.x, moving.y), "Sample the walk on the upper hex");
                 assertEquals(high.height(moving.x, moving.y), moving.z, 0.01f);
                 movement.advance(duration * 0.2, 1);
                 moving = movement.surfacePosition(scene);
+                assertTrue(BoardGeometry.contains(neighbor, moving.x, moving.y), "Sample the walk on the lower hex");
                 assertEquals(low.height(moving.x, moving.y), moving.z, 0.01f);
             }
         }

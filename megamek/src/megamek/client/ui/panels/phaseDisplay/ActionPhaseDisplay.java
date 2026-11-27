@@ -41,7 +41,6 @@ import javax.swing.AbstractAction;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.MegaMekButton;
@@ -60,8 +59,7 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
 
     @Override
     public List<MegaMekButton> getCompletionButtons() {
-        return butSkipTurn == null || !butSkipTurn.isVisible() ? super.getCompletionButtons()
-              : List.of(getButDone(), butSkipTurn);
+        return completionButtons(butSkipTurn);
     }
 
     /** The currently selected unit for taking action. Not necessarily equal to the unit shown in the unit viewer. */
@@ -309,15 +307,6 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
         }
 
         this.turnDetails = turnDetails == null ? List.of() : List.copyOf(turnDetails);
-        for (BoardClientState ibv : clientgui.boardStates()) {
-            BoardClientState bv = ibv;
-            if (bv != null) {
-                TurnDetailsOverlay turnDetailsOverlay = bv.getTurnDetailsOverlay();
-                if (turnDetailsOverlay != null) {
-                    turnDetailsOverlay.setLines(turnDetails);
-                }
-            }
-        }
     }
 
     private void adaptToGUIScale() {
@@ -380,11 +369,10 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
     }
 
     /**
-     * @return The turn details (planned steps or pending attacks) that this display last gave to the turn details
-     *       overlay while it acts: during the local player's turn or a point-blank shot. Otherwise an empty list, as
-     *       {@link TurnDetailsOverlay} clears its copy when the turn passes to another player. Unlike
+     * @return The turn details (planned steps or pending attacks) that this display last set while it acts: during
+     *       the local player's turn or a point-blank shot. Otherwise an empty list. Unlike
      *       {@link AttackPhaseDisplay#getAttackDescriptions()}, which lists every pending attack at any time, these are
-     *       the overlay's lines (a firing display gives none for a lone torso twist, for example).
+     *       the phase panel's lines (a firing display gives none for a lone torso twist, for example).
      */
     public List<String> getTurnDetails() {
         boolean acting = clientgui.getClient().isMyTurn() || clientgui.isProcessingPointblankShot();

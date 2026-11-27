@@ -66,7 +66,8 @@ public final class UiDialog {
 
     /**
      * @param title  the card's title
-     * @param cancel runs on Escape, the close button and a Cancel button; it should close the dialog
+     * @param cancel runs on Escape, the close button and a Cancel button; it should close the dialog. Null for a
+     *               dialog that wants one of its own buttons: no close button, and Escape does nothing
      */
     public UiDialog(UiKit kit, String title, Runnable cancel) {
         this.kit = kit;
@@ -236,7 +237,10 @@ public final class UiDialog {
     }
 
     private void escape() {
-        (back != null ? back : cancel).run();
+        Runnable action = back != null ? back : cancel;
+        if (action != null) {
+            action.run();
+        }
     }
 
     /** Takes every button and tool off the footer, for a dialog whose next step asks something else. */

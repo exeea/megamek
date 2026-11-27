@@ -36,8 +36,8 @@ import megamek.common.battleArmor.BattleArmor;
 import megamek.common.units.*;
 
 /**
- * Unit type classification for the LOS elevation diagram. Controls which side-view silhouette shape is drawn for
- * attacker and target units in the cross-section diagram.
+ * Unit type classification for the ruler's line of sight ({@link RulerModel}): whether a unit counts as a Mek, uses
+ * altitude, or stands at an elevation.
  */
 enum DiagramUnitType {
     /** BattleMek biped - humanoid shape, 2 levels tall. */
@@ -183,19 +183,6 @@ enum DiagramUnitType {
         }
 
         return OTHER;
-    }
-
-    /**
-     * Returns the standard TW height in levels for this unit type.
-     *
-     * @return the height in TW levels (Meks = 2, all others = 1)
-     */
-    public int twHeight() {
-        return switch (this) {
-            case BATTLE_MEK, QUAD_MEK, INDUSTRIAL_MEK -> 2;
-            case SUPERHEAVY_MEK -> 3;
-            default -> 1;
-        };
     }
 
     /**

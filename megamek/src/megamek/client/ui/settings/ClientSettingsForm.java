@@ -109,7 +109,6 @@ public final class ClientSettingsForm extends SettingsForm {
           Map.entry(CommonSettingsPane.SETTINGS_UNITDISPLAY, LABELS),
           Map.entry(CommonSettingsPane.SETTINGS_MINIMAP, BOARD),
           Map.entry(CommonSettingsPane.SETTINGS_BUTTONORDER, KEYBOARD),
-          Map.entry(CommonSettingsPane.SETTINGS_AUTODISPLAY, AUTOMATION),
           Map.entry(CommonSettingsPane.SETTINGS_ADVANCED, LOGS));
     /** The Controls pages of key bindings, in order, each with its sections and the commands each lists. */
     private static final List<BindPage> BIND_PAGES = List.of(

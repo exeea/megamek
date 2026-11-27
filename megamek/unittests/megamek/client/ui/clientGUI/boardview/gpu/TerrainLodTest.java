@@ -120,26 +120,60 @@ class TerrainLodTest {
         } finally { BoardRelief.tune(previous); }
     }
 
+    /** The field's height asked outside the board is still a height; asked at a point with no place, none, no throw. */
+    @Test
+    void fieldHeightOutsideTheBoardAndAtNoPlace() {
+        var scene = waterScene(new Coords(7, 3), false);
+        FieldBoard board = FieldBoard.of(scene, BoardRelief.tuning().stepOutline());
+        Coords h = new Coords(0, 0);
+        float[] out = new float[8];
+        var shares = board.new Shares(-1000, -1000, 1000, 1000);
+        float outsideX = BoardGeometry.centerX(h) - BoardGeometry.width(), outsideY = BoardGeometry.centerY(h);
+        board.height(h, board.segments(h), shares, outsideX, outsideY, out);
+        assertTrue(Float.isFinite(out[0]), "a point beside the board's edge keeps a height");
+        board.height(h, board.segments(h), shares, Float.NaN, Float.NaN, out);
+        assertTrue(Float.isNaN(out[0]), "a point with no place has no height");
+    }
+
+    /** Height-field water's texels are the field's values at each texel's place (FieldWater), whatever the detail. */
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void waterFieldDoesNotIntroduceASeamBetweenDetailLevels(boolean rough) {
         var scene = waterScene(new Coords(7, 3), rough);
+        FieldBoard board = FieldBoard.of(scene, BoardRelief.tuning().stepOutline());
         Map<Coords, BoardSurface> left = new HashMap<>(), right = new HashMap<>();
-        for (var tile : scene.tiles()) {
-            (tile.coords().getX() < 8 ? left : right).put(tile.coords(),
-                  new BoardSurface(scene, tile, tile.coords().getX() < 8 ? TerrainLod.DISTANT : TerrainLod.FULL));
+        for (TerrainLod lod : List.of(TerrainLod.DISTANT, TerrainLod.FULL)) {
+            var field = new ChunkField(board, lod, BoardGeometry.floor(scene));
+            for (var tile : scene.tiles()) {
+                if (tile.coords().getX() < 8 != (lod == TerrainLod.DISTANT)) { continue; }
+                var block = field.block(tile.coords());
+                var surface = new BoardSurface(scene, tile, lod, block);
+                if (tile.liquid().present()) { FieldWater.fill(scene, surface, board, block); }
+                (lod == TerrainLod.DISTANT ? left : right).put(tile.coords(), surface);
+            }
         }
-        var a = GpuWaterShader.Field.prepare(scene, Map.of(), left);
-        var b = GpuWaterShader.Field.prepare(scene, Map.of(), right);
+        var a = GpuWaterShader.Field.prepare(scene, Map.of(), left, false, board);
+        var b = GpuWaterShader.Field.prepare(scene, Map.of(), right, false, board);
         assertEquals(a.spacing(), b.spacing());
         int compared = 0;
-        for (int y = Math.max(a.firstY(), b.firstY()); y < Math.min(a.firstY() + a.height(), b.firstY() + b.height()); y++) {
-            for (int x = Math.max(a.firstX(), b.firstX()); x < Math.min(a.firstX() + a.width(), b.firstX() + b.width()); x++) {
+        int fromX = Math.max(a.firstX(), b.firstX()), fromY = Math.max(a.firstY(), b.firstY());
+        int toX = Math.min(a.firstX() + a.width(), b.firstX() + b.width()), toY = Math.min(a.firstY() + a.height(), b.firstY() + b.height());
+        // The texels the field gives (its water and the banks beside it), with a ring for the depth blur's neighbours;
+        // elsewhere (dry ground away from the water, where no water is drawn) texels keep today's per-surface values.
+        int span = toX - fromX + 2;
+        int rows = toY - fromY + 2;
+        float[] given = FieldWater.texels(board, scene, a.spacing(), fromX - 1, fromY - 1, span, new float[span * rows], new float[span * rows]);
+        for (int y = fromY; y < toY; y++) {
+            for (int x = fromX; x < toX; x++) {
+                boolean field = true;
+                for (int n = 0; n < 9; n++) {
+                    field &= !Float.isNaN(given[(y - fromY + n / 3) * span + x - fromX + n % 3]);
+                }
+                if (!field) { continue; }
                 for (int channel = 0; channel < 4; channel++) {
                     int ai = ((y - a.firstY()) * a.width() + x - a.firstX()) * 4 + channel;
                     int bi = ((y - b.firstY()) * b.width() + x - b.firstX()) * 4 + channel;
-                    assertEquals(Byte.toUnsignedInt(a.pixels()[ai]), Byte.toUnsignedInt(b.pixels()[bi]), 1,
-                          "Shared water-field sample " + x + "," + y + " channel " + channel);
+                    assertEquals(a.pixels()[ai], b.pixels()[bi], "Shared water-field sample " + x + "," + y + " channel " + channel);
                     compared++;
                 }
             }
@@ -167,15 +201,42 @@ class TerrainLodTest {
 
     @Test
     void screenSizeSelectsDetailWithHysteresis() {
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null, 1));
-        assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null, 1));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM, 1));
-        assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL, 1));
-        assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
-        assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL, 1));
+        // Today's sizes, whichever the run's property installs (the height field's below).
+        TerrainLod.Tuning installed = TerrainLod.tuning();
+        TerrainLod.tune(TerrainLod.DEFAULTS);
+        try {
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(40, null, 1));
+            assertEquals(TerrainLod.COARSE, TerrainLod.select(10, null, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, null, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(60, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(68, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(72, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(55, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL, 1));
+        } finally {
+            TerrainLod.tune(installed);
+        }
+    }
+
+    @Test
+    void heightFieldSizesSelectDetailWithHysteresis() {
+        TerrainLod.Tuning installed = TerrainLod.tuning();
+        TerrainLod.tune(TerrainLod.FIELD);
+        try {
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, null, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(30, null, 1));
+            assertEquals(TerrainLod.COARSE, TerrainLod.select(15, null, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(10, null, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(38, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(42, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(45, TerrainLod.MEDIUM, 1));
+            assertEquals(TerrainLod.MEDIUM, TerrainLod.select(35, TerrainLod.FULL, 1));
+            assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT, 1));
+            assertEquals(TerrainLod.DISTANT, TerrainLod.select(10, TerrainLod.FULL, 1));
+        } finally {
+            TerrainLod.tune(installed);
+        }
     }
 }

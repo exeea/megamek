@@ -406,7 +406,6 @@ public class SkinSpecPanel extends JPanel implements ListSelectionListener, Acti
 
     BackgroundElement backgroundElement;
 
-    JCheckBox showScrollBars = new JCheckBox(Messages.getString("SkinEditor.ShowScrollBars"));
 
     ArrayList<JButton> colorButtons = new ArrayList<>();
 
@@ -519,7 +518,6 @@ public class SkinSpecPanel extends JPanel implements ListSelectionListener, Acti
         }
 
         // Show Scroll Bars
-        skinSpec.showScrollBars = showScrollBars.isSelected();
 
     }
 
@@ -623,7 +621,6 @@ public class SkinSpecPanel extends JPanel implements ListSelectionListener, Acti
 
         gbc.gridx = gbc.gridy = 0;
         gbc.fill = GridBagConstraints.NONE;
-        misc.add(showScrollBars);
 
         resetColorButtons(skinSpec);
         JPanel glue = new JPanel();

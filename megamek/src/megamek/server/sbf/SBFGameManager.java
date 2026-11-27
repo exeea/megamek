@@ -34,14 +34,16 @@
 package megamek.server.sbf;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
+import megamek.common.actions.sbf.SBFAttackAction;
 import megamek.common.game.IGame;
+import megamek.common.enums.GamePhase;
 import megamek.common.game.InGameObject;
 import megamek.common.interfaces.ReportEntry;
 import megamek.common.net.enums.PacketCommand;
@@ -50,12 +52,15 @@ import megamek.common.net.packets.Packet;
 import megamek.common.options.OptionsConstants;
 import megamek.common.options.SBFRuleOptions;
 import megamek.common.strategicBattleSystems.SBFFormation;
+import megamek.common.strategicBattleSystems.SBFFormationTurn;
 import megamek.common.strategicBattleSystems.SBFGame;
 import megamek.common.strategicBattleSystems.SBFMovePath;
+import megamek.common.strategicBattleSystems.SBFPlayerTurn;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFRuleOptionsUser;
 import megamek.common.strategicBattleSystems.SBFTurn;
-import megamek.common.turns.TurnOrdered;
+import megamek.common.strategicBattleSystems.SBFWaterWidths;
 import megamek.logging.MMLogger;
 import megamek.server.AbstractGameManager;
 import megamek.server.Server;
@@ -87,50 +92,61 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
 
     @Override
     public void handlePacket(int connId, Packet packet) {
-        super.handlePacket(connId, packet);
-
         try {
-            switch (packet.command()) {
-                case ENTITY_MOVE:
-                    receiveMovement(packet, connId);
-                    break;
-                case ENTITY_ATTACK:
-                    receiveAttack(packet, connId);
-                    break;
-                default:
-                    break;
+            if (game.getPhase() == GamePhase.SBF_DETECTION_REPORT && packet.command() == PacketCommand.PLAYER_READY
+                  && !initiativeHelper.hasReconPriority(connId)) {
+                sendServerChat(connId, "Reconnaissance follows side initiative. Wait for your side's turn.");
+                return;
             }
-        } catch (InvalidPacketDataException e) {
-            logger.error("Invalid packet data:", e);
+            super.handlePacket(connId, packet);
+            try {
+                switch (packet.command()) {
+                    case ENTITY_MOVE:
+                        receiveMovement(packet, connId);
+                        break;
+                    case ENTITY_ATTACK:
+                        receiveAttack(packet, connId);
+                        break;
+                    default:
+                        break;
+                }
+            } catch (InvalidPacketDataException e) {
+                logger.error("Invalid packet data:", e);
+                if (packet.command() == PacketCommand.ENTITY_MOVE) {
+                    correctRejectedTurn(connId, null, true, false);
+                } else if (packet.command() == PacketCommand.ENTITY_ATTACK) {
+                    correctRejectedTurn(connId, null, true, true);
+                }
+            }
+        } finally {
+            logger.debug("Leaving handle packet: {}", packet.command());
+            sendPendingPackets();
         }
-
-        logger.info("Leaving handle packet: {}", packet.command());
-        logger.info(pendingPackets);
-        sendPendingPackets();
     }
 
     /**
      * Sends all pending packets to eligible players and clears out the pending packets.
      */
-    private void sendPendingPackets() {
+    void sendPendingPackets() {
         // packets must be sorted/filtered according to recipient for double-blind games
         // each player must receive the packets directed at them as well as any
         // undirected packets
         // in the order they were stored in pendingPackets
-        if (!pendingPackets.isEmpty()) {
-            reducePendingPackets();
-            // Send each player what they should receive ...
-            for (int playerId : game.getPlayersList().stream().map(Player::getId).toList()) {
-                List<Packet> packets = pendingPackets.stream()
-                      // ... including packets to PLAYER_NONE; these go to every player
-                      .filter(p -> (p.recipient == Player.PLAYER_NONE) ||
-                            (p.recipient == playerId))
-                      .map(PendingPacket::packet)
-                      .toList();
+        reducePendingPackets();
+        List<PendingPacket> packetsToSend = new ArrayList<>(pendingPackets);
+        pendingPackets.clear();
+        // Send each player what they should receive ...
+        for (int playerId : game.getPlayersList().stream().map(Player::getId).toList()) {
+            List<Packet> packets = packetsToSend.stream()
+                  // ... including packets to PLAYER_NONE; these go to every player
+                  .filter(p -> (p.recipient == Player.PLAYER_NONE) ||
+                        (p.recipient == playerId))
+                  .map(PendingPacket::packet)
+                  .toList();
+            if (!packets.isEmpty()) {
                 // the redundant new ArrayList is necessary to prevent a xstream error
                 super.send(playerId, new Packet(PacketCommand.MULTI_PACKET, new ArrayList<>(packets)));
             }
-            pendingPackets.clear();
         }
     }
 
@@ -182,12 +198,33 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
 
     @Override
     public List<ServerCommand> getCommandList(Server server) {
-        return Collections.emptyList();
+        return List.of(new SBFDeployCommand(server, this), new SBFEngageCommand(server, this),
+              new SBFFormationCommand(server, this), new SBFSpaceCommand(server, this), new SBFInitiativeCommand(server, this), new SBFAllocateCommand(server, this), new SBFCombatCommand(server, this), new SBFCommandDesignation(server, this),
+              new SBFMovementCommand(server, this), new SBFTransportCommand(server, this), new SBFWithdrawCommand(server, this), new SBFAeroCommand(server, this), new SBFReconCommand(server, this), new SBFHiddenCommand(server, this));
     }
 
     @Override
     public void addReport(ReportEntry r) {
-        pendingReports.add((SBFReportEntry) r);
+        SBFReportEntry entry = (SBFReportEntry) r;
+        if (entry.getSubjectId() != null && (game.usesDoubleBlind() || SBFScenarioResolution.roster(game).stream()
+              .anyMatch(f -> f.getId() == entry.getSubjectId() && f.concealsRoster()))) {
+            var recipients = game.getPlayersList().stream().filter(p -> game.isVisible(p.getId(), entry.getSubjectId()))
+                  .map(Player::getId).collect(Collectors.toSet());
+            game.getGameReport().restrictTo(entry, recipients);
+        }
+        pendingReports.add(entry);
+    }
+
+    /** Record recipients while the formations and their contacts still exist. All named subjects must be visible. */
+    void addReportFor(SBFReportEntry entry, SBFFormation... subjects) {
+        if (game.usesDoubleBlind() || Arrays.stream(subjects).anyMatch(SBFFormation::concealsRoster)) {
+            var recipients = game.getPlayersList().stream()
+                  .filter(player -> Arrays.stream(subjects).allMatch(f -> (f.getOwnerId() == player.getId())
+                        || game.isVisible(player.getId(), f.getId())))
+                  .map(Player::getId).collect(Collectors.toSet());
+            game.getGameReport().restrictTo(entry, recipients);
+        }
+        pendingReports.add(entry);
     }
 
     @Override
@@ -203,21 +240,42 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      * Creates a packet containing all entities, including wrecks, visible to the player in a blind game
      */
     Packet createGameStartUnitPacket(Player recipient) {
+        var forces = game.getForces();
+        if (game.usesDoubleBlind() || game.getActiveFormations().stream().anyMatch(SBFFormation::concealsRoster)) {
+            var viewers = game.visibilityHelper().playersSharingVision(recipient.getId());
+            forces = forces.visibleTo(owner -> viewers.contains(game.getPlayer(owner)), id -> game.isVisible(recipient.getId(), id));
+        }
         return new Packet(PacketCommand.SENDING_ENTITIES,
-              new ArrayList<>(getVisibleUnits(recipient)),
-              getGame().getGraveyard(),
-              // TODO: must add Sensor blips of all kinds as a separate list of stuff
-              getGame().getForces());
+              unitUpdateHelper.snapshotFor(recipient),
+              getGame().getGraveyard().stream().filter(unit -> getGame().isVisible(recipient.getId(), unit.getId()))
+                    .toList(),
+              forces);
     }
 
     @Override
     public void sendCurrentInfo(int connId) {
+        if (game.getPhase() == GamePhase.SBF_DETECTION_REPORT && game.getPlayer(connId) != null) {
+            sendServerChat(connId, SBFReconCommand.HELP);
+        }
+        if (game.getPhase().isEnd() && game.takingAdjustmentOrders()) {
+            sendServerChat(connId, SBFFormationCommand.HELP);
+        }
+        if (game.getPhase().isMovement() || game.getPhase().isEnd()) {
+            new SBFEngagementControl(this).remind(connId);
+        }
+        if (game.getPhase().isFiring() && (game.getPlayer(connId) != null)) {
+            var combat = new SBFCombatControl(this);
+            combat.remind(game.getPlayer(connId));
+            SBFArtilleryAirDefense.remind(this, connId);
+        }
+        if (game.getPhase().isFiringReport() && game.getDamageAllocations().stream()
+              .anyMatch(hit -> (hit.chooserId() == connId) && (hit.unitIndex() < 0))) {
+            sendServerChat(connId, "The firing report is waiting for your damage choices. Use /sbfallocate.");
+        }
         send(connId, packetHelper.createGameSettingsPacket());
 
         Player player = getGame().getPlayer(connId);
         if (player != null) {
-            send(connId, new Packet(PacketCommand.SENDING_MINEFIELDS, player.getMinefields()));
-
             if (getGame().getPhase().isLounge()) {
                 // send(connId, createMapSettingsPacket());
                 // send(createMapSizesPacket());
@@ -233,19 +291,22 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
 
                 // Send entities *before* other phase changes.
                 send(connId, createGameStartUnitPacket(player));
+                if (getGame().getPhase().isFiring()) {
+                    new SBFCombatControl(this).sendOrders(player);
+                }
                 //
                 // setPlayerDone(player, getGame().getEntitiesOwnedBy(player) <= 0);
                 send(connId, packetHelper.createPhaseChangePacket());
             }
 
+            send(connId, SBFScenarioResolution.markerPacket(game));
             send(connId, packetHelper.createPlanetaryConditionsPacket());
-            //
-            //
-            if (getGame().getPhase().usesTurns() && getGame().hasMoreTurns()) {
-                send(packetHelper.createTurnListPacket());
-                addPendingPacket(packetHelper.createTurnIndexPacket(connId));
-            } else if (!getGame().getPhase().isLounge() && !getGame().getPhase().isStartingScenario()) {
-                endCurrentPhase();
+            if (game.getPhase().isFiring()) {
+                send(connId, createActionsPacket(player));
+            }
+            if (getGame().getPhase().usesTurns() && getGame().getTurn() != null) {
+                send(connId, packetHelper.createTurnListPacket());
+                send(connId, packetHelper.createTurnIndexPacket(Player.PLAYER_NONE));
             }
 
             // This method is not called through normal packet handling, so it must send
@@ -256,6 +317,9 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
 
     @Override
     protected void endCurrentPhase() {
+        if (game.getPhase().isEnd() && !game.engagementOrders().remainingEnds().isEmpty()) {
+            return;
+        }
         logger.info("Ending phase {}", game.getPhase());
         phaseEndManager.managePhase();
     }
@@ -276,12 +340,12 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
                 game.setupTeams();
                 game.getPlanetaryConditions().determineWind();
                 send(packetHelper.createPlanetaryConditionsPacket());
+                SBFWaterWidths.roll(game);
                 send(packetHelper.createBoardsPacket());
                 game.setupDeployment();
                 break;
             case MOVEMENT:
-                // write Movement Phase header to report
-                addReport(new SBFReportEntry(2000)); // , Report.PUBLIC));
+                addReport(new SBFReportHeader(2000));
                 // intentional fall through
             case PREMOVEMENT:
             case SET_ARTILLERY_AUTO_HIT_HEXES:
@@ -344,9 +408,7 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      * Rolls initiative for all teams.
      */
     void rollInitiative() {
-        // I couldn't find confirmation whether Combat Sense worked at an SBF-scale, and not was wanting to change Juliez
-        // WIP too much, I opted to just pass in an empty map here. -- Illiani (April 3rd 2025)
-        TurnOrdered.rollInitiative(game.getTeams(), false, new HashMap<>());
+        initiativeHelper.rollInitiative();
         transmitAllPlayerUpdates();
     }
 
@@ -354,8 +416,8 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
         return new Packet(PacketCommand.SENDING_REPORTS_ALL, game.getGameReport().createFilteredReport(recipient));
     }
 
-    private Packet createReportPacket(Player recipient) {
-        return new Packet(PacketCommand.SENDING_REPORTS, pendingReports);
+    Packet createReportPacket(Player recipient) {
+        return new Packet(PacketCommand.SENDING_REPORTS, game.getGameReport().visibleTo(recipient, pendingReports));
     }
 
     public void clearPendingReports() {
@@ -366,7 +428,30 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
         return pendingReports;
     }
 
+    /** Chat commands run outside the packet handler. Publish only new damage rolls, then honor previous ready votes. */
+    void finishDamageAllocation(int previousReportCount) {
+        List<SBFReportEntry> newReports = List.copyOf(pendingReports.subList(previousReportCount, pendingReports.size()));
+        if (!newReports.isEmpty()) {
+            game.addReports(newReports);
+            for (Player player : game.getPlayersList()) {
+                send(player.getId(), new Packet(PacketCommand.SENDING_REPORTS,
+                      game.getGameReport().visibleTo(player, newReports)));
+            }
+        }
+        if (!SBFCombatDamage.hasPendingChoices(game)) {
+            checkReady();
+        }
+        sendPendingPackets();
+    }
+
+    void checkSetupReady() {
+        checkReady();
+    }
+
     void addPendingReportsToGame() {
+        if (game.getPhase().isEnd()) {
+            game.getGameReport().prependSectionHeader(pendingReports, 3399);
+        }
         game.addReports(pendingReports);
     }
 
@@ -374,7 +459,21 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      * Tries to change to the next turn. If there are no more turns, ends the current phase. If the player whose turn it
      * is next is not connected, we allow the other players to skip that player.
      */
+    boolean resolveDropLandings() {
+        List<Integer> owners = new SBFAirDrop(this).landAll();
+        if (owners.isEmpty()) {
+            return false;
+        }
+        var turns = new ArrayList<>(game.getTurnsList());
+        owners.forEach(owner -> turns.add(new SBFFormationTurn(owner)));
+        game.setTurns(turns);
+        sendCurrentTurns();
+        changeToNextTurn(Player.PLAYER_NONE);
+        return true;
+    }
+
     private void changeToNextTurn(int prevPlayerId) {
+        game.engagementOrders().finishMovement();
         if (!game.hasMoreTurns()) {
             endCurrentPhase();
             return;
@@ -391,6 +490,13 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
             endCurrentPhase();
         } else {
             Optional<Player> player = game.getPlayerFor(nextTurn);
+            if (game.getPhase() == GamePhase.PREMOVEMENT || game.getPhase() == GamePhase.PRE_FIRING) {
+                sendServerChat(nextTurn.playerId(), SBFHiddenCommand.REVEAL);
+            }
+            if (game.getPhase().isDeployment()) {
+                sendServerChat(nextTurn.playerId(), nextTurn instanceof SBFPlayerTurn ? SBFDeployCommand.ORDER
+                      : SBFDeployCommand.PLACE);
+            }
             if (prevPlayerId != Player.PLAYER_NONE) {
                 // send(packetHelper.createTurnIndexPacket(prevPlayerId));
                 addPendingPacket(packetHelper.createTurnIndexPacket(prevPlayerId));
@@ -407,10 +513,6 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
                 // sendTurnErrorSkipMessage(player);
             }
         }
-    }
-
-    private List<InGameObject> getVisibleUnits(Player viewer) {
-        return game.getFullyVisibleUnits(viewer);
     }
 
     /**
@@ -430,21 +532,27 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      */
     private void receiveMovement(Packet packet, int connId) throws InvalidPacketDataException {
         SBFMovePath movePath = packet.getSBFMovePath(0);
+        boolean wrongPhase = !getGame().getPhase().isMovement();
 
-        if (movePath != null) {
-            movePath.restore(game);
-            Optional<SBFFormation> formationInfo = game.getFormation(movePath.getEntityId());
-            if (formationInfo.isEmpty()) {
-                logger.error("Malformed packet {}", packet);
-                return;
-            }
-            SBFTurn turn = game.getTurn();
-            if ((turn == null) || !turn.isValid(connId, formationInfo.get(), game)) {
-                logger.error("It is not player {}'s turn! ", connId);
-                return;
-            }
-
-            movementProcessor.processMovement(movePath, formationInfo.get());
+        if (movePath == null) {
+            correctRejectedTurn(connId, null, wrongPhase, false);
+            return;
+        }
+        Optional<SBFFormation> formationInfo = game.getFormation(movePath.getEntityId());
+        if (formationInfo.isEmpty()) {
+            logger.error("Malformed packet {}", packet);
+            correctRejectedTurn(connId, null, wrongPhase, false);
+            return;
+        }
+        SBFFormation formation = formationInfo.get();
+        SBFTurn turn = game.getTurn();
+        if ((turn == null) || !turn.isValid(connId, formation, game)) {
+            logger.error("It is not player {}'s turn! ", connId);
+            correctRejectedTurn(connId, formation, wrongPhase, false);
+            return;
+        }
+        if (!movementProcessor.processMovement(movePath, formation)) {
+            correctRejectedTurn(connId, formation, wrongPhase, false);
         }
     }
 
@@ -453,6 +561,25 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      */
     void endCurrentTurn(SBFFormation entityUsed) {
         final int playerId = (entityUsed == null) ? Player.PLAYER_NONE : entityUsed.getOwnerId();
+        if ((entityUsed != null) && game.getPhase().isMovement() && (game.getTurn() instanceof SBFFormationTurn turn)
+              && turn.isOverrun()) {
+            // Overrun Combat, IO:BF p. 224: the Formation that moved first also attacks first this turn
+            entityUsed.markOverrun(game.getCurrentRound());
+        }
+        if (entityUsed != null && game.getPhase().isMovement() && game.adjustsFormations()
+              && game.continueDetachmentMovement(entityUsed)) {
+            game.engagementOrders().finishMovement();
+            sendServerChat(playerId, "Move the remaining counters of this detachment before the next player acts.");
+            addPendingPacket(packetHelper.createTurnIndexPacket(playerId));
+            return;
+        }
+        if (entityUsed != null && game.getPhase().isMovement() && game.usesDoubleBlind()
+              && game.visibilityHelper().isUncountedMovementGroup(entityUsed) && game.getTurn() != null
+              && game.getTurn().playerId() == playerId && game.getTurn().isValid(game)) {
+            game.engagementOrders().finishMovement();
+            addPendingPacket(packetHelper.createTurnIndexPacket(playerId));
+            return;
+        }
         changeToNextTurn(playerId);
     }
 
@@ -519,42 +646,58 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
         }
     }
 
-    private void repeatTurn(int connId) {
-        send(connId, packetHelper.createTurnListPacket());
-        SBFTurn turn = game.getTurn();
-        send(connId, packetHelper.createTurnIndexPacket((turn == null) ? Player.PLAYER_NONE : turn.playerId()));
+    /**
+     * Corrects a Client after the server rejected its movement or attacks: its own formation as the server has it, the
+     * actions it may see, and the phase and turn, so that the Client can act again. A formation of another player is
+     * never sent, so a rejected request cannot reveal a hidden unit.
+     */
+    private void correctRejectedTurn(int connId, SBFFormation formation, boolean includePhase,
+          boolean includeActions) {
+        Player player = game.getPlayer(connId);
+        if ((formation != null) && (player != null) && (formation.getOwnerId() == connId)) {
+            unitUpdateHelper.sendUnitUpdate(player, formation);
+        }
+        if (includeActions && (player != null)) {
+            send(connId, createActionsPacket(player));
+        }
+        if (includePhase) {
+            sendPhaseAndTurnCorrection(connId);
+        } else {
+            sendTurnCorrection(connId);
+        }
     }
 
     void receiveAttack(Packet packet, int connId) throws InvalidPacketDataException {
         var attacks = packet.getEntityActionList(1);
         int formationId = packet.getIntValue(0);
         Optional<SBFFormation> formationInfo = game.getFormation(formationId);
+        boolean wrongPhase = !getGame().getPhase().isFiring();
 
         if (formationInfo.isEmpty() ||
               !attacks.stream().map(EntityAction::getEntityId).allMatch(id -> id == formationId)) {
             logger.error("Invalid formation ID or diverging attacker IDs");
-            repeatTurn(connId); // TODO: This is untested; questionable if this can save a game after an error
+            correctRejectedTurn(connId, formationInfo.orElse(null), wrongPhase, true);
             return;
         }
 
         for (EntityAction action : attacks) {
             if (!validateEntityAction(action, connId)) {
-                repeatTurn(connId);
+                correctRejectedTurn(connId, formationInfo.get(), wrongPhase, true);
                 return;
             }
         }
 
         // is this the right phase?
-        if (!getGame().getPhase().isFiring() &&
-              !getGame().getPhase().isPhysical() &&
-              !getGame().getPhase().isTargeting() &&
-              !getGame().getPhase().isOffboard()) {
+        if (wrongPhase) {
             logger.error("Server got attack packet in wrong phase");
+            correctRejectedTurn(connId, formationInfo.get(), true, true);
             return;
         }
 
         // looks like mostly everything's okay
-        attackProcessor.processAttacks(attacks, formationInfo.get());
+        if (!attackProcessor.processAttacks(attacks, formationInfo.get())) {
+            correctRejectedTurn(connId, formationInfo.get(), false, true);
+        }
     }
 
     private boolean validateEntityAction(EntityAction action, int connId) {
@@ -577,6 +720,23 @@ public final class SBFGameManager extends AbstractGameManager implements SBFRule
      * Sends the game's pending actions to all Clients for them to replace any previous actions
      */
     void sendPendingActions() {
-        send(new Packet(PacketCommand.ACTIONS, new ArrayList<>(game.getActionsVector())));
+        game.getPlayersList().forEach(player -> send(player.getId(), createActionsPacket(player)));
+    }
+
+    /** One recipient's declarations for a live update or reconnect. Every contact named in the packet must be known. */
+    Packet createActionsPacket(Player recipient) {
+        List<EntityAction> visibleActions = game.getActionsVector().stream()
+              .filter(action -> game.isVisible(recipient.getId(), action.getEntityId()))
+              .filter(action -> {
+                  if (!(action instanceof SBFAttackAction attack)) {
+                      return true;
+                  }
+                  boolean ownOrder = game.getFormation(action.getEntityId())
+                        .map(f -> f.getOwnerId() == recipient.getId()).orElse(false);
+                  return attack.referencedIds().stream().allMatch(id -> game.getFormation(id).isEmpty()
+                        || (ownOrder ? game.getVisibility(recipient, id).isLocated() : game.isVisible(recipient.getId(), id)));
+              })
+              .toList();
+        return new Packet(PacketCommand.ACTIONS, new ArrayList<>(visibleActions));
     }
 }

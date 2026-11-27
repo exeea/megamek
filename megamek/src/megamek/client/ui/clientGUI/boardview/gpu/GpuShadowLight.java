@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
+import com.badlogic.gdx.graphics.g3d.environment.ShadowMap;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
@@ -20,25 +21,37 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.IntArray;
 import org.lwjgl.opengl.GL32;
 
-/** One hardware depth map for terrain, models and fog, through libGDX's existing shadow texture binding. */
+/**
+ * The sun's depth maps for terrain, models and fog, through libGDX's existing shadow texture binding: two square maps
+ * of one size in one texture, the near map (the light's own camera) in its lower half and the outer map ({@link #far})
+ * in its upper half (GpuTerrainShadows#drawLayers, surface-lighting.glsl's shadowAtlas).
+ */
 final class GpuShadowLight extends DirectionalShadowLight {
     /** The map's coarser levels (levels): a penumbra wider than the finest tent reads one (contactShadow). */
     static final int LEVELS = 3;
     private final ShaderProgram levelProgram;
     private final Mesh levelQuad = GpuAtmosphere.screenQuad();
     private final int levelFramebuffer = Gdx.gl.glGenFramebuffer();
+    /** The outer map's camera: the texture's upper half. */
+    final SlabCamera far = new SlabCamera();
+    /** The outer map's projection into the texture's upper half, for fog, which reads the texture whole. */
+    private final Matrix4 farInTexture = new Matrix4();
 
-    /** near and far as SlabCamera reads them: the slab's top and bottom heights, or distances along a lower light. */
-    GpuShadowLight(int width, int height, float viewportWidth, float viewportHeight, float near, float far) {
-        super(width, height, viewportWidth, viewportHeight, near, far);
+    /**
+     * Two maps of {@code texels} a side; near and far as SlabCamera reads them: the slab's top and bottom heights, or
+     * distances along a lower light.
+     */
+    GpuShadowLight(int texels, float viewportWidth, float viewportHeight, float near, float far) {
+        super(texels, 2 * texels, viewportWidth, viewportHeight, near, far);
         cam = new SlabCamera();
-        ((SlabCamera) cam).texels = width;
+        ((SlabCamera) cam).texels = texels;
+        this.far.texels = texels;
         cam.viewportWidth = viewportWidth;
         cam.viewportHeight = viewportHeight;
         cam.near = near;
         cam.far = far;
         fbo.dispose();
-        fbo = levelled(depthBuffer(width, height));
+        fbo = levelled(depthBuffer(texels, 2 * texels));
         // The binder applies this descriptor too; setting only Texture's filter would be overwritten by libGDX. Every
         // lookup names its level, so the finest compares exactly as without levels.
         textureDesc.minFilter = Texture.TextureFilter.MipMapLinearNearest;
@@ -47,11 +60,43 @@ final class GpuShadowLight extends DirectionalShadowLight {
               GpuShaderSource.read("shadow-levels.frag"));
     }
 
-    /** A square map of {@code texels} a side in place of the current one, whose depth is lost. */
+    /** Two maps of {@code texels} a side in place of the current ones, whose depth is lost. */
     void resize(int texels) {
         fbo.dispose();
-        fbo = levelled(depthBuffer(texels, texels));
+        fbo = levelled(depthBuffer(texels, 2 * texels));
         ((SlabCamera) cam).texels = texels;
+        far.texels = texels;
+    }
+
+    /** The outer map moved: its projection into the texture's upper half follows. */
+    void farMoved() {
+        farInTexture.setToTranslationAndScaling(0, .5f, 0, 1, .5f, 1).mul(far.combined);
+    }
+
+    /** The projection fog reads the maps through: the outer map's, in its half of the texture. */
+    static Matrix4 fogProjection(ShadowMap map) {
+        return map instanceof GpuShadowLight light ? light.farInTexture : map.getProjViewTrans();
+    }
+
+    /**
+     * The outer map's projection for lit programs (surface-lighting.glsl's shadowMatrix). A plain shadow map is one
+     * map for both: its own projection.
+     */
+    static void registerFar(BaseShader shader) {
+        shader.register("u_shadowFarProjViewTrans", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                ShadowMap map = renderable.environment == null ? null : renderable.environment.shadowMap;
+                if (map != null) {
+                    target.set(id, map instanceof GpuShadowLight light ? light.far.combined : map.getProjViewTrans());
+                }
+            }
+        });
+    }
+
+    /** One square map's depth into the texture at row {@code y}: the near map at 0, the outer map at its texels. */
+    static void copyLayer(FrameBuffer from, FrameBuffer to, int y) {
+        DepthBuffer.copyLayer(from, to, y);
     }
 
     /** The map with room for its coarser levels, undefined until levels() writes them. */
@@ -154,11 +199,15 @@ final class GpuShadowLight extends DirectionalShadowLight {
 
     @Override
     public void begin() {
-        // Clear the complete map, including its unoccluded border, after screen passes disabled depth writes.
+        // Clear the complete texture, including its maps' unoccluded borders, after screen passes disabled depth
+        // writes; then draw into the near map, the lower half, a texel of its edge left clear.
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
         Gdx.gl.glDepthMask(true);
         Gdx.gl.glClearDepthf(1);
         super.begin();
+        int texels = fbo.getWidth();
+        Gdx.gl.glViewport(0, 0, texels, texels);
+        Gdx.gl.glScissor(1, 1, texels - 2, texels - 2);
         depthClamp(true);
     }
 
@@ -219,24 +268,37 @@ final class GpuShadowLight extends DirectionalShadowLight {
     }
 
     /**
-     * Copies depth inside each rectangle of runs (x0, y0, x1, y1 texels, four values each) between two maps of one
-     * size, as GLFrameBuffer#transfer copies the whole map.
+     * Copies depth inside each rectangle of runs (x0, y0, x1, y1 texels, four values each) from a square map into the
+     * texture's square at row {@code y}, as copyLayer copies the whole square.
      */
-    static void copyDepth(FrameBuffer from, FrameBuffer to, IntArray runs) {
-        DepthBuffer.copy(from, to, runs);
+    static void copyDepth(FrameBuffer from, FrameBuffer to, IntArray runs, int y) {
+        DepthBuffer.copy(from, to, runs, y);
     }
 
     /** libGDX 1.14.2 otherwise attaches a lone texture as COLOR_ATTACHMENT0, even for a depth specification. */
     private static final class DepthBuffer extends FrameBuffer {
         DepthBuffer(GLFrameBuffer.FrameBufferBuilder builder) { super(builder); }
 
-        static void copy(FrameBuffer from, FrameBuffer to, IntArray runs) {
+        static void copy(FrameBuffer from, FrameBuffer to, IntArray runs, int y) {
             Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, from.getFramebufferHandle());
             Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, to.getFramebufferHandle());
             for (int i = 0; i < runs.size; i += 4) {
                 int x0 = runs.get(i), y0 = runs.get(i + 1), x1 = runs.get(i + 2), y1 = runs.get(i + 3);
-                Gdx.gl30.glBlitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, GL20.GL_DEPTH_BUFFER_BIT, GL20.GL_NEAREST);
+                Gdx.gl30.glBlitFramebuffer(x0, y0, x1, y1, x0, y0 + y, x1, y1 + y, GL20.GL_DEPTH_BUFFER_BIT,
+                      GL20.GL_NEAREST);
             }
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, defaultFramebufferHandle);
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, defaultFramebufferHandle);
+        }
+
+        static void copyLayer(FrameBuffer from, FrameBuffer to, int y) {
+            int size = from.getWidth();
+            // A blit honours the scissor: the whole square is copied.
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, from.getFramebufferHandle());
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, to.getFramebufferHandle());
+            Gdx.gl30.glBlitFramebuffer(0, 0, size, size, 0, y, size, y + size, GL20.GL_DEPTH_BUFFER_BIT,
+                  GL20.GL_NEAREST);
             Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, defaultFramebufferHandle);
             Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, defaultFramebufferHandle);
         }

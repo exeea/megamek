@@ -36,8 +36,8 @@ package megamek.server.scriptedEvents;
 import java.util.Map;
 
 import jakarta.annotation.Nonnull;
-import megamek.common.Player;
 import megamek.common.game.Game;
+import megamek.common.game.IGame;
 import megamek.logging.MMLogger;
 import megamek.server.trigger.Trigger;
 import megamek.server.trigger.TriggerSituation;
@@ -67,21 +67,19 @@ public record VictoryTriggeredEvent(Trigger trigger, boolean endsGame, String pl
     @Override
     public VictoryResult checkVictory(Game game, Map<String, Object> context) {
         if (trigger.isTriggered(game, TriggerSituation.ROUND_END)) {
-            VictoryResult victoryResult = new VictoryResult(true);
-            int winningTeam = game.playerForPlayerName(playerName).map(Player::getTeam).orElse(Player.TEAM_NONE);
-            if (winningTeam == Player.TEAM_NONE) {
-                int winningPlayer = game.idForPlayerName(playerName).orElse(Player.PLAYER_NONE);
-                if (winningPlayer == Player.PLAYER_NONE) {
-                    MMLogger.create().error("Could not find winning player or team");
-                    return VictoryResult.noResult();
-                }
-                victoryResult.setPlayerScore(winningPlayer, 1);
-            } else {
-                victoryResult.setTeamScore(winningTeam, 1);
-            }
-            return victoryResult;
+            return winner(game);
         }
         return VictoryResult.noResult();
+    }
+
+    /** Resolves the named winner after the scenario trigger has fired. */
+    public VictoryResult winner(IGame game) {
+        return game.getPlayersList().stream().filter(player -> player.getName().equals(playerName)).findFirst()
+              .map(VictoryResult::forPlayerOrTeam)
+              .orElseGet(() -> {
+                  MMLogger.create().error("Could not find winning player or team {}", playerName);
+                  return VictoryResult.noResult();
+              });
     }
 
     @Override

@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.FortifyBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -47,7 +46,7 @@ import megamek.common.units.Infantry;
 
 /**
  * Manages fortification-under-construction indicator sprites on the board view (TO:AUE Trench/Fieldworks Engineers and
- * Vehicles &amp; Fieldworks). Creates and removes {@link FortifyBuildSprite} instances on the hexes of all units that are
+ * Vehicles &amp; Fieldworks). Creates and removes {@link TacticalMark.Fortify} instances on the hexes of all units that are
  * currently building a fortified hex; the build state is read from the synced entities.
  */
 public class FortifyBuildSpriteHandler extends BoardViewSpriteHandler {

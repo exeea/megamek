@@ -441,14 +441,14 @@ class GpuMapSourceTest {
         };
         GpuMapSource source = onEdt(() -> {
             var editor = new BoardEditorSession();
-            try (var editing = new GpuMapSource(editor.game(), null, editor, null, null, edit);
+            try (var editing = new GpuMapSource(editor.game(), null, editor, null, edit);
                   var unavailable = new GpuMapSource(editor.game(), null, null)) {
                 for (var workspace : List.of(editing, unavailable)) {
                     assertTrue(workspace.takeFrame().globalCommands().stream()
                           .noneMatch(command -> command.id().equals("boardEdit3D")));
                 }
             }
-            return new GpuMapSource(editor.game(), null, null, null, null, edit);
+            return new GpuMapSource(editor.game(), null, null, null, edit);
         });
         BoardScene.Command command;
         try {

@@ -5,6 +5,7 @@ import java.awt.BasicStroke;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -114,6 +115,14 @@ final class BoardRoad {
     private int single;
     /** Whether this hex's own road is a single lane, its hub as narrow as its lane. */
     private boolean narrow;
+    /** Whether this is a loose road's open turning place ({@link #turningPlace}). */
+    private boolean turning;
+    /** A turning place's arms toward another turning place, by direction (#joinedArms): worn as one with it. */
+    private int joined;
+    /** Per joined arm d, whether the place beyond it and the one beyond arm d + 1 are joined too (#joinedCorners). */
+    private int joinedCorners;
+    /** A turning place no track reaches from outside its cluster of turning places: worn evenly, no loop (#ruts). */
+    private boolean yard;
     /**
      * The turns this two-lane road closes, into its exits from the approaches that may not take them, as bit
      * {@code 6 * a + b} for sides {@code a, b} both ways round (SingleLane#closedTurns): it reserves no turn between them.
@@ -129,6 +138,8 @@ final class BoardRoad {
     private int squared;
     /** Sides where a loose road runs on into another's hex, whose own coat draws the track there (#meet). */
     private int tracked;
+    /** Sides where a paved road runs on into the next hex's road of its kind, whose coats paint it there (#onward). */
+    private int carried;
     /** The paved roads a loose one meets. */
     private List<BoardRoad> paved = List.of();
     /** A gravel road's courses (#courses), derived once, and which of their ends run on (#pathEnds). */
@@ -293,7 +304,8 @@ final class BoardRoad {
         Function<Coords, Node> nodes = at -> Node.of(scene.tile(at));
         int single = singleArms(scene, tile);
         long closed = single == 0 || singleLane(tile) ? 0 : SingleLane.closedTurns(lanes(scene), tile.coords(), aprons(scene, tile));
-        var road = layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
+        int exits = roadExits(scene, tile);
+        var road = layout(tile.coords(), exits, tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
             // A road meeting a deck joins the deck's road where it has that side; a clean side keeps the road's own kind.
             if (neighbor != null && BoardSurface.connectingBridge(tile, neighbor, direction) != null) {
@@ -302,7 +314,8 @@ final class BoardRoad {
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;
         }, bends(tile.coords(), nodes), true,
-              climbingTurn(tile.roadExits(), BoardRoadGrade.ramps(scene, tile)), single, singleLane(tile), closed)
+              climbingTurn(exits, BoardRoadGrade.ramps(scene, tile)), single, singleLane(tile), closed,
+              turningPlace(tile))
               .flow(inbound(scene, tile, single)).circulate(nodes);
         if (tile.railExits() != 0) { road = road.solidHub(); }
         if (road.circle != null && road.circle.lanes == 2) {
@@ -313,12 +326,56 @@ final class BoardRoad {
             }
         } else { road = road.meetConcrete(scene, tile); }
         // Its aprons, which the concrete it meets gives, are no roads of its junction (SingleLane#control).
-        return road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
+        var result = road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
               .control(SingleLane.control(tile.appearance(), tile.roadExits(), single, road.apronExits,
                     road.junction(tile.roadExits()))).meet(scene, tile);
+        result.joined = joinedArms(scene, tile, exits);
+        result.joinedCorners = joinedCorners(scene, tile, result.joined);
+        result.yard = turningPlace(tile) && (exits & ~result.joined) == 0;
+        return result;
     }
 
     static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
+
+    /**
+     * Whether a hex's road is a loose road's turning place: dirt or gravel with five or more exits. Nobody drives a
+     * farm track round a roundabout; vehicles turning there wear an open patch of ground (#layout, #scuff).
+     */
+    static boolean turningPlace(BoardScene.Tile tile) {
+        return tile != null && tile.road() != Kind.NONE && !paved(tile.road()) && tile.railExits() == 0
+              && roundabout(tile.roadExits());
+    }
+
+    /**
+     * A turning place's drawn exits ({@code exits}) into another turning place whose road comes back: vehicles turn on
+     * the two as on one patch of ground, so its worn middle runs out along that arm to their shared border (#scuff).
+     */
+    private static int joinedArms(BoardScene scene, BoardScene.Tile tile, int exits) {
+        if (!turningPlace(tile)) { return 0; }
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            var next = (exits & 1 << d) == 0 ? null : scene.neighbor(tile, d);
+            if (turningPlace(next) && (roadExits(scene, next) & 1 << (d + 3) % 6) != 0) { result |= 1 << d; }
+        }
+        return result;
+    }
+
+    /**
+     * A hex's drawn road exits: its own, but a turning place's that lead into a hex with no road back and no bridge:
+     * no track runs toward a side with no road beyond it (plain pavement, an apron or bare ground is none).
+     */
+    static int roadExits(BoardScene scene, BoardScene.Tile tile) {
+        int exits = tile.roadExits() & 63;
+        if (!turningPlace(tile)) { return exits; }
+        for (int d = 0; d < 6; d++) {
+            var next = (exits & 1 << d) == 0 ? null : scene.neighbor(tile, d);
+            if (next != null && (next.roadExits() & 1 << (d + 3) % 6) == 0
+                  && BoardSurface.connectingBridge(tile, next, d) == null) {
+                exits &= ~(1 << d);
+            }
+        }
+        return exits;
+    }
 
     /** Whether a tile's ground road is a single, one-way lane (SingleLane#single): a paved road narrowed to one. */
     static boolean singleLane(BoardScene.Tile tile) {
@@ -426,6 +483,10 @@ final class BoardRoad {
     private BoardRoad lanes(BoardRoad from) {
         single = from.single;
         narrow = from.narrow;
+        turning = from.turning;
+        joined = from.joined;
+        joinedCorners = from.joinedCorners;
+        yard = from.yard;
         inbound = from.inbound;
         closed = from.closed;
         return this;
@@ -449,6 +510,7 @@ final class BoardRoad {
                 continue;
             }
             if (loose && !paved(next.road())) { tracked |= 1 << d; }
+            if (!loose && next.road() == tile.road()) { carried |= 1 << d; }
             if (paved(next.road()) == loose) {
                 meetings |= 1 << d;
                 if (loose) { roads.add(of(scene, next)); }
@@ -517,6 +579,43 @@ final class BoardRoad {
         }
         return result;
     }
+
+    /**
+     * Past each crossing into the next hex's road of its kind (#carried), square to the crossing and within its arm
+     * (#arm), from {@link #ONWARD} on: that hex's own coats paint the road on from there, measured from its own course,
+     * so the two never lay two headings and lanes over each other (#pavedWear, GpuRoads#patches). The overlap keeps the
+     * two coats' edges closed. A roundabout's shared paint keeps its own.
+     */
+    Area onward() {
+        Area result = new Area();
+        if (carried == 0 || circle != null) { return result; }
+        for (var path : paths) {
+            for (int end = 0; end < 2 && path.size() > 1; end++) {
+                Point outer = end == 0 ? path.getFirst() : path.getLast();
+                Point inner = end == 0 ? path.get(1) : path.get(path.size() - 2);
+                for (int d = 0; d < 6; d++) {
+                    Vector2 axis = border(d);
+                    float distance = axis.len();
+                    axis.nor();
+                    float from = inner.x * axis.x + inner.y * axis.y, to = outer.x * axis.x + outer.y * axis.y;
+                    // Only an end running on through this side's border.
+                    if ((carried & 1 << d) == 0 || to <= distance || from >= to) { continue; }
+                    float t = Math.max(0, (distance - from) / (to - from));
+                    float length = (float) Math.hypot(outer.x - inner.x, outer.y - inner.y);
+                    Point at = new Point(inner.x + (outer.x - inner.x) * t, inner.y + (outer.y - inner.y) * t,
+                          outer.width);
+                    Area past = new End(at, (outer.x - inner.x) / length, (outer.y - inner.y) / length)
+                          .band(ONWARD, 128, outer.width + SHOULDER + 3);
+                    past.intersect(arm(new End(at, axis.x, axis.y)));
+                    result.add(past);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** How far past a crossing a paved road's coats still reach over the next hex's (#onward): a tile pixel. */
+    private static final float ONWARD = 1;
 
     /**
      * The carriageways of the paved roads a loose one meets (#meet), widened by {@code margin}, in its tile pixels. A
@@ -824,7 +923,7 @@ final class BoardRoad {
         }
         BoardRoad hub = layout(coords, exits, Kind.PAVED,
               direction -> joins.stream().filter(join -> join.direction() == direction).map(Join::kind)
-                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false, single, narrow, closed);
+                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false, single, narrow, closed, false);
         hub.inbound = inbound;
         hub.solidApproaches = solidApproaches;
         hub.apronExits = apronExits;
@@ -954,7 +1053,7 @@ final class BoardRoad {
         int single = BoardFeatures.singleArms(hex, coords, board, exits);
         long closed = single == 0 || SingleLane.single(hex) ? 0 : SingleLane.closedTurns(hex, coords, board);
         return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED, bends(coords, nodes), true,
-              climbingTurn(exits, ramps), single, SingleLane.single(hex), closed).circulate(nodes);
+              climbingTurn(exits, ramps), single, SingleLane.single(hex), closed, false).circulate(nodes);
     }
 
     /** A return turn that climbs runs straight in to the hex centre and out again, keeping both ramps long. */
@@ -1054,7 +1153,7 @@ final class BoardRoad {
     /** {@code radial} runs every exit straight to the centre, as a junction's arms do. */
     private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors,
           IntFunction<Vector2> bends, boolean circulation, boolean radial) {
-        return layout(coords, exits, kind, neighbors, bends, circulation, radial, 0, false, 0);
+        return layout(coords, exits, kind, neighbors, bends, circulation, radial, 0, false, 0, false);
     }
 
     /** As {@link #layout(Coords, int, Kind, IntFunction)} with the {@link #single} arms of a road with lanes. */
@@ -1065,7 +1164,7 @@ final class BoardRoad {
     /** As {@link #layout(Coords, int, Kind, IntFunction, int, boolean)}, reserving none of the {@code closed} turns. */
     static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors, int single, boolean narrow,
           long closed) {
-        return layout(coords, exits, kind, neighbors, direction -> null, true, false, single, narrow, closed);
+        return layout(coords, exits, kind, neighbors, direction -> null, true, false, single, narrow, closed, false);
     }
 
     /**
@@ -1075,7 +1174,8 @@ final class BoardRoad {
      * ({@code closed}, SingleLane#closedTurns): an exit leaves it only towards the approaches that may take it.
      */
     private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors,
-          IntFunction<Vector2> bends, boolean circulation, boolean radial, int single, boolean narrow, long closed) {
+          IntFunction<Vector2> bends, boolean circulation, boolean radial, int single, boolean narrow, long closed,
+          boolean turning) {
         single &= exits & 63;
         float hub = narrow ? SINGLE_HALF : kind.halfWidth;
         List<Point> ends = new ArrayList<>();
@@ -1100,19 +1200,20 @@ final class BoardRoad {
         }
         List<List<Point>> paths = new ArrayList<>();
         List<End> terminals = new ArrayList<>();
-        Circle circle = circulation && single == 0 && !narrow && roundabout(exits)
+        // A loose road never circulates: five arms of a farm track meet in its turning place (#turningPlace).
+        Circle circle = circulation && single == 0 && !narrow && paved(kind) && roundabout(exits)
               ? new Circle(0, 0, ROUNDABOUT_RADIUS, 1, coords) : null;
         if (circle != null) {
             // One circulating lane, as wide as each incoming lane of the two-way approach.
             paths.add(ring(circle, kind.halfWidth / 2));
             for (Point end : ends) { entry(paths, end, circle, kind.halfWidth); }
-        } else if (ends.size() == 2 && !radial
+        } else if (ends.size() == 2 && !radial && !turning
               && RailRoute.piece(sides.get(0), sides.get(1)) >= 3
               && square(ends.get(0), directions.get(0)) && square(ends.get(1), directions.get(1))) {
             // A 120-degree connection uses the same broad course as its rail. Holding straight corridors inside
             // this bend pinches the bridge around the track, even though both reach the same border midpoints.
             paths.add(course(ends.get(0), ends.get(1)));
-        } else if (ends.size() == 2) {
+        } else if (ends.size() == 2 && !turning) {
             // A return turn needs the whole hex to keep its inner shoulder open at full road width. A climbing one holds
             // both ramp corridors instead; its legs converge too closely for an open inner shoulder, which closes into
             // the wedge between the ramps.
@@ -1146,7 +1247,22 @@ final class BoardRoad {
                 Point finish = to;
                 if (Math.abs(cross) > 1e-4f) {
                     float s = (dx * out.y - dy * out.x) / cross, u = (dx * in.y - dy * in.x) / cross;
-                    if (s > 0 && u > 0) {
+                    if (s > 0 && u > 0 && Math.min(s, u) <= CORNER_ROOM * chord) {
+                        // The tangents meet at an end itself (beside a square crossing, the other a line crossing):
+                        // the turn is a corner there, which a fillet would collapse into the chord. It is rounded
+                        // within CORNER_JOIN of that end; the rest of the course runs straight along the line.
+                        float join = Math.min(CORNER_JOIN, .5f * chord), ux = dx / chord, uy = dy / chord;
+                        if (s <= u) {
+                            to = new Point(from.x + ux * join, from.y + uy * join,
+                                  from.width + (to.width - from.width) * join / chord);
+                        } else {
+                            Point start = new Point(to.x - ux * join, to.y - uy * join,
+                                  to.width + (from.width - to.width) * join / chord);
+                            line(path, from, start);
+                            from = start;
+                        }
+                        reachIn = reachOut = join / 3;
+                    } else if (s > 0 && u > 0) {
                         // A circular fillet leaves room inside a tight turn. A quadratic pulled towards the
                         // tangent intersection can bend more sharply than the road's own half-width.
                         float arm = Math.min(s, u);
@@ -1170,7 +1286,8 @@ final class BoardRoad {
             }
             path.addAll(tail.reversed().subList(1, tail.size()));
             paths.add(path);
-        } else if (ends.isEmpty()) {
+        } else if (ends.isEmpty() && !turning) {
+            // A lone hex's stub; a turning place with no arm is its worn patch alone (below).
             float radius = Math.abs(border(0).y);
             List<Point> path = new ArrayList<>();
             line(path, new Point(0, -HexTile.ROAD_END_REACH * radius, hub),
@@ -1199,7 +1316,7 @@ final class BoardRoad {
                 paths.add(path);
             }
         }
-        if (circle == null && ends.size() >= 3) {
+        if (circle == null && (ends.size() >= 3 || turning)) {
             // Keep the radial approaches for paint and wear, but reserve each legal broad turn at full width.
             // An exit-only bridge must also carry explicit rail layouts, not just the default junction pieces.
             for (int a = 0; a < ends.size(); a++) {
@@ -1230,9 +1347,12 @@ final class BoardRoad {
                 }
             }
         }
+        // A turning place's ground is its whole worn middle (#scuff), not its arms' width only: a ring round it.
+        if (turning) { paths.add(turnLoop(.4f * TURN_EDGE, .6f * TURN_EDGE)); }
         var result = new BoardRoad(coords, paths, List.copyOf(ends), terminals, joins, circle);
         result.single = single;
         result.narrow = narrow;
+        result.turning = turning;
         result.closed = closed;
         return result;
     }
@@ -1514,6 +1634,7 @@ final class BoardRoad {
         result.meetings = meetings;
         result.squared = squared;
         result.tracked = tracked;
+        result.carried = carried;
         result.paved = paved;
         return result.lanes(this);
     }
@@ -1763,6 +1884,12 @@ final class BoardRoad {
     /** A gravel road's graded edge either side of its course (terrain-road.frag GRAVEL_EDGE), where its grass begins. */
     private static final float GRAVEL_EDGE = 3.4f * METRE;
 
+    /**
+     * A turn whose fillet arm is at most this share of its chord is a corner at an end (#layout), rounded within
+     * CORNER_JOIN of it.
+     */
+    private static final float CORNER_ROOM = .001f, CORNER_JOIN = 3 * METRE;
+
     /** A dirt track's track, its half width about each of its courses: its ruts with their loose soil. */
     private static final float TRACK_HALF = RUT_OFFSET + RUT_REACH;
 
@@ -1808,7 +1935,7 @@ final class BoardRoad {
 
     /** Whether this road's arms meet in an open junction: not a roundabout, nor arms moved beside a rail's corridor. */
     private boolean openJunction() {
-        return circle == null && borders.size() >= 3 && corridor == RailRoute.Corridor.NONE;
+        return circle == null && (borders.size() >= 3 || turning) && corridor == RailRoute.Corridor.NONE;
     }
 
     /**
@@ -1824,6 +1951,9 @@ final class BoardRoad {
             result = new ArrayList<>();
             for (int a = 0; a < borders.size(); a++) {
                 for (int b = a + 1; b < borders.size(); b++) { result.add(turn(borders.get(a), borders.get(b))); }
+            }
+            if (turning) {
+                result.add(turnLoop(TURN_LOOP, borders.isEmpty() ? Kind.GRAVEL.halfWidth : borders.getFirst().width));
             }
             result = List.copyOf(result);
         }
@@ -1911,6 +2041,20 @@ final class BoardRoad {
         if (result != null) { return result; }
         if (!openJunction()) {
             result = new Wheels(paths, paths.size(), pathEnds());
+        } else if (turning) {
+            // Vehicles drive in, turn on the worn ground and drive out: each arm's track runs in to the middle, where
+            // the scuff wears it away (#scuff), and one loop is worn into the place; no corner of a junction.
+            List<List<Point>> courses = new ArrayList<>();
+            for (Point arm : borders) {
+                // Between joined places vehicles drive anywhere on the worn ground: no track of its own.
+                if (joinedArm(arm)) { continue; }
+                List<Point> stub = new ArrayList<>();
+                line(stub, beyond(arm), arm);
+                line(stub, arm, new Point(0, 0, arm.width));
+                courses.add(List.copyOf(stub));
+            }
+            courses.add(turnLoop(TURN_LOOP, borders.isEmpty() ? Kind.DIRT.halfWidth : borders.getFirst().width));
+            result = new Wheels(List.copyOf(courses), courses.size(), openEnds(courses));
         } else {
             List<Point> arms = new ArrayList<>(borders);
             arms.sort(Comparator.comparingDouble(p -> Math.atan2(p.y, p.x)));
@@ -1925,7 +2069,7 @@ final class BoardRoad {
                     }
                 }
             }
-            for (int a = 0; a < arms.size(); a++) {
+            for (int a = 0; a < arms.size() && arms.size() > 1; a++) {
                 int b = (a + 1) % arms.size();
                 Point from = arms.get(a), to = arms.get(b);
                 // Counterclockwise from this arm to the next: the corner between them, or the open side of a bend.
@@ -2022,14 +2166,45 @@ final class BoardRoad {
             // heading there, so that neighbouring texels do not filter it away.
             if (Math.abs(rut) < nearest - .01f) { nearest = Math.abs(rut); dx = sample.dx(); dy = sample.dy(); }
         }
-        float rut = (inside < 0 ? -nearest : nearest) * (1 - scuff(x, y));
-        return new Track(new Vector2(dx, dy).nor(), Math.clamp((rut + RUT_OFFSET) / (RUT_OFFSET + RUT_REACH), 0, 1));
+        float scuff = scuff(x, y), rut = (inside < 0 ? -nearest : nearest) * (1 - scuff);
+        float across = Math.clamp((rut + RUT_OFFSET) / (RUT_OFFSET + RUT_REACH), 0, 1);
+        // A turning place's middle is worn to loose soil wherever its ruts lie, not only along them (#turningPlace).
+        if (turning) {
+            // A yard is worn evenly: no track arrives to drive a loop or ruts into it.
+            float worn = 1 - TURN_WORN * scuff / SCUFF_WEAR;
+            across = yard ? worn : Math.min(across, worn);
+        }
+        return new Track(new Vector2(dx, dy).nor(), across);
     }
 
     /** A dirt junction's middle is scuffed most within SCUFF_CORE of its centre, fading out by SCUFF_EDGE. */
     private static final float SCUFF_CORE = 1.2f * METRE, SCUFF_EDGE = 3.9f * METRE;
     /** How far both wander, either way: no scuff lies farther out than SCUFF_EDGE + SCUFF_RAGGED. */
     private static final float SCUFF_RAGGED = .9f * METRE;
+    /**
+     * A turning place's worn middle (#turningPlace): at least a vehicle's turning circle, about 14 m across, bare
+     * and rutted, its edge ragged.
+     */
+    private static final float TURN_CORE = 4f * METRE, TURN_EDGE = 7f * METRE, TURN_RAGGED = 1.5f * METRE;
+    /** The radius of the loop turning vehicles wear into it (#wheels). */
+    private static final float TURN_LOOP = 4.5f * METRE;
+    /** How far a yard's outline wanders in or out, and over how long a stretch (#wander). */
+    private static final float TURN_WANDER = .3f * TURN_EDGE, TURN_WANDER_SCALE = 6 * METRE;
+    /** How far a turning place's most worn ground stands from the grass: loose soil, between a rut and its lip. */
+    private static final float TURN_WORN = .55f;
+
+    /**
+     * A closed circle about the hex centre, of the given radius and half width: the loop worn into a turning place
+     * (#wheels), or its ground (#layout), a ring whose width reaches over its middle out to the worn edge.
+     */
+    private static List<Point> turnLoop(float radius, float width) {
+        List<Point> loop = new ArrayList<>();
+        for (int i = 0; i <= 48; i++) {
+            double angle = i * Math.PI / 24;
+            loop.add(new Point(radius * (float) Math.cos(angle), radius * (float) Math.sin(angle), width));
+        }
+        return List.copyOf(loop);
+    }
     /** How much of a rut's distance the most scuffed ground loses: enough to wear them together, not to erase them. */
     private static final float SCUFF_WEAR = .8f;
 
@@ -2038,21 +2213,113 @@ final class BoardRoad {
      * its ruts together, fading out over a ragged edge; 0 off open junctions.
      */
     private float scuff(float x, float y) {
-        float centre = (float) Math.sqrt(x * x + y * y);
-        if (centre > SCUFF_EDGE + SCUFF_RAGGED || !openJunction()) { return 0; }
+        // Measured from the middle, or along an arm joining another turning place out to the border (#joinedArms);
+        // a yard's outline and a joined arm's neck wander (#wander).
+        float wander = yard || joined != 0 ? wander(x, y) : 0;
+        float centre = (float) Math.sqrt(x * x + y * y) + (yard ? wander : 0);
+        for (int d = 0; d < 6; d++) {
+            if ((joined & 1 << d) == 0) { continue; }
+            float[] border = joinedBorder(d);
+            float t = Math.clamp((x * border[0] + y * border[1])
+                  / (border[0] * border[0] + border[1] * border[1]), 0, 1);
+            centre = Math.min(centre, (float) Math.hypot(x - t * border[0], y - t * border[1]) + wander);
+            if ((joinedCorners & 1 << d) != 0 && cornerSector(d).contains(x, y)) { centre = 0; }
+        }
+        float core = turning ? TURN_CORE : SCUFF_CORE, edgeAt = turning ? TURN_EDGE : SCUFF_EDGE;
+        float ragged = turning ? TURN_RAGGED : SCUFF_RAGGED;
+        if (centre > edgeAt + ragged || !openJunction()) { return 0; }
         float wx = (x + BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) / (1.5f * METRE);
         float wy = (y + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) / (1.5f * METRE);
-        float edge = centre + (2 * BoardRelief.noise(wx, wy) - 1) * SCUFF_RAGGED;
-        float t = Math.clamp((edge - SCUFF_CORE) / (SCUFF_EDGE - SCUFF_CORE), 0, 1);
+        float edge = centre + (2 * BoardRelief.noise(wx, wy) - 1) * ragged;
+        float t = Math.clamp((edge - core) / (edgeAt - core), 0, 1);
         return SCUFF_WEAR * (1 - t * t * (3 - 2 * t));
+    }
+
+    /**
+     * Of a turning place's joined arms ({@code joined}), each arm d whose place and the one beyond arm d + 1 are joined
+     * to each other: three places round one corner, worn as one patch out to it (#cornerSector).
+     */
+    private static int joinedCorners(BoardScene scene, BoardScene.Tile tile, int joined) {
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            int e = (d + 1) % 6;
+            if ((joined & 1 << d) == 0 || (joined & 1 << e) == 0) { continue; }
+            // From the place beyond arm d the one beyond arm d + 1 lies toward d + 2, and back toward d + 5.
+            if ((roadExits(scene, scene.neighbor(tile, d)) & 1 << (d + 2) % 6) != 0
+                  && (roadExits(scene, scene.neighbor(tile, e)) & 1 << (d + 5) % 6) != 0) {
+                result |= 1 << d;
+            }
+        }
+        return result;
+    }
+
+    /** The hex's sector between arms d and d + 1, out to the corner they share: tile px from its centre. */
+    private Path2D.Float cornerSector(int d) {
+        float[] a = joinedBorder(d), b = joinedBorder((d + 1) % 6);
+        // The hex corner nearest the two borders' middles' sum: the one between them.
+        float cx = 0, cy = 0, best = Float.POSITIVE_INFINITY;
+        for (int k = 0; k < 6; k++) {
+            float x = HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH);
+            float y = HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT);
+            float far = (float) Math.hypot(x - (a[0] + b[0]), y - (a[1] + b[1]));
+            if (far < best) {
+                best = far;
+                cx = x;
+                cy = y;
+            }
+        }
+        Path2D.Float sector = new Path2D.Float();
+        sector.moveTo(0, 0);
+        sector.lineTo(a[0], a[1]);
+        sector.lineTo(cx, cy);
+        sector.lineTo(b[0], b[1]);
+        sector.closePath();
+        return sector;
+    }
+
+    /**
+     * How far a yard's outline or a joined neck's edge stands in or out at (x, y), tile px: low-frequency noise of the
+     * world position, so neighbouring hexes agree on it, some tenths of the worn middle's radius.
+     */
+    private float wander(float x, float y) {
+        float wx = (x + BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) / TURN_WANDER_SCALE;
+        float wy = (y + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) / TURN_WANDER_SCALE;
+        return (2 * BoardRelief.noise(wx + 7.1f, wy - 3.4f) - 1) * TURN_WANDER;
+    }
+
+    /** Whether a border point of this turning place's arm leads to a joined place (#joinedArms). */
+    private boolean joinedArm(Point arm) {
+        for (int d = 0; d < 6; d++) {
+            if ((joined & 1 << d) == 0) { continue; }
+            float[] border = joinedBorder(d);
+            if (arm.x * border[0] + arm.y * border[1]
+                  > .99f * Math.hypot(arm.x, arm.y) * Math.hypot(border[0], border[1])) { return true; }
+        }
+        return false;
+    }
+
+    /** The middle of this hex's border toward direction d, tile px from its centre. */
+    private float[] joinedBorder(int d) {
+        Coords next = coords.translated(d);
+        float scale = 2 * BoardGeometry.hexScale();
+        return new float[] { (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / scale,
+              (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / scale };
     }
 
     /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of them, and its scuffed middle. */
     Area rutReach() {
         Area result = new Area();
         if (openJunction()) {
-            float reach = SCUFF_EDGE + SCUFF_RAGGED;
+            float reach = turning ? TURN_EDGE + TURN_RAGGED + (yard || joined != 0 ? TURN_WANDER : 0)
+                  : SCUFF_EDGE + SCUFF_RAGGED;
             result.add(new Area(new Ellipse2D.Float(-reach, -reach, 2 * reach, 2 * reach)));
+            for (int d = 0; d < 6; d++) {
+                if ((joined & 1 << d) == 0) { continue; }
+                float[] border = joinedBorder(d);
+                var band = new BasicStroke(2 * reach, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+                result.add(new Area(band.createStrokedShape(new Line2D.Float(0, 0, border[0], border[1]))));
+                if ((joinedCorners & 1 << d) != 0) { result.add(new Area(cornerSector(d))); }
+            }
         }
         var wheels = wheels();
         for (int p = 0; p < wheels.courses().size(); p++) {
@@ -2234,7 +2501,9 @@ final class BoardRoad {
 
     /** Junction turns widen the carrier; their original radial approaches still own its markings and tyre wear. */
     private List<List<Point>> paintPaths() {
-        return circle == null && borders.size() >= 3 ? paths.subList(0, borders.size()) : paths;
+        // A turning place with no arm paints its ground ring.
+        return circle == null && (borders.size() >= 3 || turning) && !borders.isEmpty()
+              ? paths.subList(0, borders.size()) : paths;
     }
 
     private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths) {

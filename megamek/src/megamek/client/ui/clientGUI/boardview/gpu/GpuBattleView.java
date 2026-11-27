@@ -136,6 +136,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** The editor's tiles in the frame last taken: a change of them that brings no events shows at once (renderFrame). */
     private List<BoardScene.Tile> editorTiles;
     private boolean tilesChangedThisFrame;
+    /** Whether the atmosphere made the Tactical View's clear air and light (behind the loading stage, once). */
+    private boolean tacticalAirPrepared;
     private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
@@ -622,6 +624,7 @@ class GpuBattleView extends ApplicationAdapter {
         // The 3D board's own UI scale (the Tuning panel's); Swing's GUI scale never reaches the native window.
         float preference = source.uiPreferences().scale();
         float scale = DisplayScale.read(preference, displayScale.contentScale());
+        theme.uiTheme().wantScale(scale);
         int pixelWidth = Gdx.graphics.getBackBufferWidth();
         int pixelHeight = Gdx.graphics.getBackBufferHeight();
         if (width == layoutWidth && height == layoutHeight && scale == layoutScale && preference == layoutPreference
@@ -779,6 +782,11 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void renderFrame(TerrainSettings.Scope settings) {
         frameStarted = System.nanoTime();
+        // The HUD's glyphs follow a display scale that has held (UiTheme#settle): its stages lay their text out again.
+        if (theme != null && theme.uiTheme().settle()) {
+            if (ui != null) { UiKit.relayout(ui.stage().getRoot()); }
+            if (loadingStage != null) { UiKit.relayout(loadingStage.getRoot()); }
+        }
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             loadingPanel.message(loadingMessage);
@@ -893,6 +901,10 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
+        if (!tacticalAirPrepared) {
+            atmosphere.prepareTactical();
+            tacticalAirPrepared = true;
+        }
         tuning.displaySettings().apply(terrain, atmosphere, ambientOcclusion,
               Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), boardCamera.tactical());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
@@ -915,8 +927,11 @@ class GpuBattleView extends ApplicationAdapter {
             var upcoming = !source.isEditor() && terrain.ready(scene) ? playback.preparingTerrain() : null;
             terrain.update(upcoming == null ? scene : upcoming, boardCamera.camera, upcoming == null);
         }
+        // A changed light or switch shows the loading stage below first: the terrain asks for its programs from the next
+        // frame on, behind it, and the stage's warm-up follows however fast they link.
+        boolean staging = GpuGlsl.presenting() && !terrain.ready(scene);
         // Keep draining preparation, but do not build another terrain level for the shader probe's temporary camera.
-        boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera);
+        boolean detailChanged = !staging && terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera);
         settings.set(terrain.settings());
         tuning.terrainProgress(terrain.buildProgress());
         if (!terrain.ready(scene)) {
@@ -1764,7 +1779,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         });
         return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered,
-              pointedUnit(), hexPixels, targets);
+              pointedUnit(), targets);
     }
 
     /**
@@ -2626,7 +2641,7 @@ class GpuBattleView extends ApplicationAdapter {
             fitted = true;
             cameraSelection = scene.selectedId();
             cameraFollowingPlayback = false;
-            // Start with the whole map, ignoring any earlier Legacy 2D board centering. Later board switches
+            // Start with the whole map, ignoring any earlier centering request. Later board switches
             // can follow a unit-list click, whose pending focus request must still be applied.
             centerSequence = centerSequence < 0 ? request.sequence() : 0;
         }
@@ -2700,7 +2715,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (playback.movement() != null) {
                 // The complete route is already framed. Do not chase the unit or recenter it on arrival.
                 cameraFollowingPlayback = false;
-                // The Legacy 2D board auto-centers each move's start; do not replay that request after arrival.
+                // The client asks to centre each move's start; do not replay that request after arrival.
                 if (request.entityId() == Entity.NONE
                       && playback.movement().path().getFirst().coords().equals(request.coords())) {
                     centerSequence = request.sequence();

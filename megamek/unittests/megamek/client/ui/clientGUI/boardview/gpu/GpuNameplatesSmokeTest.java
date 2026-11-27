@@ -104,7 +104,7 @@ class GpuNameplatesSmokeTest {
               Map<Integer, Vector2> heads, boolean tactical, int hovered) {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             nameplates.update(new GpuHud.Inputs(GpuHudFixtures.frame(status, panels),
-                  new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered, 0), null,
+                  new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered), null,
                   preferences, GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
 
@@ -261,8 +261,7 @@ class GpuNameplatesSmokeTest {
                 expected.put(TIMBER_WOLF, List.of("Timber Wolf", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
-                Table nameRow = (Table) plates.tag(TIMBER_WOLF).getChild(0);
-                assertEquals(UiTheme.CORAL, ((Label) nameRow.getChild(0)).getColor(),
+                assertEquals(UiTheme.CORAL, label(plates.tag(TIMBER_WOLF), 0).getColor(),
                       "An enemy's tag is coral");
                 capture(hud, "nameplates-09", SHOT_09, new Crop("target", plates.tag(TIMBER_WOLF), 888, 339),
                       new Crop("tag", plates.tag(ATLAS), 913, 437));
@@ -527,7 +526,7 @@ class GpuNameplatesSmokeTest {
                       GamePhase.MOVEMENT, false, TIMBER_WOLF, roster), panels(GpuFireOrders.Snapshot.EMPTY,
                       GpuPhysicalOptions.Snapshot.EMPTY));
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), grid(roster), Map.of(), null,
-                      Entity.NONE, 0);
+                      Entity.NONE);
                 GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
                 Group root = hud.stage.getRoot();
                 Map<Integer, List<String>> pips = pips(roster);
@@ -858,8 +857,12 @@ class GpuNameplatesSmokeTest {
 
     /** A tag's name (0), chip (1: weight class and skills) or sub-line (2). */
     private static String line(Table tag, int index) {
-        Table nameRow = (Table) tag.getChild(0);
-        return ((Label) nameRow.getChild(index)).getText().toString();
+        return label(tag, index).getText().toString();
+    }
+
+    /** The label of a tag's name row: its name (0), chip (1) or sub-line (2). */
+    private static Label label(Table tag, int index) {
+        return (Label) ((Table) tag.getChild(0)).getChild(index);
     }
 
     private static GpuHudData panels(GpuFireOrders.Snapshot fire, GpuPhysicalOptions.Snapshot physical) {

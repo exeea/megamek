@@ -158,7 +158,10 @@ final class BoardRoadGrade {
         // A bridge's approach is one plane over the inset halves of both hexes, as its footing builds it.
         if (next != null && BoardSurface.connectingBridge(tile, next, direction) != null) { return BRIDGE_START; }
         int exits = arms(scene, tile);
-        if (Integer.bitCount(exits) >= 3) { return BoardRoad.roundabout(exits) ? .75f : BoardRoad.CORRIDOR; }
+        // A loose road's turning place keeps a junction's core level, not a ring's (BoardRoad#turningPlace).
+        if (Integer.bitCount(exits) >= 3 || BoardRoad.turningPlace(tile)) {
+            return BoardRoad.roundabout(exits) && BoardRoad.paved(tile.road()) ? .75f : BoardRoad.CORRIDOR;
+        }
         if (BoardRoad.climbingTurn(exits, ramps(scene, tile))) { return 0; }
         // Measured from the centre, as a share of the centre-to-edge run (half the hex's width).
         return next != null && partners(tile, next, direction) && junction(tile) == junction(next)
@@ -243,7 +246,7 @@ final class BoardRoadGrade {
     /** The directions a hex's carriageway or apron runs out by; 0 where it reserves no ground. */
     private static int arms(BoardScene scene, BoardScene.Tile tile) {
         if (tile == null || !BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return 0; }
-        if (BoardRoad.carriageway(tile)) { return tile.wayExits() & 63; }
+        if (BoardRoad.carriageway(tile)) { return (BoardRoad.roadExits(scene, tile) | tile.railExits()) & 63; }
         int arms = 0;
         for (int d = 0; d < 6; d++) {
             var next = scene.neighbor(tile, d);
@@ -481,6 +484,17 @@ final class BoardRoadGrade {
             }
         }
         return result;
+    }
+
+    /**
+     * The unit direction an eased grade rises in at a point; null on Classic's straight ramps and where it is level.
+     */
+    float[] fall(float x, float y) {
+        if (!eased) { return null; }
+        float step = .05f * BoardGeometry.hexScale();
+        float gx = height(x + step, y) - height(x - step, y), gy = height(x, y + step) - height(x, y - step);
+        float slope = (float) Math.hypot(gx, gy);
+        return slope < .001f * step ? null : new float[] { gx / slope, gy / slope };
     }
 
     /** A line parallel to this direction's edge at the given share of its run, across any carriageway. */

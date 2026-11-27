@@ -52,7 +52,6 @@ import javax.swing.JList;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Player;
 import megamek.common.Team;
 import megamek.common.game.IGame;
@@ -66,14 +65,11 @@ public class PlayerListDialog extends JDialog implements ActionListener {
 
     private final Client client;
     private final JButton butOkay;
-    private final boolean modal;
-    private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
-    public PlayerListDialog(JFrame parent, Client client, boolean modal) {
-        super(parent, "", false);
+    public PlayerListDialog(JFrame parent, Client client) {
+        super(parent, "", true);
         this.setTitle(Messages.getString("PlayerListDialog.title"));
         this.client = client;
-        this.modal = modal;
 
         add(playerList, BorderLayout.CENTER);
         add(Box.createHorizontalStrut(20), BorderLayout.LINE_START);
@@ -97,14 +93,8 @@ public class PlayerListDialog extends JDialog implements ActionListener {
         pack();
         setResizable(false);
 
-        if (modal) {
-            setModal(true);
-            setLocation(parent.getLocation().x + (parent.getSize().width / 2) - (getSize().width / 2),
-                  parent.getLocation().y + (parent.getSize().height / 2) - (getSize().height / 2));
-        } else {
-            setModal(false);
-            setLocation(GUIP.getPlayerListPosX(), GUIP.getPlayerListPosY());
-        }
+        setLocation(parent.getLocation().x + (parent.getSize().width / 2) - (getSize().width / 2),
+              parent.getLocation().y + (parent.getSize().height / 2) - (getSize().height / 2));
     }
 
     public void refreshPlayerList(JList<String> playerList,
@@ -205,24 +195,7 @@ public class PlayerListDialog extends JDialog implements ActionListener {
     public void actionPerformed(ActionEvent ae) {
         if (ae.getSource().equals(butOkay)) {
             setVisible(false);
-            if (!modal) {
-                GUIP.setPlayerListEnabled(false);
-            }
         }
     }
 
-    public void saveSettings() {
-        GUIP.setPlayerListPosX(getLocation().x);
-        GUIP.setPlayerListPosY(getLocation().y);
-    }
-
-    @Override
-    protected void processWindowEvent(WindowEvent e) {
-        super.processWindowEvent(e);
-        if ((e.getID() == WindowEvent.WINDOW_DEACTIVATED) || (e.getID() == WindowEvent.WINDOW_CLOSING)) {
-            if (!modal) {
-                saveSettings();
-            }
-        }
-    }
 }

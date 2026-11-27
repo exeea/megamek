@@ -56,10 +56,13 @@ final class GpuTerrainLayer {
               .add(new Shape(owner, material, route, lift, batch -> shape.accept(() -> batch.reserve(3))));
     }
 
-    /** Finished vertices in {@code material}'s layout and their triangles (a height-field hex's ChunkMesh group). */
-    void addArrays(Material material, float[] vertices, short[] indices) {
+    /**
+     * Finished vertices in {@code material}'s layout, {@code floats} a vertex, and their triangles (a height-field hex's
+     * ChunkMesh group).
+     */
+    void addArrays(Material material, float[] vertices, short[] indices, int floats) {
         if (indices.length == 0) { return; }
-        int count = vertices.length / ChunkMesh.FLOATS;
+        int count = vertices.length / floats;
         geometry.computeIfAbsent(material, key -> new ArrayList<>()).add(new Shape(owner, material, route, lift, batch -> {
             MeshPartBuilder mesh = batch.reserve(count);
             int base = mesh.lastIndex() + 1;
@@ -221,7 +224,7 @@ final class GpuTerrainLayer {
                 attributes = GpuTessellation.contacts(attributes);
             }
             if (GpuMaterialCache.isWall(material)) { attributes = GpuMaterialCache.chartLayout(attributes); }
-            if (TerrainField.isField(material)) { attributes = TerrainField.LAYOUT; }
+            if (TerrainField.isField(material)) { attributes = TerrainField.layout(material, attributes); }
             current = active.computeIfAbsent(attributes, key -> {
                 Buffer buffer = new Buffer(key);
                 buffers.add(buffer);

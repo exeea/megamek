@@ -1,1 +1,3 @@
 megamek.testUtilities.TestEnvironmentIsolation
+megamek.client.ui.clientGUI.boardview.gpu.GpuApplicationRelease
+megamek.client.ui.UiTestRelease

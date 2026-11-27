@@ -67,8 +67,12 @@ import org.lwjgl.opengl.GL31;
  */
 final class GpuMaterialCache {
     private static final MMLogger LOGGER = MMLogger.create(GpuMaterialCache.class);
-    /** {@code -Dmegamek.gpu.materialCache=false} keeps every top on its own program (the split stays). */
-    static final boolean ENABLED = !"false".equals(System.getProperty("megamek.gpu.materialCache"));
+    /**
+     * {@code -Dmegamek.gpu.materialCache=false} keeps every top on its own program (the split stays). With the terrain
+     * field the cache is never made (no pages, framebuffers, programs or fill): its ground draws directly.
+     */
+    static final boolean ENABLED = !"false".equals(System.getProperty("megamek.gpu.materialCache"))
+          && !TerrainField.ON;
     /** {@code -Dmegamek.gpu.materialCacheSplit=false} builds no cache tops at all, as before the cache. */
     static final boolean SPLIT = !"false".equals(System.getProperty("megamek.gpu.materialCacheSplit"));
     private static final String TOP = "#cacheTop";
@@ -968,7 +972,8 @@ final class GpuMaterialCache {
         var counts = pages.allocated() && filling && last != null && pages.changes() == lastChanges
               ? last.pages() : pages.status();
         String state;
-        if (!ENABLED || !SPLIT) { state = "Disabled at startup"; }
+        if (TerrainField.ON) { state = "Not used - the terrain field draws the ground directly"; }
+        else if (!ENABLED || !SPLIT) { state = "Disabled at startup"; }
         else if (!enabled) { state = "Disabled - direct rendering"; }
         else if (!usable) { state = "Unavailable - GPU requirements"; }
         else if (!pages.allocated()) { state = "Not allocated"; }

@@ -65,7 +65,6 @@ import megamek.client.ui.util.CommandAction;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.battleArmor.ProtoMekClampMount;
 import megamek.common.bays.Bay;
 import megamek.common.board.AllowedDeploymentHelper;
@@ -324,7 +323,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         setRemoveEnabled(true);
 
         clientgui.getUnitDisplayState().displayEntity(entity);
-        clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         computeWarningHexes(entity);
@@ -355,7 +353,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
      * Enables relevant buttons and sets up for the local player's turn.
      */
     private void beginMyTurn() {
-        clientgui.maybeShowUnitDisplay();
         selectEntity(clientgui.getClient().getFirstDeployableEntityNum());
         setNextEnabled(true);
         setRemoveEnabled(true);
@@ -380,7 +377,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
             (next != null) &&
             (currentEntity() != null) &&
             (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         cen = Entity.NONE;
         clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
@@ -1414,7 +1410,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
 
     @Override
     public void clear() {
-        clientgui.maybeShowUnitDisplay();
         if (currentEntity() != null) {
             selectEntity(currentEntity().getId());
             currentEntity().setPosition(null);
@@ -1440,7 +1435,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         }
 
         if (clientgui.getClient().isMyTurn()) {
-            clientgui.maybeShowUnitDisplay();
         }
     }
 
@@ -1486,7 +1480,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
                 }
             }
         } else {
-            clientgui.maybeShowUnitDisplay();
             clientgui.getUnitDisplayState().displayEntity(e);
             if (game.hasBoardLocation(e.getPosition(), e.getBoardId())) {
                 clientgui.getBoardState(e).centerOn(e);

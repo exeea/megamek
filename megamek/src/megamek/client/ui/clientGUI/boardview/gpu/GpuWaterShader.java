@@ -64,6 +64,8 @@ final class GpuWaterShader extends Attribute {
     record Impact(Vector3 from, Vector3 to, float radius) { }
     /** Most landing stretches one pool churns with; the shader's arrays hold this many. */
     static final int MAX_IMPACTS = 12;
+    /** Farthest a boil reaches from its landing, in radii: 2.4 past a band of 0.7 behind the curtain. */
+    static final float BOIL_REACH = 3.1f;
 
     private final int palette;
     final Mode mode;
@@ -114,8 +116,8 @@ final class GpuWaterShader extends Attribute {
                     Vector3 from = GpuWaterfall.landing(upper, fall, start);
                     for (int k = 1; k <= 2; k++) {
                         Vector3 to = GpuWaterfall.landing(upper, fall, start + (end - start) * k / 2f);
-                        // The boil reaches out a little over twice its radius, and behind the curtain to the wall.
-                        if (distance(middle, from, to) < BoardGeometry.width() * .6f + 2.2f * radius) {
+                        // The boil reaches 2.4 radii past a band of 0.7 radius behind the curtain.
+                        if (distance(middle, from, to) < BoardGeometry.width() * .6f + BOIL_REACH * radius) {
                             hits.add(new Impact(from, to, radius));
                         }
                         from = to;
@@ -575,7 +577,7 @@ final class GpuWaterShader extends Attribute {
 
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
               Map<Coords, BoardSurface> surfaces) {
-            return prepare(scene, currents, surfaces, false);
+            return prepare(scene, currents, surfaces, false, null);
         }
 
         /** Stitch the existing world-aligned fields. Padding overlaps use the sample furthest inside its source. */
@@ -608,9 +610,12 @@ final class GpuWaterShader extends Attribute {
             return new Prepared(width, height, spacing, x, y, pixels, null);
         }
 
+        /** {@code field}: the height field whose water hexes take their texels from it ({@link FieldWater}), or null. */
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
-              Map<Coords, BoardSurface> surfaces, boolean molten) {
+              Map<Coords, BoardSurface> surfaces, boolean molten, FieldBoard field) {
             Pools pools = new Pools(scene, currents, surfaces, molten);
+            pools.shore = field == null ? null : field.shore;
+            pools.board = field;
             float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
             float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
             for (BoardSurface surface : surfaces.values()) {
@@ -622,6 +627,13 @@ final class GpuWaterShader extends Attribute {
                 maxY = Math.max(maxY, pool.maxY);
             }
             if (minX > maxX) { return null; }
+            if (field != null) {
+                // The water layer reaches over the banks beside field water (WaterLayer).
+                minX -= WaterLayer.reach();
+                minY -= WaterLayer.reach();
+                maxX += WaterLayer.reach();
+                maxY += WaterLayer.reach();
+            }
             float spacing = BoardGeometry.height() / 16;
             int firstX = (int) Math.floor(minX / spacing) - 1, firstY = (int) Math.floor(minY / spacing) - 1;
             int width = (int) Math.ceil(maxX / spacing) - firstX + 2;
@@ -645,6 +657,20 @@ final class GpuWaterShader extends Attribute {
                 }
             }
             float[] depth = depths(pools, owners, span, firstX - 1, firstY - 1, spacing);
+            float[] film = null;
+            if (field != null) {
+                // On field water and its banks, bank distance and depth are the field's at each texel (FieldWater).
+                film = new float[depth.length];
+                float[] shore = FieldWater.texels(field, scene, spacing, firstX - 1, firstY - 1, span, depth, film);
+                for (int row = 0; row < height; row++) {
+                    for (int column = 0; column < width; column++) {
+                        float distance = shore[(row + 1) * span + column + 1];
+                        if (!Float.isNaN(distance)) {
+                            buffer.put((row * width + column) * 4, unit(0.5f + 0.5f * distance / SHORE_RANGE));
+                        }
+                    }
+                }
+            }
             // A 1-2-1 tent softens underwater steps into the few metres a real column blurs them over.
             for (int row = 0; row < height; row++) {
                 for (int column = 0; column < width; column++) {
@@ -661,6 +687,11 @@ final class GpuWaterShader extends Attribute {
                         float across = Math.max(0, depth[line - 1]) + 2 * Math.max(0, depth[line])
                               + Math.max(0, depth[line + 1]);
                         blurred += dy == 0 ? 2 * across : across;
+                    }
+                    // (The height field) a descending stream's film and thread keep their own depths: the thread's
+                    // is not blurred over the thin film, so only the thread carries the water's colour and foam.
+                    if (film != null && film[center] > 0) {
+                        blurred += (16 * Math.max(0, depth[center]) - blurred) * film[center];
                     }
                     buffer.put((row * width + column) * 4 + 1, unit(blurred / 16 / DEPTH_RANGE));
                 }
@@ -739,6 +770,10 @@ final class GpuWaterShader extends Attribute {
         private final float[] scratch = new float[4];
         private final Vector3 point = new Vector3();
         private final Vector2 acceleration = new Vector2();
+        /** The height field's shore, whose descending streams have no agitation on their films (FieldShore#film); null without the field. */
+        private FieldShore shore;
+        /** The height field, whose water hexes' falls pour by their depth (BoardSurface#pourByDepth); null without it. */
+        private FieldBoard board;
 
         Pools(BoardScene scene, Map<Coords, BoardFlow.Current> currents, Map<Coords, BoardSurface> surfaces) {
             this(scene, currents, surfaces, false);
@@ -757,7 +792,11 @@ final class GpuWaterShader extends Attribute {
             Pool pool = null;
             if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten) {
                 BoardSurface surface = surfaces.get(coords);
-                if (surface == null) { surface = new BoardSurface(scene, tile); }
+                if (surface == null) {
+                    surface = new BoardSurface(scene, tile);
+                    // (the height field) beyond the chunk a field water hex's falls pour as its field surface's do
+                    if (board != null && WaterLayer.water(board, coords)) { surface.pourByDepth(); }
+                }
                 // Only actual liquid openings participate in a frozen tile; the remaining slab stays a bank.
                 if (!tile.frozen() || !surface.waterFaces.isEmpty()) {
                     pool = new Pool(surface, currents.getOrDefault(coords, BoardFlow.Current.STILL));
@@ -826,7 +865,7 @@ final class GpuWaterShader extends Attribute {
             for (int i = 0; i < count; i++) {
                 agitation = Math.max(agitation, candidates[i].surface.slopeAgitation(point));
             }
-            return agitation;
+            return shore == null ? agitation : agitation * (1 - shore.film(point.x, point.y));
         }
 
         /** Finds the hex whose centre is nearest, then its open water and its neighbours'. */

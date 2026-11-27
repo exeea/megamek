@@ -144,16 +144,19 @@ class GpuGameTerrainSmokeTest {
                     boolean checkedField = false;
                     for (var tile : scene.tiles()) {
                         if (!tile.features().isEmpty() || tile.barren()) { continue; }
-                        var field = planting.support(tile.coords());
+                        // The support the terrain itself reads: its build's field (none with the switch off) and scene.
+                        var field = planting.support(tile.coords(), GpuTestSupport.field(terrain, "fieldBoard"), scene);
+                        // The field's stones are scatter faces; its shrubs are plants of the chunk's scatter stand.
                         int stones = (int) field.faces.stream().filter(BoardSurface.Face::scatter)
                               .filter(f -> field.relief.shade(f.a()).kind() == BoardRelief.Kind.ROCK).count();
                         int fieldFaces = (int) field.faces.stream().filter(BoardSurface.Face::scatter).count();
-                        if (stones == 0 || fieldFaces == stones) { continue; }
+                        if (stones == 0 || scatterPlants(terrain, tile.coords()) == 0) { continue; }
                         assertEquals(fieldFaces * 3, scatterIndices(terrain, tile.coords()));
                         scene = BoardScenes.replace(scene, tile.withoutGroundCover(false));
                         terrain.update(scene);
                         assertEquals(0, scatterIndices(terrain, tile.coords()),
-                              "Scorching removes every decorative stone and shrub without rebuilding ground");
+                              "Scorching removes every decorative stone without rebuilding ground");
+                        assertEquals(0, scatterPlants(terrain, tile.coords()), "Scorching removes every shrub of the stand");
                         assertEquals(unburnedGround, ground(terrain));
                         checkedField = true;
                         break;
@@ -200,6 +203,17 @@ class GpuGameTerrainSmokeTest {
             result.addAll((List<ModelInstance>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "opaque"));
         }
         return result;
+    }
+
+    /** The hex's plants on its chunks' scatter stands (GpuTerrain#scatterPlant). */
+    private static int scatterPlants(GpuTerrain terrain, Coords at) throws Exception {
+        int count = 0;
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if ((boolean) GpuTestSupport.field(prop, "scatter") && at.equals(GpuTestSupport.field(prop, "coords"))) { count++; }
+            }
+        }
+        return count;
     }
 
     private static int scatterIndices(GpuTerrain terrain, Coords at) throws Exception {

@@ -521,7 +521,7 @@ class GpuMaterialLodSmokeTest {
 
     private static double visiblePatchFraction(GpuSceneTestOutput surface, GpuShaderManager manager, GpuTerrain terrain,
           OrthographicCamera camera, byte[] original, String family) {
-        String material = GpuShaderSource.readDisk("terrain-materials.glsl");
+        String material = GpuShaderSource.readDisk("old-ground-material.glsl");
         // Volcanic programs mix their roles in naturalMaterialFor, every other family in cliffMaterial.
         String natural = "vec4 roles = vec4(cover, soil,", cliff = "vec4 roles = vec4(cover, clamp(mantle,";
         String coverOnly = GpuShaderSource.replaceOnce(GpuShaderSource.replaceOnce(material, natural,
@@ -547,12 +547,12 @@ class GpuMaterialLodSmokeTest {
             sculpt = sculpt.replace(result, result + "\n    result = finish.emission;")
                   .replace(output, "fragColor = vec4(result, ground ? .25 : 1.0);");
             var probe = manager.apply(Map.of("terrain-sculpt.frag", sculpt,
-                  "terrain-materials.glsl", material.replace(emission, roles)));
+                  "old-ground-material.glsl", material.replace(emission, roles)));
             assertTrue(probe.success(), probe.message());
             render(surface, terrain, camera);
             float[] selected = linearPixels(surface);
             probe = manager.apply(Map.of("terrain-sculpt.frag", sculpt,
-                  "terrain-materials.glsl", coverOnly.replace(emission, roles)));
+                  "old-ground-material.glsl", coverOnly.replace(emission, roles)));
             assertTrue(probe.success(), probe.message());
             render(surface, terrain, camera);
             float[] cover = linearPixels(surface);
@@ -574,7 +574,7 @@ class GpuMaterialLodSmokeTest {
             assertTrue(ground > 100, "The rock scene must render visible material-role samples");
             return patches / (double) ground;
         }
-        var changed = manager.apply(Map.of("terrain-materials.glsl", coverOnly));
+        var changed = manager.apply(Map.of("old-ground-material.glsl", coverOnly));
         assertTrue(changed.success(), changed.message());
         byte[] hardpan = render(surface, terrain, camera);
         int ground = 0, patches = 0;
@@ -620,7 +620,7 @@ class GpuMaterialLodSmokeTest {
         var result = new HashMap<String, String>();
         // C1 separates color and numerical arrays. Perturb only actual normal/AO reads, retaining their
         // projection and coverage branches; odd semantic IDs no longer pass through color helpers.
-        for (String file : List.of("terrain-materials.glsl", "terrain-sculpt.frag")) {
+        for (String file : List.of("terrain-materials.glsl", "old-ground-material.glsl", "terrain-sculpt.frag")) {
             String source = GpuShaderSource.readDisk(file);
             String changed = source.replaceAll(
                   "\\b(?:materialTexel|fungusTexel|translatedTexel|cliffTexel)\\(u_terrainData,",
@@ -640,10 +640,10 @@ class GpuMaterialLodSmokeTest {
               }
               """ + projection.replace(normal, normal + " return vec4(.95, .05, .65, .1);"));
         String magma = GpuShaderSource.readDisk("terrain-magma.glsl");
-        String magmaSample = "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) {";
+        String magmaSample = "vec4 magmaTexel(float layer, vec2 uv, vec2 dx, vec2 dy) {";
         assertTrue(magma.contains(magmaSample), "Volcanic numerical-map diagnostic must be installed");
         result.put("terrain-magma.glsl", magma.replace(magmaSample, magmaSample
-              + " if (map == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"));
+              + " if (layer == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"));
         return result;
     }
 

@@ -36,7 +36,7 @@ final class BoardRoadBank {
      */
     static final float VERGE = 3;
     /** Rise per run of the steepest part of a bank. */
-    private static final float SLOPE = .75f;
+    static final float SLOPE = .75f;
     /** Height, in levels, over which a bank rounds into the ground it leaves. */
     private static final float ROUND = .35f;
     /** Height, in levels, past a road's range over which ground fades back to its own shape. */
@@ -46,7 +46,7 @@ final class BoardRoadBank {
     /** How far from a poured or wet hex natural ground fades into its bank, in tile pixels. */
     private static final float FADE = 12;
     /** How far, in hexes, a grade's reserved ground and bank can reach. */
-    private static final int REACH = 3;
+    static final int REACH = 3;
 
     /** A grade shaping the ground, how far its bank reaches from its outline, and the box that reach spans. */
     private record Bank(BoardRoadGrade grade, int index, float fill, float reach, float minX, float minY, float maxX,
@@ -79,6 +79,11 @@ final class BoardRoadBank {
     /** The poured and wet hexes within reach. */
     private final List<Kept> kept = new ArrayList<>();
     private final float level = BoardGeometry.level(), scale = BoardGeometry.hexScale();
+    /**
+     * Every point #conform and #split cut on the grid. A face left whole beside one cut there has none of them on their
+     * shared edge (BoardSurface#closeTJunctions).
+     */
+    final Set<Vector3> cut = Collections.newSetFromMap(new IdentityHashMap<>());
     /** The hex's relief, which decides where containment walls retain the slopes beside a road. */
     private final BoardRelief relief;
 
@@ -151,6 +156,14 @@ final class BoardRoadBank {
 
     /** Whether any carriageway's ground or bank reaches this hex's surroundings. */
     boolean active() { return !grades.isEmpty(); }
+
+    /** Whether a carriageway reserves the ground at a point. */
+    boolean reserved(float x, float y) {
+        for (var grade : grades) {
+            if (grade.contains(x, y)) { return true; }
+        }
+        return false;
+    }
 
     /**
      * The surface of the carriageway at a point: the highest reserving it, else the nearest's own grade continued; NaN
@@ -362,6 +375,7 @@ final class BoardRoadBank {
             boolean ground = shade != null && shade.normal().z > .95f;
             relief.reshade(from, to, ground ? normal(from) : normals.get(to));
         }
+        cut.addAll(cuts.values());
         return result;
     }
 
@@ -383,6 +397,7 @@ final class BoardRoadBank {
                 result.add(face);
             }
         }
+        cut.addAll(cuts.values());
         return result;
     }
 

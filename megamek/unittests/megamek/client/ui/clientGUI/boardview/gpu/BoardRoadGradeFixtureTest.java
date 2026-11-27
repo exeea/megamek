@@ -294,17 +294,33 @@ class BoardRoadGradeFixtureTest {
                     // The reserved carriageway keeps the nominal edge, where both owners meet.
                     var p = new Vector3(left).lerp(right, .5f + fraction * mouth / left.dst(right));
                     float expected = BoardRoadGrade.edgeLevel(tile, next, d) * BoardGeometry.level();
+                    var other = sources.get(next.coords());
                     float first = BoardSurface.sampleHeight(source.groundFaces(), p.x, p.y, Float.NaN);
-                    assertTrue(Float.isFinite(first), name + " missing shared-rim support at " + p);
-                    if (fraction == 0) {
-                        assertEquals(expected, first, EPSILON, name + " approach center keeps its joint height");
-                    }
+                    float second = BoardSurface.sampleHeight(other.groundFaces(), p.x, p.y, Float.NaN);
                     // Adjacent widened arms may overlap away from their axes; their blended grade is valid
                     // provided both owners meet on the same emitted boundary without a step or hole.
-                    for (var owner : List.of(source, sources.get(next.coords()))) {
-                        assertEquals(first, BoardSurface.sampleHeight(owner.groundFaces(), p.x, p.y, Float.NaN),
-                              EPSILON, name + " broken shared road/rail mouth at " + member + " direction " + d
-                                    + ", across " + fraction + ", owner " + owner.tile.coords() + ", point " + p);
+                    boolean paved = tile.surface() == BoardScene.Surface.CONCRETE
+                          && next.surface() == BoardScene.Surface.CONCRETE;
+                    if (paved && Float.isFinite(first) != Float.isFinite(second)) {
+                        // Fitted pavement moves the corners of both hexes, so that boundary lies a little off the
+                        // nominal edge: one owner covers this point, and the other reaches to within 0.3 m of it.
+                        var late = Float.isFinite(first) ? other : source;
+                        var inside = new Vector3(BoardGeometry.center(late.tile.coords(), 0)).sub(p);
+                        inside.z = 0;
+                        inside.nor().scl(BoardRelief.metres(.3f));
+                        if (Float.isNaN(first)) { first = second; }
+                        assertEquals(first, BoardSurface.sampleHeight(late.groundFaces(), p.x + inside.x, p.y + inside.y,
+                              Float.NaN), EPSILON, name + " hole or step at a shared road/rail mouth on fitted pavement"
+                                    + " (its owners meet off the nominal edge) at " + member + " direction " + d
+                                    + ", across " + fraction + ", owner " + late.tile.coords() + ", 0.3 m inside from "
+                                    + p);
+                    } else {
+                        assertTrue(Float.isFinite(first), name + " missing shared-rim support at " + p);
+                        assertEquals(first, second, EPSILON, name + " broken shared road/rail mouth at " + member
+                              + " direction " + d + ", across " + fraction + ", owner " + next.coords() + ", at " + p);
+                    }
+                    if (fraction == 0) {
+                        assertEquals(expected, first, EPSILON, name + " approach center keeps its joint height");
                     }
                     // Classic keeps the nominal hex boundary rather than Enhanced's displaced earthwork rim.
                     // Its actual route cut must still meet the adjacent road, including a level junction arm.

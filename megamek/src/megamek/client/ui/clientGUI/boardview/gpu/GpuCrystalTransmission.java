@@ -113,7 +113,8 @@ final class GpuCrystalTransmission implements Disposable {
         }
         if (target == null || target.getWidth() != depth.getWidth()) {
             if (target != null) { target.dispose(); }
-            target = new FrameBuffer(Pixmap.Format.RGB888, depth.getWidth(), depth.getHeight(), false);
+            // The near map's square: the light's projection, which the crystals are drawn and looked up through.
+            target = new FrameBuffer(Pixmap.Format.RGB888, depth.getWidth(), depth.getWidth(), false);
             target.getColorBufferTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
             captured = Long.MIN_VALUE;
         }

@@ -26,10 +26,6 @@ uniform sampler2DArray u_terrainLayers;
 uniform sampler2DArray u_terrainData;
 // The finish layers follow its normal/AO layers (finish-arrays.glsl).
 #define FINISH_LAYERS u_terrainData
-// The compact material's arrays and noise (ground-material.glsl).
-#define GROUND_COLOUR u_terrainLayers
-#define GROUND_DATA u_terrainData
-#define GROUND_NOISE(uv) textureLod(u_surfaceNoise, rainNoiseAt(uv), 0.0)
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
@@ -38,7 +34,6 @@ uniform float u_metre;      // world units per metre
 // How deep the ground's visible grain (its height map) stands, in metres, for the shadow lookup (sculptShadow).
 const float RELIEF_METRES = .2;
 uniform float u_normalMaps;
-uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform vec4 u_materialCacheDebug; // draw-path tint; alpha is zero unless the session's Debug switch is on
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
@@ -297,6 +292,9 @@ vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, 
 #endif
 
 // sculpt-material-functions
+// The ground's material comes from one of two files, never both (GpuShaderSource#terrainLighting): ground-material.glsl,
+// or old-ground-material.glsl for an A/B against the path it replaced. Each implements the four entries main calls:
+// groundPathFields, groundPathMaterial and groundPathCovers.
 void main() {
     vec2 surfaceUV = v_diffuseUV;
     vec3 face = normalize(v_normal);
@@ -343,6 +341,12 @@ void main() {
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
     terrainView = -viewDirection();
+#ifdef GROUND_FACE_SLOPE
+    // A step face too: the field draws a steep step as stretched triangles between level samples, whose shading
+    // normal can say level where the face stands near vertical.
+    if (ground || cliff) groundFaceSlope = geometric.z;
+    if (cliff && !panel && abs(kind * 255.0 - 138.0) < .5) groundBareLedge = 1.0;
+#endif
 #endif
     // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
     if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }
@@ -369,17 +373,19 @@ void main() {
     mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
           vec2(-worldDy.x * sign(projection.y), -worldDy.z));
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
-#ifdef compactGroundFlag
-    vec3 fields = compactFields(world);
-#else
-    vec3 fields = groundFields(world);
-#endif
+    vec3 fields = groundPathFields(world);
     float broad = fields.x, fine = fields.y, region = fields.z;
     // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
     // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
     // descending decks keep the same fade. The material's own height breaks the margin without extra reads.
     float deckMud = ground && !shore && kind > .05 ? 1.0
           : mudShell ? 1.0 - smoothstep(.35, mix(1.3, 2.9, .35 * broad + .65 * fine), v_color.r * 8.0) : 0.0;
+#if defined(GROUND_FACE_SLOPE) && defined(fieldMorphFlag) && defined(lightingFlag)
+    // A field step face has no frame of its own (a cut wall's is its panel's): it takes its side planes from its own
+    // facing (terrain-materials.glsl), so the material's grain runs straight down it. The two fixed planes sheared it
+    // across a lattice face, which strikes 30 or 60 degrees off them.
+    terrainFaceFrames = (ground || (cliff && !panel)) && geometric.z < .6;
+#endif
     MaterialProjection rockProjection = materialProjection(world, face);
 #if defined(biomeMaskFlag) && !defined(materialCachedFlag) && !defined(materialFillFlag) && !defined(volcanicFlag)
     if ((ground || cliff || bedrock) && !family(4.0) && !(shore && above <= -1.1)) {
@@ -471,38 +477,19 @@ void main() {
 #else
     vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
     if (natural) {
-        float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
-        float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
-        float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
-        float bed = ground ? .5 : hardness;
-#ifdef terrainBlendFlag
-        // Blended tops take blendCovers below.
-        if (rocky) {
-            TerrainMaterial material = blendCliff(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
-                  region, sediment, materialCoverage);
-            coverEffects(materialCoverage, sediment, grass, sand, bounce, response, rainCover);
-#else
+        // A blended surface, its walls too, takes groundPathCovers below.
+#ifndef terrainBlendFlag
         {
+            float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
+            float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
+            float bed = ground ? .5 : hardness;
 #ifdef volcanicFlag
             TerrainMaterial material = crustOrBankMaterial(world, face);
-#elif defined(compactGroundFlag)
-            // The compact material (ground-material.glsl) from the same inputs: the family's rules from its table row.
-            GroundPixel px;
-            px.world = world; px.face = face; px.top = rockProjection.top; px.x = rockProjection.x;
-            px.y = rockProjection.y; px.topGradient = rockProjection.topGradient;
-            px.xGradient = rockProjection.xGradient; px.yGradient = rockProjection.yGradient;
-            px.side = rockProjection.side; px.facing = rockProjection.facing; px.aboveFoot = foot; px.belowRim = rim;
-            px.rock = rock; px.hardness = bed; px.sediment = sediment; px.shallowSediment = shallowSediment;
-            px.riverBank = riverBank; px.role = rocky ? 1.0 : 0.0; px.covered = terrainCovered;
-            px.levelMetres = u_levelHeight / u_metre; px.pixelMetres = pixelMetres; px.normalMaps = u_normalMaps > .5;
-            GroundSurface compact = groundSurface(px, int(sculptFamily + .5), fields);
-            TerrainMaterial material = TerrainMaterial(compact.albedo, compact.normal, compact.cavity, compact.height,
-                  Finish(compact.roughness, 0.0, 0.0, vec3(0.0)), 0.0, compact.relief);
 #else
             // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
-            TerrainMaterial material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
-                  region, sediment, vec4(sculptFamily), 0, u_sculptTiles, u_sculptLayers, rocky, false);
-#endif
+            TerrainMaterial material = groundPathMaterial(rockProjection, world, face, foot, rim, rock, bed, sediment,
+                  fields, rocky);
 #endif
             albedo = material.color;
             normal = material.normal;
@@ -512,6 +499,7 @@ void main() {
             finish = material.finish;
             volcanic = material.volcanic;
         }
+#endif
         // Match a top to its slope at the same height; tactical level grading remains continuous.
         if (!shore) level = v_cloudPosition.z / u_levelHeight;
     } else if (ground) {
@@ -675,14 +663,21 @@ void main() {
               albedo, normal, occlusion, cavity, finish);
     }
 #ifdef terrainBlendFlag
-    if ((ground || cliff) && !rocky) {
-        float foot = shore || cliff ? surfaceUV.x : surfaceUV.y;
-        float rim = shore || cliff ? surfaceUV.y : surfaceUV.x;
-        float rock = ground ? rockiness(steps) : v_color.g;
+    if (ground || cliff || rocky) {
+        float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+        float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
+        float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
         // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
-        blendCovers(world, face, foot, rim, rock, ground ? .5 : hardness, sediment,
-              broad, fine, region, albedo, normal, cavity, relief, materialHeight, grass, sand, bounce, response,
-              rainCover, finish, volcanic, materialCoverage);
+        // A paved base slot is the slab drawn above. A natural wall, steep bank or bedrock (rocky) takes the wall
+        // projections and its foot's share of the cover; volcanic programs (rocky is never set) the projections alone.
+#ifdef volcanicFlag
+        bool sides = natural && (cliff || bedrock || (ground && face.z < .6));
+#else
+        bool sides = rocky;
+#endif
+        groundPathCovers(rockProjection, world, face, foot, rim, rock, ground ? .5 : hardness, sediment, fields,
+              sides, rocky, albedo, normal, cavity, relief, materialHeight, grass, sand, bounce, response, rainCover,
+              finish, volcanic, materialCoverage);
     }
 #endif
 #endif
@@ -718,6 +713,14 @@ void main() {
               cliff || bedrock ? surfaceUV.y : surfaceUV.x, materialHeight, sand, deckMud, region,
               albedo, normal, cavity, finish, grass, bounce, biomePool, biomeDamp, field);
 #endif
+    }
+#endif
+#ifdef canopyFlag
+    // The forest from far above: where its trees are too small to draw, their crowns' colour in the ground
+    // (terrain-canopy.glsl; features').
+    if (ground && !shore && u_canopy.w > 0.0) {
+        vec4 canopy = canopyTint(world.xy);
+        albedo = mix(albedo, canopy.rgb, canopy.a * u_canopy.w);
     }
 #endif
 #ifndef materialFillFlag
@@ -872,7 +875,8 @@ void main() {
     // Biome peat/mud already contains its wet pigment. Rain only darkens the remaining unsaturated share;
     // the existing film/pool response above still receives the full rain amount.
     albedo = wetAlbedo(albedo, max(groundAbsorption(wet * (1.0 - saturated), response), shoreAbsorption));
-    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
+    // The grid lies on the ground's tops and slopes: a vertical face (a plate's cast wall) shows no hex edge crossing it.
+    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic) * smoothstep(.15, .35, face.z));
     albedo *= transmission;
     albedo = materialReflectance(albedo);
     // Grade the completed bounded pigment: later weathering or a reflectance bound must not flatten the lift.
@@ -929,6 +933,16 @@ void main() {
     surface.emission = finish.emission;
     surface.regolith = lunar * (1.0 - volcanic);
     vec3 result = shadeSurface(surface, caustic, submerged);
+#ifdef fieldMorphFlag
+    // Moon dust has no sky: a step face in shade is lit by the sunlit ground alone, which an imported environment
+    // image's lower half leaves out, so a flat field face reads as one black plate. It takes the lit ground's light at
+    // its foot, fading up the face over about half a level: the gradient today's rounded bank shows.
+    if (rocky && lunar > 0.0) {
+        float aboveFoot = max(shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y, 0.0);
+        float nearFoot = exp(-aboveFoot / (1.0 * u_levelHeight / u_metre));
+        result += albedo * environmentGround(bounce) * (1.0 * lunar * nearFoot * occlusion);
+    }
+#endif
 #else
     vec3 result = albedo + finish.emission;
 #endif

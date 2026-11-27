@@ -41,7 +41,7 @@ public class UnitChangedGameEvent extends GameEvent {
     protected InGameObject oldUnit;
     protected InGameObject newUnit;
 
-    public UnitChangedGameEvent(Object source, @Nullable InGameObject oldUnit, InGameObject newUnit) {
+    public UnitChangedGameEvent(Object source, @Nullable InGameObject oldUnit, @Nullable InGameObject newUnit) {
         super(source);
         this.oldUnit = oldUnit;
         this.newUnit = newUnit;

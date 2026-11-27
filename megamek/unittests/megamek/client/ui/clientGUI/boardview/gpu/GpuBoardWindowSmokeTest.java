@@ -12,21 +12,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.Arrays;
@@ -40,10 +37,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import javax.imageio.ImageIO;
-import javax.swing.AbstractButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
@@ -67,15 +63,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
-import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
-import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
@@ -133,12 +121,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void nativeGameplayRendersWithoutConstructingALegacy2DBoardOrInspector() throws Exception {
-        var legacy2D = GpuTestSupport.onSwing(() -> mockConstruction(BoardView.class));
-        var panels = GpuTestSupport.onSwing(() -> mockConstruction(BoardViewPanel.class));
-        var inspector = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayPanel.class));
-        var inspectorDialog = GpuTestSupport.onSwing(() -> mockConstruction(UnitDisplayDialog.class));
-        var weapons = GpuTestSupport.onSwing(() -> mockConstruction(WeaponPanel.class));
+    void nativeGameplayRendersWithoutConstructingALegacy2DBoard() throws Exception {
         var session = GpuTestSupport.onSwing(GpuGameplayStateTest.Session::create);
         JFrame owner = GpuTestSupport.onSwing(JFrame::new);
         CommonMenuBar menus = GpuTestSupport.onSwing(CommonMenuBar::getMenuBarForGame);
@@ -171,11 +154,8 @@ class GpuBoardWindowSmokeTest {
                 });
             }
             GpuTestSupport.onSwing(() -> {
-                assertTrue(legacy2D.constructed().isEmpty());
-                assertTrue(panels.constructed().isEmpty());
-                assertTrue(inspector.constructed().isEmpty());
-                assertTrue(inspectorDialog.constructed().isEmpty());
-                assertTrue(weapons.constructed().isEmpty());
+
+
                 assertFalse(session.state().isClosed());
                 return null;
             });
@@ -186,18 +166,14 @@ class GpuBoardWindowSmokeTest {
                 session.close();
                 owner.dispose();
                 menus.die();
-                panels.close();
-                weapons.close();
-                inspectorDialog.close();
-                inspector.close();
-                legacy2D.close();
+
+
                 return null;
             });
         }
     }
     /** {@code gpuChoice} is View > Renderer's item for the current graphics. */
-    private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
-          UnitOverviewOverlay overview) { }
+    private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardClientState view, JMenuItem gpuChoice) { }
 
     private static void clickBoard(Coords coords, int button) {
         clickBoard(coords, button, 0);
@@ -280,10 +256,7 @@ class GpuBoardWindowSmokeTest {
         Application previous = Gdx.app;
         try {
             GpuTestSupport.onSwing(() -> {
-                try (var views = mockConstruction(BoardView.class)) {
-                    GpuBoardWindow.openEditor(launcher, file.toFile(), false);
-                    assertTrue(views.constructed().isEmpty());
-                }
+                GpuBoardWindow.openEditor(launcher, file.toFile(), false);
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);
@@ -351,8 +324,15 @@ class GpuBoardWindowSmokeTest {
             original.getInputProcessor().touchUp(x + 80, y + 35, 0, button);
             assertEquals(orbit, !direction.epsilonEquals(camera.camera.direction, 0.001f),
                   "Orbit changes the viewing angle; pan preserves it");
-            assertEquals(!orbit, !focus.epsilonEquals(camera.focus, 0.001f),
-                  "Pan moves the focus; orbit preserves it");
+            // An orbit keeps the visible centre: its pivot may move to the terrain there, along the line of sight
+            // (BoardCamera.anchorOrbit), and nowhere else. A pan moves the focus across it.
+            Vector3 moved = camera.focus.cpy().sub(focus);
+            float across = moved.cpy().crs(direction).len();
+            if (orbit) {
+                assertTrue(across <= 0.001f * (1 + moved.len()), "Orbit keeps the line of sight's pivot: " + moved);
+            } else {
+                assertTrue(across > 0.001f, "Pan moves the focus across the line of sight: " + moved);
+            }
         } finally {
             Gdx.input = original;
         }
@@ -605,7 +585,7 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> {
                     assertTrue(preview instanceof GpuMapSource, "Preview uses the model directly");
                     assertTrue(preview.takeFrame().scene().units().isEmpty());
-                    GpuBoardWindow.open(ui.view().getClientState(), () -> fixture.panel);
+                    GpuBoardWindow.open(ui.view(), () -> fixture.panel);
                     ui.frame().setVisible(false);
                     return null;
                 });
@@ -619,7 +599,7 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> {
                     GpuBoardWindow.closeFor(ui.view().getClientgui());
                     ui.frame().dispose();
-                    ui.view().dispose();
+                    ui.view().close();
                     ui.menus().die();
                     return null;
                 });
@@ -656,6 +636,9 @@ class GpuBoardWindowSmokeTest {
         BoardFile.save(Board.createEmptyBoard(8, 8), file);
         byte[] saved = Files.readAllBytes(file);
         Coords at = new Coords(3, 4);
+        // The editor opens a file preview's source sheet and copies only a generated map (BoardEditorSession#open):
+        // the displayed change at the hex below reaches it only from a generated map.
+        int opened = replaceFile ? 3 : BoardFile.read(file).getHex(at).getLevel();
         var client = mock(ClientGUI.class);
         var lobby = client;
         doAnswer(call -> {
@@ -706,7 +689,7 @@ class GpuBoardWindowSmokeTest {
             gameField.setAccessible(true);
             Board shown = GpuTestSupport.onSwing(() -> {
                 Board board = ((megamek.common.game.Game) gameField.get(preview)).getBoard();
-                // The handoff must copy the displayed state, even when it differs from the file on disk.
+                // A displayed state the file lacks (as a finished preview closes outer building exits).
                 board.setHex(at, new Hex(3));
                 preview.refresh();
                 return board;
@@ -735,7 +718,8 @@ class GpuBoardWindowSmokeTest {
                 assertNotSame(shown, editor.board(), "The editor owns a separate document");
                 assertEquals(shown.getWidth(), editor.board().getWidth());
                 assertEquals(shown.getHeight(), editor.board().getHeight());
-                assertEquals(3, editor.board().getHex(at).getLevel());
+                assertEquals(opened, editor.board().getHex(at).getLevel(), replaceFile
+                      ? "A generated map is copied as displayed" : "A file preview opens the file's sheet");
                 assertEquals(replaceFile ? null : file, editor.path(),
                       "Only the currently displayed file supplies the editor's save path");
                 assertEquals(replaceFile, editor.dirty(), "Generated maps have never been saved");
@@ -745,7 +729,7 @@ class GpuBoardWindowSmokeTest {
 
             input(() -> editorWheel(at, true, true, -1));
             GpuTestSupport.onSwing(() -> {
-                assertEquals(4, editor.board().getHex(at).getLevel(), "Native input edits the opened map");
+                assertEquals(opened + 1, editor.board().getHex(at).getLevel(), "Native input edits the opened map");
                 assertEquals(3, shown.getHex(at).getLevel(), "Editing must not mutate the preview's board");
                 assertTrue(editor.dirty());
                 return null;
@@ -765,7 +749,7 @@ class GpuBoardWindowSmokeTest {
             await(() -> GpuTestSupport.onSwing(launcher::isShowing));
             if (saveBeforeClose) {
                 verify(lobby).boardEditorClosed(savedFile, replaceFile);
-                assertEquals(4, BoardFile.read(savedFile).getHex(at).getLevel());
+                assertEquals(opened + 1, BoardFile.read(savedFile).getHex(at).getLevel());
             } else {
                 verify(lobby, never()).boardEditorClosed(any(), anyBoolean());
             }
@@ -791,68 +775,14 @@ class GpuBoardWindowSmokeTest {
         }
     }
 
+    /** The lobby's preview offers the 3D graphics in View > Renderer; a lobby update replaces its board, and the lobby closes it. */
     @Test
-    void previewMenuSwitchesBothWaysWithoutRegeneratingTheBoard() throws Exception {
-        JFrame launcher = GpuTestSupport.onSwing(() -> { var frame = new JFrame("Preview launcher"); frame.setSize(400, 300); frame.setVisible(true); return frame; });
-        Board board = Board.createEmptyBoard(7, 9);
-        board.setHex(3, 4, new Hex(3));
-        try {
-            Application previous = Gdx.app;
-            GpuTestSupport.onSwing(() -> { GpuBoardWindow.openPreview(launcher, board); return null; });
-            await(() -> Gdx.app != null && Gdx.app != previous);
-            for (int round = 0; round < 2; round++) {
-                await(() -> previewSource() != null);
-                BoardSource source = previewSource();
-                await(() -> previewReady(source)); awaitNavigation();
-                // Each round opens a new window, whose View and Renderer groups start closed.
-                input(() -> GpuBoardTestUi.click("utility-menu"));
-                input(() -> GpuBoardTestUi.click("/view"));
-                input(() -> GpuBoardTestUi.click("/view/viewRenderer"));
-                captureMenu("preview-view-switch-menu.png");
-                onGl(() -> { GpuBoardTestUi.click("/view/viewRenderer/viewLegacy2D"); return null; });
-                await(() -> GpuTestSupport.onSwing(() -> mapWindow("board-preview-2d") != null));
-                assertTrue(source.isClosed());
-                JDialog legacy2D = GpuTestSupport.onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
-                captureLegacy2D(legacy2D, "preview-view", "preview-view-switch-2d.png");
-                Application nativeView = Gdx.app;
-                String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
-                      ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
-                GpuTestSupport.onSwing(() -> {
-                    assertTrue(java.util.Arrays.stream(legacy2D.getJMenuBar().getMenu(0).getMenuComponents())
-                          .anyMatch(item -> item instanceof JMenuItem entry
-                                && entry.getText().equals(Messages.getString("CommonMenuBar.PrintMenu"))),
-                          "The Legacy 2D preview's File menu offers Print, as the 3D preview's Menu does");
-                    JMenu view = (JMenu) namedButton(legacy2D, "preview-view");
-                    JMenu renderer = (JMenu) namedButton(view.getPopupMenu(), "preview-renderer");
-                    assertTrue(rendererItem(renderer, ClientGUI.VIEW_LEGACY_2D).isSelected());
-                    rendererItem(renderer, graphics).doClick(0);
-                    return null;
-                });
-                await(() -> Gdx.app != null && Gdx.app != nativeView);
-                await(() -> previewSource() != null);
-                BoardSource resumed = previewSource();
-                await(() -> previewReady(resumed));
-                assertFalse(GpuTestSupport.onSwing(legacy2D::isDisplayable), "Each switch releases the old Legacy 2D renderer");
-                var field = GpuMapSource.class.getDeclaredField("game"); field.setAccessible(true);
-                assertSame(board, ((megamek.common.game.Game) field.get(resumed)).getBoard(), "Switching keeps the exact preview board");
-                assertEquals(3, resumed.takeFrame().scene().tile(new Coords(3, 4)).elevation());
-            }
-        } finally {
-            GpuTestSupport.onSwing(() -> { GpuBoardWindow.closeFor((ClientGUI) null); launcher.dispose(); return null; });
-        }
-    }
-
-    /**
-     * The lobby's 3D preview is 3D only: its View > Renderer has no Legacy 2D, a lobby update replaces its board, and the
-     * lobby closes it.
-     */
-    @Test
-    void lobbyPreviewIsThreeDOnlyAndFollowsTheLobby() throws Exception {
+    void lobbyPreviewFollowsTheLobby() throws Exception {
         JFrame lobby = GpuTestSupport.onSwing(() -> { var frame = new JFrame("Lobby"); frame.setSize(800, 600); frame.setVisible(true); return frame; });
         Board board = Board.createEmptyBoard(8, 10);
         try {
             Application previous = Gdx.app;
-            GpuTestSupport.onSwing(() -> { GpuBoardWindow.openLobbyPreview(lobby, board, new PlanetaryConditions()); return null; });
+            GpuTestSupport.onSwing(() -> { GpuBoardWindow.openPreview(lobby, board, new PlanetaryConditions()); return null; });
             await(() -> Gdx.app != null && Gdx.app != previous);
             await(() -> previewSource() != null);
             BoardSource source = previewSource();
@@ -861,8 +791,6 @@ class GpuBoardWindowSmokeTest {
             input(() -> GpuBoardTestUi.click("utility-menu"));
             input(() -> GpuBoardTestUi.click("/view"));
             input(() -> GpuBoardTestUi.click("/view/viewRenderer"));
-            assertNull(onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("/view/viewRenderer/viewLegacy2D")),
-                  "The lobby's preview offers no Legacy 2D");
             assertNotNull(onGl(() -> GpuBoardTestUi.stage().getRoot()
                   .findActor("/view/viewRenderer/" + ClientGUI.VIEW_GRAPHICS_CLASSIC)));
 
@@ -874,209 +802,6 @@ class GpuBoardWindowSmokeTest {
         } finally {
             GpuTestSupport.onSwing(() -> { GpuBoardWindow.closeFor((ClientGUI) null); lobby.dispose(); return null; });
         }
-    }
-    /**
-     * The editor's 2D Preview is one live window beside the running editor, owned by the editor's owner window: it shows
-     * the session's board as the 2D board draws it, repaints what the session paints and undoes and follows a replaced
-     * document without being reopened, comes to the front on a second request, and closes with the editor.
-     */
-    @Test
-    void editorMenuOpensOneLive2DPreviewThatClosesWithTheEditor() throws Exception {
-        File file = new File(megamek.common.Configuration.boardsDir(), "unofficial/VictorMorson/48x48.board");
-        Coords at = new Coords(2, 2);
-        JFrame launcher = GpuTestSupport.onSwing(() -> { var frame = new JFrame("Editor launcher"); frame.setSize(400, 300); frame.setVisible(true); return frame; });
-        try {
-            Application previous = Gdx.app;
-            GpuTestSupport.onSwing(() -> { GpuBoardWindow.openEditor(launcher, file, false); return null; });
-            await(() -> Gdx.app != null && Gdx.app != previous);
-            await(() -> previewSource() != null);
-            BoardSource source = previewSource();
-            var editorField = GpuMapSource.class.getDeclaredField("editor"); editorField.setAccessible(true);
-            BoardEditorSession session = (BoardEditorSession) editorField.get(source);
-            await(() -> previewReady(source)); awaitNavigation();
-            input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/boardPreview2D"); return null; });
-            await(() -> GpuTestSupport.onSwing(() -> mapWindow("board-editor-preview-2d") != null));
-            JDialog preview = GpuTestSupport.onSwing(() -> (JDialog) mapWindow("board-editor-preview-2d"));
-            assertFalse(source.isClosed(), "The editor keeps running beside its 2D Preview");
-            assertSame(launcher, preview.getOwner(), "The editor's owner window owns the 2D Preview");
-            assertFalse(preview.isModal());
-            BoardView view = GpuTestSupport.onSwing(() -> boardView(preview));
-            assertSame(session.board(), GpuTestSupport.onSwing(view::getBoard), "It shows the session's own board, not a copy");
-            await(() -> GpuTestSupport.onSwing(view::isTileImagesLoaded));
-            awaitNavigation();
-            captureEditorWithPreview(preview, "b9-2d-preview.png");
-
-            // Painting through the session repaints the hex in 2D; Undo paints it back.
-            Rectangle hex = GpuTestSupport.onSwing(() -> hexArea(view, at));
-            assertNotNull(hex, "The painted hex is in view");
-            BufferedImage before = GpuTestSupport.onSwing(() -> viewportImage(view));
-            assertFalse(GpuTestSupport.onSwing(() -> session.board().getHex(at).containsTerrain(Terrains.WATER)));
-            GpuTestSupport.onSwing(() -> {
-                session.pointer(at, 0, 0, false);
-                session.command(new BoardEditorSession.Command(BoardEditorSession.Action.TERRAIN, "water", "2"), launcher);
-                assertTrue(session.board().getHex(at).containsTerrain(Terrains.WATER));
-                return null;
-            });
-            await(() -> GpuTestSupport.onSwing(() -> changedPixels(before, viewportImage(view), hex) > hex.width * hex.height / 4));
-            GpuTestSupport.onSwing(() -> { session.command(new BoardEditorSession.Command(BoardEditorSession.Action.UNDO), launcher); return null; });
-            await(() -> GpuTestSupport.onSwing(() -> changedPixels(before, viewportImage(view), hex) == 0));
-
-            // A second request brings the same window to the front instead of opening another.
-            input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/boardPreview2D"); return null; });
-            GpuTestSupport.onSwing(() -> null);
-            assertEquals(1L, GpuTestSupport.onSwing(() -> Arrays.stream(Window.getWindows())
-                  .filter(window -> "board-editor-preview-2d".equals(window.getName()) && window.isDisplayable()).count()));
-            assertSame(preview, GpuTestSupport.onSwing(() -> mapWindow("board-editor-preview-2d")));
-
-            // A replaced document (New, Open) is the game's new board, which the view follows.
-            GpuTestSupport.onSwing(() -> {
-                session.command(new BoardEditorSession.Command(BoardEditorSession.Action.NEW, "12x9"), launcher);
-                assertSame(session.board(), view.getBoard());
-                assertEquals(12, view.getBoard().getWidth());
-                return null;
-            });
-
-            // Closing the editor's window closes the 2D Preview and releases its view.
-            onGl(() -> {
-                long window = ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle();
-                var callback = GLFW.glfwSetWindowCloseCallback(window, null);
-                GLFW.glfwSetWindowCloseCallback(window, callback);
-                callback.invoke(window);
-                return null;
-            });
-            await(source::isClosed);
-            await(() -> GpuTestSupport.onSwing(launcher::isShowing));
-            assertFalse(GpuTestSupport.onSwing(preview::isDisplayable), "The 2D Preview closes with the editor");
-            assertTrue(GpuTestSupport.onSwing(() -> session.game().getGameListeners().isEmpty()), "Its board view no longer listens");
-        } finally {
-            GpuTestSupport.onSwing(() -> {
-                GpuBoardWindow.closeFor((ClientGUI) null);
-                for (Window owned : launcher.getOwnedWindows()) { owned.dispose(); }
-                launcher.dispose(); return null;
-            });
-        }
-    }
-
-    /** The board view a 2D window shows. */
-    private static BoardView boardView(java.awt.Container parent) throws ReflectiveOperationException {
-        for (var component : parent.getComponents()) {
-            if (component instanceof BoardViewPanel panel) {
-                var field = BoardViewPanel.class.getDeclaredField("boardView");
-                field.setAccessible(true);
-                return (BoardView) field.get(panel);
-            }
-            if (component instanceof java.awt.Container child) {
-                BoardView view = boardView(child);
-                if (view != null) { return view; }
-            }
-        }
-        return null;
-    }
-
-    /** What the view's viewport shows now, painted from the board's current state. */
-    private static BufferedImage viewportImage(BoardView view) {
-        var viewport = ((javax.swing.JScrollPane) view.getComponent(true)).getViewport();
-        var image = new BufferedImage(viewport.getWidth(), viewport.getHeight(), BufferedImage.TYPE_INT_RGB);
-        var graphics = image.createGraphics();
-        try { viewport.printAll(graphics); } finally { graphics.dispose(); }
-        return image;
-    }
-
-    /** The viewport pixels the view maps to {@code at}, as their bounding box, or null when the hex is out of view. */
-    private static Rectangle hexArea(BoardView view, Coords at) {
-        var viewport = ((javax.swing.JScrollPane) view.getComponent(true)).getViewport();
-        Point origin = viewport.getViewPosition();
-        Rectangle area = null;
-        // Every 4th pixel is enough to find a hex; the box is the samples' bounding box.
-        for (int y = 0; y < viewport.getHeight(); y += 4) {
-            for (int x = 0; x < viewport.getWidth(); x += 4) {
-                if (at.equals(view.getCoordsAt(new Point(x + origin.x, y + origin.y)))) {
-                    area = area == null ? new Rectangle(x, y, 1, 1) : area.union(new Rectangle(x, y, 1, 1));
-                }
-            }
-        }
-        return area;
-    }
-
-    private static int changedPixels(BufferedImage before, BufferedImage after, Rectangle area) {
-        int changed = 0;
-        for (int y = area.y; y < area.y + area.height; y++) {
-            for (int x = area.x; x < area.x + area.width; x++) {
-                if (before.getRGB(x, y) != after.getRGB(x, y)) { changed++; }
-            }
-        }
-        return changed;
-    }
-
-    /**
-     * The editor's frame (a native frame grab) with the 2D Preview window's own paint at its lower right. A screen grab
-     * would also show whatever else is on the desktop.
-     */
-    private static void captureEditorWithPreview(Window preview, String name) throws Exception {
-        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-        assertTrue(output.isDirectory() || output.mkdirs());
-        File frame = File.createTempFile("editor-frame-", ".png");
-        try {
-            onGl(() -> GpuBoardTestUi.capture(frame));
-            BufferedImage editor = ImageIO.read(frame);
-            // Swing draws at the display's scale, as the native frame does: paint the window in device pixels.
-            double scale = GpuTestSupport.onSwing(() -> preview.getGraphicsConfiguration().getDefaultTransform().getScaleX());
-            BufferedImage window = GpuTestSupport.onSwing(() -> {
-                var image = new BufferedImage((int) Math.round(preview.getWidth() * scale),
-                      (int) Math.round(preview.getHeight() * scale), BufferedImage.TYPE_INT_RGB);
-                var graphics = image.createGraphics();
-                try { graphics.scale(scale, scale); preview.printAll(graphics); } finally { graphics.dispose(); }
-                return image;
-            });
-            var image = new BufferedImage(editor.getWidth(), editor.getHeight(), BufferedImage.TYPE_INT_RGB);
-            for (int y = 0; y < editor.getHeight(); y++) {
-                // The frame grab's alpha is not what the window shows; the colour is.
-                for (int x = 0; x < editor.getWidth(); x++) { image.setRGB(x, y, editor.getRGB(x, y) | 0xFF000000); }
-            }
-            var graphics = image.createGraphics();
-            try {
-                int x = image.getWidth() - window.getWidth() - 24, y = image.getHeight() - window.getHeight() - 24;
-                graphics.drawImage(window, x, y, null);
-                graphics.setColor(java.awt.Color.GRAY);
-                graphics.drawRect(x - 1, y - 1, window.getWidth() + 1, window.getHeight() + 1);
-            } finally { graphics.dispose(); }
-            ImageIO.write(image, "png", new File(output, name));
-        } finally {
-            Files.deleteIfExists(frame.toPath());
-        }
-    }
-
-    private static Window mapWindow(String name) {
-        return Arrays.stream(Window.getWindows()).filter(window -> name.equals(window.getName()) && window.isShowing())
-              .findFirst().orElse(null);
-    }
-
-    private static void captureLegacy2D(Window window, String buttonName, String filename) throws Exception {
-        GpuTestSupport.onSwing(() -> {
-            AbstractButton button = namedButton(window, buttonName);
-            assertTrue(button.isShowing(), "The return control is visible in the Legacy 2D view");
-            assertTrue(button.getVisibleRect().width > 0 && button.getVisibleRect().height > 0);
-            var image = new BufferedImage(window.getWidth(), window.getHeight(), BufferedImage.TYPE_INT_RGB);
-            var graphics = image.createGraphics();
-            try { window.printAll(graphics); } finally { graphics.dispose(); }
-            File output = new File("build/gpu-board-review");
-            output.mkdirs();
-            ImageIO.write(image, "png", new File(output, filename));
-            return null;
-        });
-    }
-
-    private static AbstractButton namedButton(java.awt.Container parent, String name) {
-        for (var component : parent.getComponents()) {
-            if (component instanceof AbstractButton button && name.equals(button.getName())) { return button; }
-            if (component instanceof java.awt.Container child) {
-                AbstractButton button = namedButton(child, name);
-                if (button != null) { return button; }
-            }
-        }
-        return null;
     }
 
     private static boolean previewReady(BoardSource source) throws Exception {
@@ -1098,45 +823,6 @@ class GpuBoardWindowSmokeTest {
             field.setAccessible(true);
             return (BoardSource) field.get(GpuHost.sceneListener());
         });
-    }
-
-    @Test
-    void startsDirectlyInThreeDimensionsWithoutConstructingTheLegacy2DViewport() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            ClientWindow ui = GpuTestSupport.onSwing(() -> createClientWindow(fixture, false));
-            try {
-                GpuTestSupport.onSwing(() -> {
-                    ui.view().centerOn(fixture.entity);
-                    assertEquals(fixture.entity.getId(), ui.view().getClientState().getCenterRequest().entityId());
-                    assertNull(ui.view().getPanel().getParent());
-                    return null;
-                });
-                openNative(ui);
-                await(() -> onGl(() -> frames() >= 5));
-                GpuTestSupport.onSwing(() -> {
-                    verify(ui.view(), never()).getComponent();
-                    assertNull(ui.view().getPanel().getParent());
-                    assertFalse(ui.frame().isVisible());
-                    assertTrue(GpuBoardWindow.isActiveFor(ui.view().getClientgui()));
-                    GpuBoardWindow.showLegacy2D(ui.view().getClientgui());
-                    return null;
-                });
-                await(() -> GpuTestSupport.onSwing(() -> ui.frame().isVisible()));
-                GpuTestSupport.onSwing(() -> {
-                    verify(ui.view()).getComponent();
-                    assertTrue(ui.view().getPanel().isShowing(), "The legacy viewport is created on explicit return");
-                    return null;
-                });
-            } finally {
-                GpuTestSupport.onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view().getClientState());
-                    ui.frame().dispose();
-                    ui.view().dispose();
-                    GUIPreferences.getInstance().removePreferenceChangeListener(ui.menus());
-                    return null;
-                });
-            }
-        }
     }
 
 
@@ -1163,7 +849,6 @@ class GpuBoardWindowSmokeTest {
                 assertFalse(GpuTestSupport.onSwing(() -> ui.frame().isVisible()));
                 long window = onGl(() -> ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle());
                 GpuTestSupport.onSwing(() -> {
-                    verify(ui.view(), never()).getComponent();
                     phase.set(new WaitingForServerPanel());
                     return null;
                 });
@@ -1173,7 +858,7 @@ class GpuBoardWindowSmokeTest {
                     return message.getText().toString().equals(Messages.getString("ClientGUI.waitingOnTheServer"));
                 }));
                 GpuTestSupport.onSwing(() -> {
-                    doReturn(Optional.of(ui.view().getClientState())).when(gui).getCurrentBoardState();
+                    doReturn(Optional.of(ui.view())).when(gui).getCurrentBoardState();
                     return null;
                 });
                 await(() -> onGl(() -> frames() >= 5));
@@ -1187,18 +872,13 @@ class GpuBoardWindowSmokeTest {
                 });
                 GpuTestSupport.onSwing(() -> { phase.set(fixture.panel); return null; });
                 await(() -> onGl(() -> !phaseHeaderTexts().contains(waiting)));
-                GpuTestSupport.onSwing(() -> {
-                    verify(ui.view(), never()).getComponent();
-                    assertFalse(ui.frame().isVisible());
-                    return null;
-                });
-                BoardView replacement = GpuTestSupport.onSwing(() -> {
-                    BoardView view = new BoardView(fixture.game, null, gui, 0);
-                    view.setLocalPlayer(fixture.player);
-                    ui.view().dispose();
-                    fixture.view.close();
-                    doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
-                    return view;
+                assertFalse(GpuTestSupport.onSwing(() -> ui.frame().isVisible()));
+                BoardClientState replacement = GpuTestSupport.onSwing(() -> {
+                    BoardClientState state = new BoardClientState(fixture.game, null, gui, 0, null);
+                    state.setLocalPlayer(fixture.player);
+                    ui.view().close();
+                    doReturn(Optional.of(state)).when(gui).getCurrentBoardState();
+                    return state;
                 });
                 try {
                     assertTrue(GpuBoardWindow.isActiveFor(gui), "Replacing the map must not dispose the client's window");
@@ -1208,17 +888,18 @@ class GpuBoardWindowSmokeTest {
                     });
                     Application restarting = Gdx.app;
                     GpuTestSupport.onSwing(() -> {
-                        GpuBoardWindow.showLegacy2D(gui);
+                        GpuBoardWindow.closeFor(gui);
                         GpuBoardWindow.open(gui, phase::get);
                         return null;
                     });
                     await(() -> Gdx.app != null && Gdx.app != restarting);
                     await(() -> onGl(() -> frames() > 0));
-                    assertFalse(GpuTestSupport.onSwing(() -> ui.frame().isVisible()), "A queued native restart never flashes 2D");
+                    assertFalse(GpuTestSupport.onSwing(() -> ui.frame().isVisible()),
+                          "A queued restart never shows the Swing frame");
                 } finally {
                     GpuTestSupport.onSwing(() -> {
                         GpuBoardWindow.closeFor(gui);
-                        replacement.dispose();
+                        replacement.close();
                         return null;
                     });
                 }
@@ -1226,7 +907,7 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> {
                     GpuBoardWindow.closeFor(gui);
                     ui.frame().dispose();
-                    ui.view().dispose();
+                    ui.view().close();
                     ui.menus().die();
                     return null;
                 });
@@ -1246,6 +927,14 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> {
                     preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
                     doCallRealMethod().when(gui).handleExit();
+                    // The exit asks Save First? in the native battle window and leaves through exitWithoutAsking
+                    // (97c3b7ad24): those chokepoints run their real code; askSaveFirst is protected.
+                    doCallRealMethod().when(gui).exitWithoutAsking();
+                    doCallRealMethod().when(gui).confirm(any(), any(), anyInt(), anyInt());
+                    doCallRealMethod().when(gui).askNative(any(), any(), anyInt(), any(), any(), anyBoolean());
+                    var askSaveFirst = ClientGUI.class.getDeclaredMethod("askSaveFirst");
+                    askSaveFirst.setAccessible(true);
+                    askSaveFirst.invoke(doCallRealMethod().when(gui));
                     doAnswer(invocation -> {
                         quit.incrementAndGet();
                         GpuBoardWindow.closeFor(gui);
@@ -1264,15 +953,13 @@ class GpuBoardWindowSmokeTest {
                         callback.invoke(window);
                         return null;
                     });
-                    await(() -> GpuTestSupport.onSwing(() -> savePrompt(ui.frame()) != null));
-                    GpuTestSupport.onSwing(() -> {
-                        JOptionPane prompt = savePrompt(ui.frame());
-                        assertEquals(Messages.getString("ClientGUI.gameSaveDialogMessage"), prompt.getMessage());
-                        assertTrue(GpuBoardWindow.raisedOverBoard(
-                              (java.awt.Dialog) SwingUtilities.getWindowAncestor(prompt)));
-                        prompt.setValue(response);
-                        return null;
-                    });
+                    // The question shows in this native window: its source publishes it; the answer is its button.
+                    GpuBoardSource source = (GpuBoardSource) previewSource();
+                    GpuBoardWindow.DialogRequest asked = GpuDialogFixture.awaitDialog(source,
+                          Messages.getString("ClientGUI.gameSaveDialogMessage"));
+                    assertEquals(Messages.getString("ClientGUI.gameSaveFirst"), asked.title());
+                    source.answer(asked.id(),
+                          new GpuBoardWindow.DialogAnswer(response, List.of(), null, false, List.of()));
                     GpuTestSupport.onSwing(() -> null);
                     if (response != JOptionPane.NO_OPTION) {
                         assertEquals(0, quit.get(), "Cancelling or failing to save must keep the game open");
@@ -1291,7 +978,7 @@ class GpuBoardWindowSmokeTest {
                     }
                     GpuBoardWindow.closeFor(gui);
                     ui.frame().dispose();
-                    ui.view().dispose();
+                    ui.view().close();
                     ui.menus().die();
                     preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, noSaveNag);
                     return null;
@@ -1319,60 +1006,29 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void swingReportStaysHiddenUntilReturningFromTheNativeBoard() throws Exception {
+    void aReportPhaseOpensTheNativeLog() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean enabled = preferences.getMiniReportEnabled();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = GpuTestSupport.onSwing(() -> createClientWindow(fixture));
             ClientGUI gui = ui.view().getClientgui();
-            MiniReportDisplayDialog report = GpuTestSupport.onSwing(() -> {
-                MiniReportDisplayDialog dialog = new MiniReportDisplayDialog(ui.frame(), gui);
-                when(gui.getMiniReportDisplayDialog()).thenReturn(dialog);
-                when(gui.getMiniReportDisplay()).thenReturn(mock(MiniReportDisplayPanel.class));
-                doAnswer(invocation -> {
-                    if (GpuBoardWindow.isActiveFor(gui)) {
-                        invocation.callRealMethod();
-                    } else {
-                        // The fixture has no Swing split panes. Observe the restored visibility request instead.
-                        dialog.setVisible(invocation.getArgument(0));
-                    }
-                    return null;
-                }).when(gui).setMiniReportLocation(anyBoolean());
-                preferences.setMiniReportEnabled(true);
-                dialog.setVisible(true);
-                return dialog;
-            });
             try {
                 openNative(ui);
                 await(() -> GpuTestSupport.onSwing(() -> !ui.frame().isVisible()));
                 GpuTestSupport.onSwing(() -> {
                     assertTrue(GpuBoardWindow.isActiveFor(gui));
-                    assertFalse(report.isVisible(), "Hide an already open Swing report during the handoff");
                     fixture.game.setPhase(GamePhase.FIRING_REPORT);
                     fixture.game.setAllReports(List.of(List.of(new Report(3000),
                           new Report(6065).addDesc(fixture.entity).add(10).add("Left Torso"))));
-                    gui.setMiniReportLocation(true);
-                    assertFalse(report.isVisible(), "Phase and preference updates must not reopen the legacy dialog");
-                    assertTrue(preferences.getMiniReportEnabled(), "Suppressing the old window preserves 2D preferences");
                     return null;
                 });
-                // The report phase opens the HUD's log, which stands for the Swing report.
+                // The report phase opens the HUD's log, the client's only report window.
                 await(() -> onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("log-panel"))));
-                GpuTestSupport.onSwing(() -> {
-                    assertFalse(report.isVisible(), "The native log must not revive the old report");
-                    GpuBoardWindow.showLegacy2D(gui);
-                    return null;
-                });
-                await(() -> GpuTestSupport.onSwing(() -> ui.frame().isVisible() && report.isVisible()));
-                assertFalse(GpuTestSupport.onSwing(() -> GpuBoardWindow.isActiveFor(gui)));
             } finally {
                 GpuTestSupport.onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view().getClientState());
-                    report.dispose();
+                    GpuBoardWindow.closeFor(ui.view());
                     ui.frame().dispose();
-                    ui.view().dispose();
+                    ui.view().close();
                     preferences.removePreferenceChangeListener(ui.menus());
-                    preferences.setMiniReportEnabled(enabled);
                     return null;
                 });
             }
@@ -1380,7 +1036,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void switchesExclusiveWindowsThroughMenusAndNeverRestoresLegacy2DOnClientDisposal() throws Exception {
+    void switchesExclusiveWindowsThroughMenusAndNeverShowsTheSwingFrameOnClientDisposal() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = GpuTestSupport.onSwing(() -> createClientWindow(fixture));
             Coords position = fixture.entity.getPosition();
@@ -1413,12 +1069,13 @@ class GpuBoardWindowSmokeTest {
                 GpuTestSupport.onSwing(() -> { ui.view().centerOnHex(position); return null; });
                 await(() -> onGl(() -> unitIsCentered(fixture)));
                 assertTrue(GpuTestSupport.onSwing(() -> ui.frame().isDisplayable()), "Switching must preserve the original client");
-                // The Swing window is hidden, so an allowed client dialog, here the bug report, must be raised above
-                // the native window.
+                // The Swing window is hidden, so an allowed client dialog must be raised above the native window: a
+                // file chooser (user item 21), the one Swing surface the battle keeps since its message boxes went
+                // native (ad0fdcab88).
                 JDialog probe = GpuTestSupport.onSwing(() -> {
-                    JDialog dialog = new JOptionPane("GPU dialog probe").createDialog(ui.frame(),
-                          new megamek.client.ui.BugReportMessages().get("title"));
-                    dialog.setModal(false);
+                    JDialog dialog = new JDialog(ui.frame(), "GPU dialog probe");
+                    dialog.getContentPane().add(new JFileChooser());
+                    dialog.pack();
                     dialog.setVisible(true);
                     return dialog;
                 });
@@ -1432,7 +1089,7 @@ class GpuBoardWindowSmokeTest {
                     // Allow the EDT to publish the resized overlay and upload it on the render thread.
                     await(() -> onGl(() -> frames() > resizedFrame + 15));
                     assertFalse(GpuTestSupport.onSwing(() -> ui.frame().isVisible()),
-                          "Resizing must not fall back to the Legacy 2D board");
+                          "Resizing must not show the Swing frame");
                     // A client's request to centre on the unit, as Center camera gives it, keeps zoom and angle.
                     float zoom = onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
@@ -1445,7 +1102,7 @@ class GpuBoardWindowSmokeTest {
                           .boardCamera.camera.direction));
                     Callable<Long> centerOnUnit = () -> {
                         ui.view().centerOn(fixture.entity);
-                        var request = ui.view().getClientState().getCenterRequest();
+                        var request = ui.view().getCenterRequest();
                         assertEquals(fixture.entity.getId(), request.entityId());
                         return request.sequence();
                     };
@@ -1464,7 +1121,11 @@ class GpuBoardWindowSmokeTest {
                     onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                         assertTrue(settled.epsilonEquals(battle.boardCamera.focus, .001f),
-                              "A second request must retain the same framing, not snap to the unit's hex");
+                              "A second request must retain the same framing, not snap to the unit's hex: "
+                                    + settled + " then " + battle.boardCamera.focus + " at " + size[0] + " wide, zoom "
+                                    + battle.boardCamera.camera.zoom + ", viewport "
+                                    + battle.boardCamera.camera.viewportWidth + "x"
+                                    + battle.boardCamera.camera.viewportHeight);
                         return null;
                     });
                 }
@@ -1490,10 +1151,10 @@ class GpuBoardWindowSmokeTest {
                 });
                 input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
                 input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
-                // A game has no Legacy 2D board to switch to: Renderer offers only the 3D board's graphics.
+                // Renderer offers only the 3D board's graphics.
                 assertTrue(GpuTestSupport.onSwing(() -> ui.gpuChoice().isSelected()), "Renderer shows the 3D board's graphics");
                 GpuTestSupport.onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view().getClientState());
+                    GpuBoardWindow.closeFor(ui.view());
                     ui.frame().dispose();
                     return null;
                 });
@@ -1506,8 +1167,7 @@ class GpuBoardWindowSmokeTest {
             } finally {
                 GpuTestSupport.onSwing(() -> {
                     preferences.setBoardUiScale(originalScale);
-                    preferences.removePreferenceChangeListener(ui.overview());
-                    GpuBoardWindow.closeFor(ui.view().getClientState());
+                    GpuBoardWindow.closeFor(ui.view());
                     ui.frame().dispose();
                     ui.menus().die();
                     return null;
@@ -1542,19 +1202,13 @@ class GpuBoardWindowSmokeTest {
         return createClientWindow(fixture, true);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean legacy2D) throws Exception {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean frameShown) throws Exception {
         fixture.source.close();
-        ClientGUI gui = mock(ClientGUI.class, invocation -> switch (invocation.getMethod().getName()) {
-            case "refreshAuxiliaryWindows", "setMapVisible", "setBotCommandsLocation",
-                 "setPlayerListVisible", "setRoundsInAirVisible" -> invocation.callRealMethod();
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
-        });
+        ClientGUI gui = mock(ClientGUI.class);
         BoardViewsContainer container = mock(BoardViewsContainer.class);
-        when(container.isLegacy2DEnabled()).thenAnswer(invocation -> !GpuBoardWindow.isActiveFor(gui));
         setField(AbstractClientGUI.class, gui, "boardViewsContainer", container);
-        setField(AbstractClientGUI.class, gui, "miniMaps", new HashMap<>());
         Client client = mock(Client.class);
-        JFrame frame = new JFrame("MegaMek - Legacy 2D board switch test");
+        JFrame frame = new JFrame("MegaMek - client window test");
         CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
         menus.setPhase(GamePhase.MOVEMENT);
         when(gui.getClient()).thenReturn(client);
@@ -1565,39 +1219,13 @@ class GpuBoardWindowSmokeTest {
         fixture.view.close();
         fixture.view = new BoardClientState(fixture.game, null, gui, 0, null);
         fixture.view.setLocalPlayer(fixture.player);
-        BoardView renderer = new BoardView(fixture.view, null, gui);
-        if (legacy2D) {
-            frame.add(renderer.getComponent());
-        }
-        BoardView view = spy(renderer);
-        // BoardViewPanel retains its original owner; let that owner create its viewport on demand too.
-        doAnswer(invocation -> renderer.getComponent()).when(view).getComponent();
-        doReturn(gui).when(view).getClientgui();
-        when(gui.getClient()).thenReturn(client);
-        when(client.getGame()).thenReturn(fixture.game);
-        when(client.getLocalPlayer()).thenReturn(fixture.player);
-        when(gui.getFrame()).thenReturn(frame);
-        doAnswer(invocation -> {
-            frame.getContentPane().removeAll();
-            if (invocation.getArgument(0, Boolean.class)) {
-                frame.add(view.getComponent());
-            } else {
-                renderer.releaseLegacy2DView();
-                view.releaseLegacy2DView();
-            }
-            frame.validate();
-            return null;
-        }).when(gui).setLegacy2DViewEnabled(anyBoolean());
+        BoardClientState view = fixture.view;
         when(gui.getMenuBar()).thenReturn(menus);
-        doReturn(Optional.of(fixture.view)).when(gui).getCurrentBoardState();
-        when(gui.boardViews()).thenReturn(List.of(view));
-        doReturn(List.of(fixture.view)).when(gui).boardStates();
-        doReturn(fixture.view).when(gui).getBoardState();
-        doReturn(fixture.view).when(gui).getBoardState(any(BoardLocation.class));
-        doReturn(fixture.view).when(gui).getBoardState(any(Entity.class));
-        when(gui.getBoardView()).thenReturn(view);
-        when(gui.getBoardView(any(BoardLocation.class))).thenReturn(view);
-        when(gui.getMainPanel()).thenReturn(new JPanel());
+        doReturn(Optional.of(view)).when(gui).getCurrentBoardState();
+        doReturn(List.of(view)).when(gui).boardStates();
+        doReturn(view).when(gui).getBoardState();
+        doReturn(view).when(gui).getBoardState(any(BoardLocation.class));
+        doReturn(view).when(gui).getBoardState(any(Entity.class));
         doCallRealMethod().when(gui).centerOnUnit(any());
         doAnswer(invocation -> {
             BoardLocation location = invocation.getArgument(0);
@@ -1606,7 +1234,6 @@ class GpuBoardWindowSmokeTest {
             }
             return null;
         }).when(gui).centerOnHex(any());
-        UnitOverviewOverlay overview = new UnitOverviewOverlay(gui);
         // ClientGUI's board switch; the menu bar has saved the Renderer choice before.
         menus.addActionListener(event -> {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_CLASSIC)
@@ -1616,7 +1243,7 @@ class GpuBoardWindowSmokeTest {
         });
         frame.setJMenuBar(menus);
         frame.setSize(960, 700);
-        frame.setVisible(legacy2D);
+        frame.setVisible(frameShown);
         JMenu viewMenu = (JMenu) java.util.Arrays.stream(menus.getComponents())
               .filter(component -> component instanceof JMenu menu
                     && menu.getText().equals(Messages.getString("CommonMenuBar.ViewMenu"))).findFirst().orElseThrow();
@@ -1627,7 +1254,7 @@ class GpuBoardWindowSmokeTest {
         String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
               ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
         JMenuItem gpuChoice = rendererItem(rendererMenu, graphics);
-        return new ClientWindow(frame, menus, view, gpuChoice, overview);
+        return new ClientWindow(frame, menus, view, gpuChoice);
     }
 
     private static JMenuItem rendererItem(JMenu renderer, String command) {

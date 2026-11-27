@@ -22,7 +22,6 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
-import megamek.common.units.ProtoMek;
 import megamek.common.units.Tank;
 
 /** Equipment modes, dumping and critical-slot presentation shared by unit views. */
@@ -30,45 +29,6 @@ public final class UnitEquipmentActions {
     private UnitEquipmentActions() { }
 
     private static final String DUMP_BLOCKED = "MekDisplay.DumpBlocked.";
-
-    /**
-     * The slot list's text for one critical slot of a location: "---" when empty; a system's name, marked "*" when it
-     * is destroyed or missing and "x" when breached; or the equipment's description with its state and modes. An
-     * armored slot ends in "(armored)". The Unit Display and the GPU record sheet both use it.
-     */
-    public static String slotText(Entity en, int loc, int slot) {
-        final CriticalSlot cs = en.getCritical(loc, slot);
-        StringBuilder sb = new StringBuilder(32);
-        if (cs == null) {
-            sb.append("---");
-        } else {
-            switch (cs.getType()) {
-                case CriticalSlot.TYPE_SYSTEM:
-                    if (cs.isDestroyed() || cs.isMissing()) {
-                        sb.append("*");
-                    }
-                    if (cs.isBreached()) {
-                        sb.append("x");
-                    }
-                    // ProtoMeks have different system names.
-                    if (en instanceof ProtoMek) {
-                        sb.append(ProtoMek.SYSTEM_NAMES[cs.getIndex()]);
-                    } else {
-                        sb.append(((Mek) en).getSystemName(cs
-                              .getIndex()));
-                    }
-                    break;
-                case CriticalSlot.TYPE_EQUIPMENT:
-                    sb.append(getMountedDisplay(en, cs.getMount(), cs));
-                    break;
-                default:
-            }
-            if (cs.isArmored()) {
-                sb.append(" (armored)");
-            }
-        }
-        return sb.toString();
-    }
 
     /**
      * Appends the remaining bridge building budget to the Infantry Bridge Kit line so a Bridge-Building Engineer
@@ -124,6 +84,23 @@ public final class UnitEquipmentActions {
         } else {
             displayText.append(' ').append(Messages.getString("MekDisplay.bridgeLayerCF", bridgeState.getCurrentCF()));
         }
+    }
+
+    /**
+     * The unit's bridge equipment as the equipment list words it: an infantry bridge kit with the bridges it can still
+     * build, a bridge layer with the state of its bridge. Empty for a unit without either.
+     */
+    public static List<String> bridgeEquipment(Entity en) {
+        List<String> lines = new ArrayList<>();
+        for (Mounted<?> mounted : en.getEquipment()) {
+            StringBuilder state = new StringBuilder();
+            appendBridgeKitBudget(en, state, mounted);
+            appendBridgeLayerState(state, mounted);
+            if (!state.isEmpty()) {
+                lines.add(getMountedDisplay(en, mounted, null));
+            }
+        }
+        return lines;
     }
 
     public static String getMountedDisplay(Entity en, Mounted<?> m, @Nullable CriticalSlot cs) {

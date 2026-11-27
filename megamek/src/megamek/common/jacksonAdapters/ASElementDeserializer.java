@@ -117,6 +117,7 @@ public class ASElementDeserializer extends StdDeserializer<AlphaStrikeElement> {
             requireFields(AS_ELEMENT, node, CHASSIS, SIZE, STRUCTURE, AS_TYPE, MOVE);
             element = new AlphaStrikeElement();
             element.setChassis(node.get(CHASSIS).textValue());
+            element.setClanActiveProbe(node.path(ASElementSerializer.CLAN_ACTIVE_PROBE).asBoolean(false));
             if (node.has(MODEL)) {
                 element.setModel(node.get(MODEL).textValue());
             }
@@ -175,6 +176,9 @@ public class ASElementDeserializer extends StdDeserializer<AlphaStrikeElement> {
             if (element.isBattleArmor() && node.has(SQUAD_SIZE)) {
                 element.setSquadSize((Integer) node.get(SQUAD_SIZE).numberValue());
             }
+        }
+        if (node.has(ASElementSerializer.TRANSPORT_TONNAGE)) {
+            element.setTransportTonnage(node.get(ASElementSerializer.TRANSPORT_TONNAGE).asDouble());
         }
         element.setSkill(node.has(SKILL) ? node.get(SKILL).intValue() : 4);
         ASConverter.updateCalculatedValues(element);

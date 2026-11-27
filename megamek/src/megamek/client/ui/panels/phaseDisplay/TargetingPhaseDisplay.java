@@ -56,7 +56,6 @@ import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.HexTarget;
 import megamek.common.Player;
 import megamek.common.RangeType;
@@ -450,10 +449,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
 
             setFireModeEnabled(true);
 
-            if (!entity.isOffBoard()) {
-                clientgui.showFiringSolutions(entity);
-            }
-
             updateClearWeaponJam();
 
         } else {
@@ -468,7 +463,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         target = null;
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
@@ -526,7 +520,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         if ((phase == game.getPhase())
             && (next != null) && (currentEntity() != null)
               && (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         target(null);
@@ -973,9 +966,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         }
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplayState().displayEntity(currentEntity());
-        if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
-        }
         clientgui.getUnitDisplayState().selectFirstWeapon();
         updateTarget();
         clientgui.updateFiringArc(currentEntity());
@@ -1700,7 +1690,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
         }
 
         if (clientgui.getClient().isMyTurn() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             var bv = clientgui.getBoardState(currentEntity());
             if (bv != null) {
                 bv.centerOn(currentEntity());
@@ -1722,7 +1711,6 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponD
                     selectEntity(entity.getId());
                 }
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(entity);
                 if (entity.isDeployed()) {
                     clientgui.getBoardState(entity).centerOn(entity);

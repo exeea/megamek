@@ -101,7 +101,7 @@ final class GpuCalibrationScenes {
             terrain.refine(camera.camera);
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
-        } while (terrain.familyPrograms().pending() > 0);
+        } while (terrain.familiesPending());
         // Deferred work waits for unchanged frames: stale mesh pages merge, a little each frame, and refined chunks
         // redraw the cached shadow. A merge reorders draws, so pixels where surfaces tie in depth change when it lands.
         // The merges take a few dozen frames; one that the frame's merge share never reaches (submissions outlasting it

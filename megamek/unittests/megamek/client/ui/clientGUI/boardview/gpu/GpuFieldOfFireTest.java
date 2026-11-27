@@ -17,8 +17,8 @@ import java.util.TreeMap;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.clientGUI.boardview.TacticalMark.WeaponRange;
+import megamek.client.ui.clientGUI.boardview.TacticalMark.RangeLabel;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.FiringArcSpriteHandler;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -151,18 +151,18 @@ class GpuFieldOfFireTest {
         when(gui.getDisplayedWeapon()).thenReturn(Optional.of(weapon));
         handler.update(unit, weapon);
         Map<Integer, int[]> outline = new TreeMap<>();
-        fixture.view.getAllSprites().stream().filter(FieldOfFireSprite.class::isInstance)
-              .map(FieldOfFireSprite.class::cast).filter(FieldOfFireSprite::isWeaponRange).forEach(sprite -> {
-                  int[] counts = outline.computeIfAbsent(sprite.getRangeBracket(), bracket -> new int[2]);
+        fixture.view.getMarks().stream().filter(WeaponRange.class::isInstance)
+              .map(WeaponRange.class::cast).forEach(range -> {
+                  int[] counts = outline.computeIfAbsent(range.bracket(), bracket -> new int[2]);
                   counts[0]++;
-                  counts[1] += Integer.bitCount(sprite.getBorders());
+                  counts[1] += Integer.bitCount(range.borders());
               });
         StringBuilder text = new StringBuilder();
         outline.forEach((bracket, counts) -> text.append(bracket).append(':').append(counts[0]).append('/')
               .append(counts[1]).append(' '));
-        text.append(fixture.view.getAllSprites().stream().filter(TextMarkerSprite.class::isInstance)
-              .map(TextMarkerSprite.class::cast)
-              .map(label -> label.getRangeBracket() + "@" + label.getPosition().getX() + "," + label.getPosition()
+        text.append(fixture.view.getMarks().stream().filter(RangeLabel.class::isInstance)
+              .map(RangeLabel.class::cast)
+              .map(label -> label.bracket() + "@" + label.coords().getX() + "," + label.coords()
                     .getY()).sorted().toList());
         return text.toString();
     }

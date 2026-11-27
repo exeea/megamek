@@ -82,6 +82,15 @@ final class GpuLavaLighting implements Disposable {
      */
     private float[] falls = new float[0];
     private int fallRow;
+    /**
+     * The board's canopy (GpuCanopy) in whole rows, one RGBA texel per hex as the hex table: between the falls' slots
+     * and the hex table, which stays the texture's last rows. None on a board without trees.
+     */
+    private float[] canopy = new float[0];
+    private int canopyRow;
+    private boolean canopyUploaded = true;
+    private int canopyHexes;
+    private float canopyFade;
     private boolean fallsUploaded = true;
     private float fallClock, fallGravity;
     private int fallColumns, fallRows;
@@ -101,6 +110,20 @@ final class GpuLavaLighting implements Disposable {
         hexWidth = width;
         hexesUploaded = false;
     }
+
+    /** The canopy's table (GpuTerrain#canopyHexes): four floats a hex in the hex table's order; empty for none. */
+    void setCanopy(float[] hexes) {
+        float[] rows = new float[(hexes.length / 4 + ROW - 1) / ROW * ROW * 4];
+        System.arraycopy(hexes, 0, rows, 0, hexes.length);
+        canopy = rows;
+        canopyHexes = hexes.length / 4;
+        canopyUploaded = false;
+        // The falls' slots lie above it.
+        fallsUploaded = false;
+    }
+
+    /** How far the canopy's tint has come in, 0 to 1 (terrain-canopy.glsl). */
+    void setCanopyFade(float fade) { canopyFade = fade; }
 
     /** The board's width in hexes, for the table's addresses (terrain-hexes.glsl). */
     int hexWidth() { return hexWidth; }
@@ -360,17 +383,21 @@ final class GpuLavaLighting implements Disposable {
      * texture binder never assigns (its units start at 1), so the draw's tracked sampler bindings stay intact.
      */
     Texture texture() {
-        if (texture != null && uploaded == revision && hexesUploaded && fallsUploaded) { return texture; }
+        if (texture != null && uploaded == revision && hexesUploaded && fallsUploaded && canopyUploaded) {
+            return texture;
+        }
         int height = list.length / (ROW * 4), hexHeight = hexes.length / (ROW * 4), fallHeight = falls.length / (ROW * 4);
+        int canopyHeight = canopy.length / (ROW * 4);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-        if (texture == null || texture.getHeight() < height + fallHeight + hexHeight) {
+        if (texture == null || texture.getHeight() < height + fallHeight + canopyHeight + hexHeight) {
             if (texture != null) { texture.dispose(); }
             int capacity = 1;
-            while (capacity < height + fallHeight + hexHeight) { capacity <<= 1; }
+            while (capacity < height + fallHeight + canopyHeight + hexHeight) { capacity <<= 1; }
             texture = new Texture(new GLOnlyTextureData(ROW, capacity, 0, GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT));
             uploaded = -1;
             hexesUploaded = false;
             fallsUploaded = false;
+            canopyUploaded = false;
         }
         texture.bind();
         if (uploaded != revision) {
@@ -382,8 +409,13 @@ final class GpuLavaLighting implements Disposable {
             upload(hexes, hexRow, hexHeight);
             hexesUploaded = true;
         }
+        if (!canopyUploaded) {
+            canopyRow = texture.getHeight() - hexHeight - canopyHeight;
+            if (canopyHeight > 0) { upload(canopy, canopyRow, canopyHeight); }
+            canopyUploaded = true;
+        }
         if (!fallsUploaded) {
-            fallRow = texture.getHeight() - hexHeight - fallHeight;
+            fallRow = texture.getHeight() - hexHeight - canopyHeight - fallHeight;
             if (fallHeight > 0) { upload(falls, fallRow, fallHeight); }
             fallsUploaded = true;
         }
@@ -432,6 +464,19 @@ final class GpuLavaLighting implements Disposable {
                 var field = GpuEnvironmentLighting.lavaLighting(attributes);
                 if (field == null) { field = tables; }
                 if (field != null) { target.set(id, field.hexRow(), field.hexWidth()); }
+            }
+        });
+        // The canopy's table and fade, after u_lavaLights' setter too (terrain-canopy.glsl).
+        shader.register("u_canopy", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field == null) { return; }
+                field.texture();
+                // The table holds whole rows: the board's height is its hexes over its width.
+                target.set(id, field.canopyRow, field.hexWidth, field.canopyHexes / Math.max(1, field.hexWidth),
+                      field.canopyHexes == 0 ? 0 : field.canopyFade);
             }
         });
         // The falls' slots and clock, after u_lavaLights' setter too (tree-instances.glsl): off without falls.

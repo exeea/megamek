@@ -56,6 +56,7 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.planetaryConditions.Weather;
 import megamek.common.planetaryConditions.Wind;
 import megamek.common.planetaryConditions.WindDirection;
 import megamek.common.units.Entity;
@@ -75,6 +76,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.MockedStatic;
 
 class PlanetaryConditionsTest {
+
+    @Test
+    void matchesTheCurrentWeatherAgainstEveryCandidate() {
+        assertTrue(Weather.HEAVY_RAIN.isAnyRain());
+        assertTrue(Weather.SNOW_FLURRIES.isAnySnowfall());
+        assertFalse(Weather.CLEAR.isAnyOf(Weather.SLEET, Weather.SLEET));
+    }
 
     @BeforeAll
     static void beforeAll() {

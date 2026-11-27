@@ -74,21 +74,19 @@ class UiTreeSmokeTest {
                     sidebar("gameBoard.fov", "gameBoard.fovInside", "gameBoard.fovOutside")),
               sidebar("unitDisplay",
                     sidebar("unitDisplay.tooltips", "unitDisplay.tooltip", "unitDisplay.armor"),
-                    sidebar("unitDisplay.interface", "unitDisplay.heat", "unitDisplay.order", "unitDisplay.weapons",
+                    sidebar("unitDisplay.interface", "unitDisplay.heat", "unitDisplay.weapons",
                           "unitDisplay.sensors", "unitDisplay.fonts")),
               sidebar("miniMap", "miniMap.theme", "miniMap.display"),
               sidebar("report", "report.appearance", "report.content", "report.filter"),
-              sidebar("overlays", "overlays.overview", "overlays.planetary", "overlays.toasts", "overlays.trace"),
+              sidebar("overlays", "overlays.planetary", "overlays.toasts", "overlays.trace"),
               sidebar("buttonOrder", "buttonOrder.movement", "buttonOrder.deployment", "buttonOrder.firing",
                     "buttonOrder.physical", "buttonOrder.targeting"),
-              sidebar("autoDisplay", "autoDisplay.unit", "autoDisplay.minimap", "autoDisplay.report",
-                    "autoDisplay.players", "autoDisplay.force", "autoDisplay.bots", "autoDisplay.tabs"),
               sidebar("aiDisplay", "aiDisplay.settings"),
-              sidebar("advanced", "advanced.chat", "advanced.timing", "advanced.safety"));
+              sidebar("advanced", "advanced.timing", "advanced.safety"));
     }
 
     private static final List<String> TOP = List.of("main", "audio", "keyBinds", "gameBoard", "unitDisplay", "miniMap",
-          "report", "overlays", "buttonOrder", "autoDisplay", "aiDisplay", "advanced");
+          "report", "overlays", "buttonOrder", "aiDisplay", "advanced");
 
     @Test
     void theClientSettingsSidebarFiltersToMatchesWithTheirParentsAndRestoresItsExpansion() {
@@ -100,7 +98,7 @@ class UiTreeSmokeTest {
             List<String> all = new ArrayList<>(List.of("main", "main.application", "main.colours", "main.behavior",
                   "audio", "keyBinds", "gameBoard", "gameBoard.general", "gameBoard.appearance", "gameBoard.fov",
                   "unitDisplay", "unitDisplay.tooltips", "unitDisplay.interface", "miniMap", "report", "overlays",
-                  "buttonOrder", "autoDisplay", "aiDisplay", "advanced"));
+                  "buttonOrder", "aiDisplay", "advanced"));
             assertEquals(all, tree.shown(), "Every node starts expanded, in the sidebar's order");
             assertEquals("Field of View", ((UiButton) tree.findActor("gameBoard.fov")).getText().toString());
 
@@ -115,11 +113,11 @@ class UiTreeSmokeTest {
             assertFalse(tree.expanded("main"));
             TextField search = panel.findActor("tree-search");
             search.setText("view");
-            // "Field of View" by its label (and its sections' summaries), Overlays by its section "Unit Overview".
+            // "Field of View" by its label (and its sections' summaries).
             // Nothing of "Unit Display" says "view" (the Swing dialog's own search does not list it either).
-            assertEquals(List.of("gameBoard", "gameBoard.fov", "overlays"), tree.shown());
+            assertEquals(List.of("gameBoard", "gameBoard.fov"), tree.shown());
             search.setText("display");
-            assertTrue(tree.shown().containsAll(List.of("unitDisplay", "unitDisplay.interface", "autoDisplay")),
+            assertTrue(tree.shown().containsAll(List.of("unitDisplay", "unitDisplay.interface")),
                   "Unit Display under its parent: " + tree.shown());
             assertFalse(tree.shown().contains("main.application"), tree.shown().toString());
 

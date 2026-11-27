@@ -146,6 +146,9 @@ class GpuSpecularAntialiasingSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
+        // The family programs a switch rebuilds are checked on every GPU, whatever its default (GpuGlsl#integrated).
+        String families = System.getProperty(GpuFamilyPrograms.PROPERTY);
+        System.setProperty(GpuFamilyPrograms.PROPERTY, "true");
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
@@ -181,6 +184,8 @@ class GpuSpecularAntialiasingSmokeTest {
                             Gdx.gl.glFinish();
                             long drawn = System.nanoTime();
                             float[] image = luminance(width, height);
+                            // The loading stage does not wait for the helper's links: the count is the settled one.
+                            draw(terrain, frame, camera, scene);
                             report.append(String.format(Locale.ROOT, "%s,%.0f,%.1f,%.1f,%d%n", enabled ? "on" : "off again",
                                   (rebuilt - start) / 1e6, longest / 1e6, (drawn - rebuilt) / 1e6,
                                   terrain.familyPrograms().ready().size()));
@@ -205,7 +210,9 @@ class GpuSpecularAntialiasingSmokeTest {
                 }
             }, config);
         } finally {
-            // The switches are the terrain's own: nothing to restore.
+            // The switches are the terrain's own; the family programs' property is put back.
+            if (families == null) { System.clearProperty(GpuFamilyPrograms.PROPERTY); }
+            else { System.setProperty(GpuFamilyPrograms.PROPERTY, families); }
         }
         System.out.print("Specular anti-aliasing switches on the calibration board\n" + report);
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing switch\n" + report, failure.get()); }
@@ -328,8 +335,9 @@ class GpuSpecularAntialiasingSmokeTest {
     }
 
     /**
-     * Draws until no family program is waiting (GpuFamilyPrograms): timings and captures see the settled programs.
-     * Like the view, it refines before each frame; family programs build there while the terrain loads.
+     * Draws until no family program is waiting (GpuFamilyPrograms), nor linking in the link helper, whose links the
+     * loading stage does not wait for: timings, captures and counts see the settled programs. Like the view, it
+     * refines before each frame; family programs build and are adopted there.
      */
     private static void draw(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) {
         long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(20);
@@ -337,7 +345,7 @@ class GpuSpecularAntialiasingSmokeTest {
             terrain.refine(camera.camera);
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
-        } while (terrain.familyPrograms().pending() > 0);
+        } while (terrain.familiesPending() || terrain.familyPrograms().adopting());
     }
 
     /** Waits until the terrain has installed its detail for the camera and compiled its material programs. */

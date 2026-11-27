@@ -499,7 +499,7 @@ class GpuHelpMenuPlayersSmokeTest {
 
     private static GpuHud.Inputs inputs(GpuHudTestStage hud, GpuBoardSource.Frame frame,
           GpuBoardSource.UiPreferences preferences, boolean tactical) {
-        GpuHud.HudView view = new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        GpuHud.HudView view = new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
         return new GpuHud.Inputs(frame, view, null, preferences, GpuHud.Metrics.of(hud.width(), hud.height()),
               List.of());
     }

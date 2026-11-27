@@ -180,14 +180,18 @@ class GpuEditorOrientationSmokeTest {
                                     cliffStrokes(63);
                                     super.render(); // Clear the extra HUD draw used to settle scroll coordinates.
                                     GpuBoardTestUi.capture(new File(output, "editor-hex-edges-top.png"));
+                                    // Undo and Redo clear the selection, and Edit with it:
+                                    // the hex's ground is selected again.
                                     command(Action.UNDO, "", "");
+                                    command(Action.COMPONENT, "", "ground");
                                 }
                                 case 7 -> {
                                     assertEquals(31, edges("cliff_top").selected());
-                                    cliffHover(edges("cliff_top"), 2); // Undo clears selection, but leaves the inspector open.
+                                    cliffHover(edges("cliff_top"), 2);
                                     command(Action.COMPONENT, "", "ground");
                                     cliffStrokes(31);
                                     command(Action.REDO, "", "");
+                                    command(Action.COMPONENT, "", "ground");
                                 }
                                 case 8 -> {
                                     var sides = edges("cliff_top"); assertEquals(63, sides.selected());

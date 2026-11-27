@@ -26,8 +26,6 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
@@ -43,8 +41,6 @@ class ClientGUIUnitLoadingTest {
         AtomicReference<ClientGUI> opened = new AtomicReference<>();
         FutureTask<Void> startup = new FutureTask<>(() -> {
             try (var sound = mockConstruction(SoundManager.class);
-                  var inspector = mockConstruction(UnitDisplayPanel.class);
-                  var inspectorDialog = mockConstruction(UnitDisplayDialog.class);
                   var cacheAccess = mockStatic(MekSummaryCache.class);
                   var application = mockStatic(MegaMekGUI.class);
                   // Keep real Swing presentation, but prevent a GL thread from outliving gui.die() and opening a
@@ -75,9 +71,6 @@ class ClientGUIUnitLoadingTest {
                     gui.switchPanel(GamePhase.LOUNGE);
                     lobbyWindow.verify(() -> GpuLobbyWindow.open(gui), atLeastOnce());
                     boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), never());
-                    gui.setUnitDisplayVisible(true);
-                    assertTrue(inspector.constructed().isEmpty());
-                    assertTrue(inspectorDialog.constructed().isEmpty());
                     assertTrue(Arrays.stream(gui.getFrame().getOwnedWindows())
                           .noneMatch(window -> window instanceof RandomArmyDialog));
                     verify(cache, never()).getAllMeks();

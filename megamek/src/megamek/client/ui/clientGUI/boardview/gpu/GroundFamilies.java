@@ -5,6 +5,8 @@ import java.nio.FloatBuffer;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 
 import org.lwjgl.BufferUtils;
@@ -19,8 +21,13 @@ import org.lwjgl.opengl.GL31C;
  * {@code -Dmegamek.gpu.compactGround} (off by default), not a Display switch until it ships with its place in the presets.
  */
 final class GroundFamilies {
-    /** {@code -Dmegamek.gpu.compactGround}: sculpt programs compile the compact material in ({@code compactGroundFlag}). */
-    static final boolean ON = Boolean.getBoolean("megamek.gpu.compactGround");
+    /**
+     * {@code -Dmegamek.gpu.compactGround}: sculpt programs hold the compact material (ground-material.glsl) instead of
+     * the old path's (old-ground-material.glsl), never both (GpuShaderSource#terrainLighting).
+     * The height field ({@link TerrainField#ON}) implies it: a field hex's cover weights, its blends and scree, exist
+     * only with the compact ground (ChunkField), so the field without it would draw each hex as one family to its edge.
+     */
+    static final boolean ON = Boolean.getBoolean("megamek.gpu.compactGround") || TerrainField.ON;
     static final String BLOCK = "BoardMaterials";
     /** The block's binding: 1 and 2 are the material cache's page tables (GpuMaterialCache). */
     static final int BINDING = 3;
@@ -33,6 +40,8 @@ final class GroundFamilies {
     /** One family's rules, in ground-material.glsl's GroundFamily order from {@code cover} on. */
     private static final class Rules {
         final float[] values = new float[RULES * 4];
+
+        float at(int vec4, int component) { return values[vec4 * 4 + component]; }
 
         private Rules put(int vec4, float x, float y, float z, float w) {
             values[vec4 * 4] = x; values[vec4 * 4 + 1] = y; values[vec4 * 4 + 2] = z; values[vec4 * 4 + 3] = w;
@@ -70,12 +79,27 @@ final class GroundFamilies {
         Rules ripples(float amount) { values[8 * 4 + 3] = amount; return this; }
         /** Crust colonies: lowland skin, crust above level zero and along raised rims. */
         Rules colonies() { values[12 * 4 + 2] = 1; return this; }
+        /**
+         * Walls that read four offset cells (ground-material.glsl groundWallOffsets) instead of offsets moving up them.
+         */
+        Rules cellWalls() { values[12 * 4 + 3] = 1; return this; }
         /** The root mat a two-level lip's sod leaves below it. */
         Rules rootMat(float r, float g, float b) { return put(13, r, g, b, 0); }
         /** A rim's abraded rock below its crest and at it. */
         Rules abrasion(float lowR, float lowG, float lowB, float highR, float highG, float highB) {
-            put(14, lowR, lowG, lowB, 0);
-            return put(15, highR, highG, highB, 0);
+            values[14 * 4] = lowR; values[14 * 4 + 1] = lowG; values[14 * 4 + 2] = lowB;
+            values[15 * 4] = highR; values[15 * 4 + 1] = highG; values[15 * 4 + 2] = highB;
+            return this;
+        }
+        /**
+         * The tops' second read (ground-material.glsl groundRead): the roles that take translated reads, two offsets
+         * of one repeat, instead of an enlarged second repeat (bits: cover 1, mantle 2, deposit 4, rock 8), and whether
+         * the mantle's varies with the broad field instead of the fine one: today's cliff material's choices.
+         */
+        Rules reads(int translated, boolean broadMantle) {
+            values[14 * 4 + 3] = translated;
+            values[15 * 4 + 3] = broadMantle ? 1 : 0;
+            return this;
         }
     }
 
@@ -109,22 +133,120 @@ final class GroundFamilies {
         rules.put(BoardScene.Surface.DIRT, new Rules().cover(.28f, .9f, .16f, 0).trim(0, .9f, false, 0).mantle(1, 1, 0, 0)
               .deposit(.6f, 1, .18f, 0).edges(false, false, .9f, true).shore(1, false, 1, 0));
         rules.put(BoardScene.Surface.SAND, new Rules().cover(.38f, .94f, .45f, .15f).trim(.92f, 0, false, 0)
-              .deposit(.55f, 1, 0, 0).edges(false, false, .9f, true).shore(1, false, 1, 0).ripples(.04f));
+              .deposit(.55f, 1, 0, 0).edges(false, false, .9f, true).shore(1, false, 1, 0).ripples(.04f)
+              .reads(1, false));
         rules.put(BoardScene.Surface.SNOW, new Rules().cover(.36f, .92f, .5f, .18f).trim(.85f, .88f, true, 0)
               .deposit(.35f, 1, 0, 0).edges(false, true, .9f, true).shore(1, false, 1, 0));
         rules.put(BoardScene.Surface.ROCK, plain().deposit(1, 1, .12f, 0));
         rules.put(BoardScene.Surface.LUNAR, plain().deposit(1, 1, .12f, 0).shore(1, false, 0, 0));
         rules.put(BoardScene.Surface.CONCRETE, plain());
         rules.put(BoardScene.Surface.FUNGUS, new Rules().cover(.76f, .97f, 0, 0).trim(0, .9f, false, 0).mantle(1, 1, 0, 0)
-              .deposit(.3f, 1, 0, 0).edges(false, false, .9f, false).shore(1, false, 0, 0).colonies());
+              .deposit(.3f, 1, 0, 0).edges(false, false, .9f, false).shore(1, false, 0, 0).colonies().cellWalls()
+              .reads(15, false));
         rules.put(BoardScene.Surface.DESERT, arid().shore(1, true, 0, 1)
               .tone(0, 1.03f, .91f, .85f, .45f, .6f, .4f, 0, .4f, .75f, 0, 0)
-              .abrasion(.98f, .91f, .85f, 1.14f, 1.15f, 1.13f));
+              .abrasion(.98f, .91f, .85f, 1.14f, 1.15f, 1.13f).reads(2, true));
         rules.put(BoardScene.Surface.MARS, arid().shore(1, true, 0, 0)
               .tone(0, .92f, .82f, .77f, .3f, 0, .6f, .4f, .55f, .8f, 0, 0));
-        rules.put(BoardScene.Surface.VOLCANO, arid().shore(1, false, 1, 0));
+        rules.put(BoardScene.Surface.VOLCANO, arid().shore(1, false, 1, 0).reads(2, true));
         for (BoardScene.Surface family : BoardScene.Surface.values()) { rules.putIfAbsent(family, plain()); }
         return rules;
+    }
+
+    /**
+     * The rule kinds: rules only some families use. Each is compiled into a sculpt program by its define
+     * (ground-material.glsl) where a row the program's draws read uses it and, where it has a quality switch, while that
+     * is on; a kind without a switch costs too little for a choice. A row's numbers still decide within a program. A
+     * family program (GpuFamilyPrograms) reads its family's row; a generic program reads any, a tile's new family in
+     * play too, so it has every kind and nothing links then.
+     */
+    enum Rule {
+        SECOND("groundSecondRule", BoardSwitch.GROUND_SECOND_LAYER, (rules, floor) -> true),
+        TONE("groundToneRule", BoardSwitch.GROUND_TONE_PATCHES, (rules, floor) -> true),
+        MANTLE("groundMantleRule", BoardSwitch.GROUND_SOIL_MANTLE,
+              (rules, floor) -> rules.at(2, 0) > 0 || rules.at(2, 2) > 0 || rules.at(2, 3) > 0),
+        WEAR("groundWearRule", BoardSwitch.GROUND_WEAR_THROUGH, (rules, floor) -> rules.at(3, 3) > 0),
+        TURF("groundTurfRule", BoardSwitch.GROUND_TURF_LIP, (rules, floor) -> rules.at(4, 0) > 0),
+        WEATHERING("groundWeatheringRule", BoardSwitch.GROUND_WALL_WEATHERING, (rules, floor) -> rules.at(5, 2) > 0),
+        TRIMS("groundTrimsRule", null, (rules, floor) -> rules.at(1, 0) > 0 || rules.at(1, 1) > 0 || rules.at(1, 3) > 0),
+        CORNICE("groundCorniceRule", null, (rules, floor) -> rules.at(4, 1) > 0),
+        COLONIES("groundColoniesRule", null, (rules, floor) -> rules.at(12, 2) > 0),
+        FLOOR("groundFloorRule", null, (rules, floor) -> floor != null),
+        BANKS("groundBanksRule", null, (rules, floor) -> rules.at(4, 3) > 0),
+        DUST("groundDustRule", null, (rules, floor) -> rules.at(3, 2) > 0),
+        ABRASION("groundAbrasionRule", null, (rules, floor) -> rules.at(5, 3) > 0),
+        POCKETS("groundPocketsRule", BoardSwitch.GROUND_POCKETS, (rules, floor) -> true),
+        TWO_SCALES("groundTwoScaleRule", BoardSwitch.GROUND_TWO_SCALE_PATCHES, (rules, floor) -> true),
+        WALL_READS("groundWallReadsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> true),
+        /** Walls read in four offset cells (Rules#cellWalls), with Varied cliff faces: its own kind, so the branch
+         *  stays out of the programs of families, and of boards ({@link #withoutWallCells}), that have no such wall. */
+        WALL_CELLS("groundWallCellsRule", BoardSwitch.GROUND_WALL_READS, (rules, floor) -> rules.at(12, 3) > 0),
+        /** A family whose own materials declare a finish (emission, metallic, scattering): set by the materials, not
+         *  the row ({@link #kinds(int, String[], int)}). */
+        FINISH("groundFinishRule", null, (rules, floor) -> false);
+
+        final String define;
+        /** The switch that turns the kind off, or null. */
+        final BoardSwitch quality;
+        /** Whether a family's row, with its floor's name or null, uses the kind. */
+        private final BiPredicate<Rules, String> used;
+
+        Rule(String define, BoardSwitch quality, BiPredicate<Rules, String> used) {
+            this.define = define;
+            this.quality = quality;
+            this.used = used;
+        }
+
+        /** Whether a quality switch is a kind's: in development, so off the Display page while the compact ground is off. */
+        static boolean has(BoardSwitch quality) {
+            for (Rule rule : values()) {
+                if (rule.quality == quality) { return true; }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * The rule kinds these families' rows use, as bits by {@link Rule} ordinal. {@code families}: bits by
+     * {@link BoardScene.Surface} ordinal; {@code floors}: each family's floor or null.
+     */
+    static int kinds(int families, String[] floors) {
+        int kinds = 0;
+        for (BoardScene.Surface family : BoardScene.Surface.values()) {
+            if ((families & 1 << family.ordinal()) == 0) { continue; }
+            for (Rule rule : Rule.values()) {
+                if (rule.used.test(RULES_OF.get(family), floors[family.ordinal()])) { kinds |= 1 << rule.ordinal(); }
+            }
+        }
+        return kinds;
+    }
+
+    /**
+     * As {@link #kinds(int, String[])}, with {@link Rule#FINISH} where one of the families is among {@code finishing}
+     * (bits by ordinal): those whose own materials declare a finish (GpuTerrain#finishFamilies).
+     */
+    static int kinds(int families, String[] floors, int finishing) {
+        return kinds(families, floors) | ((families & finishing) != 0 ? 1 << Rule.FINISH.ordinal() : 0);
+    }
+
+    /** Whether the family's walls read in four offset cells (its row's cellWalls). */
+    static boolean cellWalls(BoardScene.Surface family) { return RULES_OF.get(family).at(12, 3) > 0; }
+
+    /**
+     * {@code kinds} for a generic program of a board without a family whose walls read in cells
+     * (GpuEnvironmentLighting.cellWalls): without {@link Rule#WALL_CELLS}, a branch none of its pixels would take.
+     */
+    static int withoutWallCells(int kinds) { return kinds & ~(1 << Rule.WALL_CELLS.ordinal()); }
+
+    /** The define lines of a sculpt program's prefix for {@code kinds}, without the kinds whose switch is off. */
+    static String defines(int kinds, Predicate<BoardSwitch> on) {
+        StringBuilder defines = new StringBuilder();
+        for (Rule rule : Rule.values()) {
+            if ((kinds & 1 << rule.ordinal()) != 0 && (rule.quality == null || on.test(rule.quality))) {
+                defines.append("#define ").append(rule.define).append('\n');
+            }
+        }
+        return defines.toString();
     }
 
     private int buffer;

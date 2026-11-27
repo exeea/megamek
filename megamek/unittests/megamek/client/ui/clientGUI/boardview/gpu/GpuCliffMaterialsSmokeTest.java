@@ -118,8 +118,10 @@ class GpuCliffMaterialsSmokeTest {
                     // This controlled normal-map probe needs its declared ambient fill in the PBR environment too.
                     // A black sky/horizon would leave self-shadowed folds lit only by weak ground bounce.
                     Color ambient = new Color(.23f, .25f, .28f, 1);
-                    terrain.setAtmosphere(new BoardAtmosphere.Lighting(light, new Color(.85f, .82f, .76f, 1),
-                          ambient, Color.BLACK, ambient, ambient, Color.WHITE, 1, 1, true));
+                    BoardAtmosphere.Lighting lighting = new BoardAtmosphere.Lighting(light,
+                          new Color(.85f, .82f, .76f, 1), ambient, Color.BLACK, ambient, ambient, Color.WHITE,
+                          1, 1, true);
+                    terrain.setAtmosphere(lighting);
                     terrain.renderShadows(camera, List.of());
                     terrain.setNormalMaps(false);
                     int[] flat = samples(surface, terrain, camera, a, b);
@@ -139,10 +141,15 @@ class GpuCliffMaterialsSmokeTest {
                         // Terrain Parallax moves the sculpted rock's maps, whether or not the normal maps shade them.
                         for (boolean normals : new boolean[] { true, false }) {
                             terrain.setNormalMaps(normals);
-                            int[] moved = samples(surface, terrain, camera, a, b);
-                            terrain.setTerrainParallax(false);
-                            int[] still = samples(surface, terrain, camera, a, b);
-                            terrain.setTerrainParallax(true);
+                            int[] moved = samples(surface, terrain, camera, a, b), still = moved;
+                            // A compiled switch: it reaches the programs with the light, and the terrain prepares them.
+                            for (boolean parallax : new boolean[] { false, true }) {
+                                terrain.setSwitches(terrain.switches().with(BoardSwitch.TERRAIN_PARALLAX, parallax));
+                                terrain.setAtmosphere(lighting);
+                                terrain.update(scene);
+                                if (parallax) { break; }
+                                still = samples(surface, terrain, camera, a, b);
+                            }
                             double parallax = difference(moved, still);
                             assertTrue(parallax > .5, "Terrain Parallax with normal maps " + normals + ": " + parallax);
                         }
@@ -307,9 +314,18 @@ class GpuCliffMaterialsSmokeTest {
         var assets = new GpuAssets();
         var quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
+        // The reads every ground program holds, then the compact ground's wall reads (groundWallRead and its spread).
         String materials = GpuShaderSource.read("terrain-materials.glsl");
         int start = materials.indexOf("vec4 materialTexel(");
-        String sampling = materials.substring(start, materials.indexOf("#ifdef volcanicFlag", start));
+        String sampling = materials.substring(start, materials.indexOf("// Direct sunlight on flattened relief", start));
+        String ground = GpuShaderSource.read("ground-material.glsl");
+        start = ground.indexOf("float groundSpread(");
+        sampling += ground.substring(start, ground.indexOf('\n', start) + 1);
+        start = ground.indexOf("// A side projection's reads on a wall");
+        sampling += ground.substring(start, ground.indexOf("// One role's colour/height", start));
+        // The projection the reads take (enlargedShare reads it): its type, before them.
+        start = materials.indexOf("struct MaterialProjection {");
+        sampling = materials.substring(start, materials.indexOf("};", start) + 2) + "\n" + sampling;
         // The translated and fungal reads' heights (the terrain's parallax) sample through terrain-projection.glsl's.
         String projection = GpuShaderSource.read("terrain-projection.glsl");
         sampling = projection.substring(projection.indexOf("float heightTexel("), projection.indexOf("// planar's height"))
@@ -320,15 +336,22 @@ class GpuCliffMaterialsSmokeTest {
               """, """
               out vec4 fragColor;
               uniform sampler2DArray u_terrainLayers;
+              uniform sampler2DArray u_terrainData;
+              #define GROUND_COLOUR u_terrainLayers
+              #define GROUND_DATA u_terrainData
+              #define groundWallReadsRule
+              #define groundWallCellsRule
               uniform float u_layer;
               uniform int u_mode;
               """ + sampling + """
               void main() {
                   vec2 uv = gl_FragCoord.xy / 64.0;
                   mat2 gradient = mat2(dFdx(uv), dFdy(uv));
-                  vec4 color = u_mode == 0 ? translatedTexel(u_layer, uv, gradient, .37)
-                        : u_mode == 2 ? fungusTexel(u_layer, uv, gradient)
-                        : cliffTexel(u_layer, uv, gradient, .37);
+                  // Mode 0: one repeat as it is (the source's period); 1: a wall's reads; 2: a wall's in cells
+                  // (fungus).
+                  vec4 color = textureGrad(GROUND_COLOUR, vec3(uv, u_layer), gradient[0], gradient[1]), data;
+                  float spread;
+                  if (u_mode > 0) groundWallRead(uv, gradient, u_layer, .37, u_mode == 2, false, color, data, spread);
                   fragColor = vec4(color.rgb, 1.0);
               }
               """);
@@ -345,7 +368,7 @@ class GpuCliffMaterialsSmokeTest {
             shader.setUniformi("u_terrainLayers", 0);
             for (int layer = 0; layer < MATERIALS.size(); layer++) {
                 String name = MATERIALS.get(layer);
-                shader.setUniformf("u_layer", 2f * layer);
+                shader.setUniformf("u_layer", layer);
                 double[] correlation = new double[2];
                 for (int pass = 0; pass < 2; pass++) {
                     shader.setUniformi("u_mode", pass == 0 ? 0 : name.startsWith("fungus") ? 2 : 1);

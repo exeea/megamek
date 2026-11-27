@@ -66,11 +66,8 @@ final class LobbyMapThumbnail {
     static BufferedImage bake(Board board, List<Player> players, @Nullable Player local, int longSide) {
         int columns = board.getWidth();
         int rows = board.getHeight();
-        double boardWidth = columns * .75 + .25;
-        double boardHeight = (rows + .5) * HEX_HEIGHT;
-        double unit = longSide / Math.max(boardWidth, boardHeight);
-        BufferedImage image = new BufferedImage(Math.max(1, (int) Math.round(boardWidth * unit)),
-              Math.max(1, (int) Math.round(boardHeight * unit)), BufferedImage.TYPE_INT_ARGB);
+        double unit = unit(columns, rows, longSide);
+        BufferedImage image = image(columns, rows, unit);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
@@ -111,6 +108,17 @@ final class LobbyMapThumbnail {
         return image;
     }
 
+    /** A hex's width in pixels when a board {@code columns} by {@code rows} is {@code longSide} on its long side. */
+    static double unit(int columns, int rows, int longSide) {
+        return longSide / Math.max(columns * .75 + .25, (rows + .5) * HEX_HEIGHT);
+    }
+
+    /** A transparent image just large enough for a board of {@code columns} by {@code rows} at {@code unit}. */
+    static BufferedImage image(int columns, int rows, double unit) {
+        return new BufferedImage(Math.max(1, (int) Math.round((columns * .75 + .25) * unit)),
+              Math.max(1, (int) Math.round((rows + .5) * HEX_HEIGHT * unit)), BufferedImage.TYPE_INT_ARGB);
+    }
+
     /** The common terrain layer of lobby and briefing previews, with the in-game minimap's captured colours. */
     static void paintTerrain(Graphics2D g, Board board, double unit) {
         for (int x = 0; x < board.getWidth(); x++) {
@@ -130,11 +138,8 @@ final class LobbyMapThumbnail {
     static BufferedImage bakeZone(boolean[][] zone, ZoneStyle style, int longSide) {
         int columns = zone.length;
         int rows = columns == 0 ? 0 : zone[0].length;
-        double boardWidth = columns * .75 + .25;
-        double boardHeight = (rows + .5) * HEX_HEIGHT;
-        double unit = longSide / Math.max(boardWidth, boardHeight);
-        BufferedImage image = new BufferedImage(Math.max(1, (int) Math.round(boardWidth * unit)),
-              Math.max(1, (int) Math.round(boardHeight * unit)), BufferedImage.TYPE_INT_ARGB);
+        double unit = unit(columns, rows, longSide);
+        BufferedImage image = image(columns, rows, unit);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
@@ -209,12 +214,12 @@ final class LobbyMapThumbnail {
         }
     }
 
-    private static double centreX(Coords coords, double unit) {
+    static double centreX(Coords coords, double unit) {
         return (.5 + .75 * coords.getX()) * unit;
     }
 
     /** Odd columns sit half a hex lower, as in {@link Coords#yInDir}. */
-    private static double centreY(Coords coords, double unit) {
+    static double centreY(Coords coords, double unit) {
         return ((coords.getY() + .5 + ((coords.getX() & 1) == 0 ? 0 : .5)) * HEX_HEIGHT) * unit;
     }
 

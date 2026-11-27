@@ -69,8 +69,7 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+ready}: readies the player alone, without their bots, a second before the shot (or once the
  *     bots have joined without one), so the shot shows the ready state while the table waits for the bots.</li>
  *     <li>{@code lobby+start}: presses Ready as the lobby does, for the player and their bots, once the bots have
- *     joined (and after the shot), to watch the game start; it answers No to any question Ready asks, such as
- *     whether to record the battle's GIF.</li>
+ *     joined (and after the shot), to watch the game start; it answers No to any question Ready asks.</li>
  *     <li>{@code lobby+blocked}: turns on the victory condition of killing the commander, so forces without one
  *     raise a red warning that blocks Ready.</li>
  *     <li>{@code lobby+overlap}: turns on double blind with exclusive deployment, so every player left on any edge

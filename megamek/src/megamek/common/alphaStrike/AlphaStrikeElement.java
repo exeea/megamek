@@ -106,6 +106,16 @@ public class AlphaStrikeElement implements Serializable, ASCardDisplayable, ASSp
     private EntityFluff fluff = new EntityFluff();
 
     private ASUnitType asUnitType;
+    // The AS card combines Beagle and Clan active probes into PRB. IO:BF p. 197 distinguishes them.
+    private boolean clanActiveProbe;
+
+    public boolean hasClanActiveProbe() {
+        return clanActiveProbe;
+    }
+
+    public void setClanActiveProbe(boolean clanActiveProbe) {
+        this.clanActiveProbe = clanActiveProbe;
+    }
     private int size;
     private int tmm;
     private Map<String, Integer> movement = new LinkedHashMap<>();
@@ -145,6 +155,19 @@ public class AlphaStrikeElement implements Serializable, ASCardDisplayable, ASSp
      * the TW quirks are just reproduced here.
      */
     private Quirks quirks = new Quirks();
+
+    private double transportTonnage;
+
+    /** Source weight in tons for Strategic BattleForce cargo capacity. Zero means the source did not specify it. */
+    public double getTransportTonnage() {
+        return transportTonnage;
+    }
+
+    public void setTransportTonnage(double tons) {
+        if (Double.isFinite(tons) && tons > 0) {
+            transportTonnage = tons;
+        }
+    }
 
     private boolean isDeployed = false;
     private int deployRound = 0;

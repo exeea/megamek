@@ -141,24 +141,31 @@ final class GpuRoads {
         }
     }
 
-    /** Borrowed chunk-atlas region, retained per tile range so an edit can relocate unchanged road vertices. */
+    /**
+     * A coat's mask: its place in the board's mask array (GpuRoadMaskAtlas), retained per tile range so an edit can
+     * relocate unchanged road vertices. The texture it carries only names the array (GpuRoadMaskAtlas#array); the
+     * U offset holds the layer in its integer part.
+     */
     static final class Mask extends TextureAttribute {
         static final long TYPE = register("roadMask");
         static { TextureAttribute.Mask |= TYPE; }
         final MaskData data;
 
-        Mask(TextureRegion region, MaskData data) {
-            super(TYPE, region);
+        Mask(GpuRoadMaskAtlas.Place place, MaskData data) {
+            super(TYPE, place.texture());
+            offsetU = place.u();
+            offsetV = place.v();
+            scaleU = place.width();
+            scaleV = place.height();
             this.data = data;
         }
 
-        Mask withRegion(TextureRegion region) { return new Mask(region, data); }
+        Mask withPlace(GpuRoadMaskAtlas.Place place) { return new Mask(place, data); }
 
         @Override
         public Mask copy() {
-            var copy = new Mask(new TextureRegion(textureDescription.texture), data);
+            var copy = new Mask(new GpuRoadMaskAtlas.Place(textureDescription.texture, offsetU, offsetV, scaleU, scaleV), data);
             copy.textureDescription.set(textureDescription);
-            copy.offsetU = offsetU; copy.offsetV = offsetV; copy.scaleU = scaleU; copy.scaleV = scaleV;
             return copy;
         }
     }
@@ -475,7 +482,8 @@ final class GpuRoads {
         List<Float> past = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f));
         if (columns) { return ends == 0 ? road : road.extended(past, ends); }
         for (int d = 0; d < 6; d++) {
-            if ((tile.roadCuts() & 1 << d) == 0 && (tile.roadExits() & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
+            int drawn = BoardRoad.roadExits(scene, tile);
+            if ((tile.roadCuts() & 1 << d) == 0 && (drawn & 1 << d) != 0 && BoardRoadGrade.overDrop(tile, scene.neighbor(tile, d), d)) {
                 ends |= 1 << d;
                 past.set(d, BoardRelief.metres(CRUMBLE) / BoardGeometry.hexScale());
             }
@@ -748,6 +756,11 @@ final class GpuRoads {
             if (!median.isEmpty()) {
                 patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));
             }
+        }
+        // Past a crossing into the next hex's road of its kind, that hex's coats paint the road on (BoardRoad#onward).
+        if (paved && !deck && !slabs) {
+            Area onward = road.onward();
+            for (var patch : onward.isEmpty() ? List.<Patch>of() : patches) { patch.shape().subtract(onward); }
         }
         // Past a dirt track's run-on the paved road is its own, but for the faint grit its wheels carry on (#coverage).
         Area meeting = road.pavedCarriageway(0);
@@ -1028,11 +1041,17 @@ final class GpuRoads {
         return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch), density);
     }
 
-    /** Only the broad paved wear field can become coarse. Thin paint and markings retain their original coverage. */
+    /**
+     * Texels a tile unit of a coat's mask: 4 (8.9 cm), but the broad paved wear field, a smooth field, takes
+     * {@link #WEAR_DENSITY}, and 1 at the coarse and distant levels. Paint, markings and the coats' edges keep 4.
+     */
     static int maskDensity(Patch patch, TerrainLod lod) {
-        return (lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT)
-              && asphalt(patch) && patch.fade() != null && patch.fade().wheels() ? 1 : 4;
+        if (!(asphalt(patch) && patch.fade() != null && patch.fade().wheels())) { return 4; }
+        return lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT ? 1 : WEAR_DENSITY;
     }
+
+    /** The paved wear field's mask density at full and medium detail: 2, as the user saw no difference from 4 (memory step 2). */
+    private static final int WEAR_DENSITY = 2;
 
     /**
      * The mask texels this carrier can display. A neighbour's shared mask can change outside these triangles without
@@ -1290,6 +1309,11 @@ final class GpuRoads {
             vertex = Arrays.copyOf(vertex, vertex.length + 5);
             vertex[vertex.length - 1] = 1;
         }
+        if (surface.fieldDrape != null) {
+            // A slab's side on a height-field hex keeps its place: its points stand at no ground sample (FieldDrape).
+            vertex = Arrays.copyOf(vertex, vertex.length + FieldDrape.FLOATS);
+            surface.fieldDrape.parent(Float.NaN, Float.NaN, Float.NaN, vertex, vertex.length - FieldDrape.FLOATS);
+        }
         return mesh.vertex(vertex);
     }
 
@@ -1331,6 +1355,11 @@ final class GpuRoads {
                 vertex[shape + 3] = lift;
                 vertex[shape + 4] = surface.fixedTessellation(ground.position) ? 1 : 0;
             }
+        }
+        if (surface.fieldDrape != null) {
+            // On a height-field hex the coat moves with the ground it lies on (FieldDrape).
+            vertex = Arrays.copyOf(vertex, vertex.length + FieldDrape.FLOATS);
+            surface.fieldDrape.parent(p.x, p.y, z - lift, vertex, vertex.length - FieldDrape.FLOATS);
         }
         return mesh.vertex(vertex);
     }

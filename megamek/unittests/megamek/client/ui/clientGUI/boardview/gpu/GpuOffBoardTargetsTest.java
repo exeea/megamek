@@ -9,15 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.function.Function;
 
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 import megamek.common.OffBoardDirection;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EntityAction;
@@ -30,41 +26,21 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Off-board artillery targets (OffBoardTargetOverlay, plan P7) in a scripted TARGETING turn: an Atlas whose Long Tom
- * faces west, with observed enemy units off the west edge and off the east edge. The Legacy 2D board's arrows and their
- * click are pinned first; over the GPU window the dock's commands offer the same edges and send exactly what the click
- * sends, and a choice between units beyond one edge is a native question that Esc cancels.
+ * faces west, with observed enemy units off the west edge and off the east edge. The dock's commands offer the edges
+ * the Long Tom can fire across and send its artillery attack, and a choice between units beyond one edge is a native
+ * question that Esc cancels.
  */
 @ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuOffBoardTargetsTest {
-    /** The Legacy 2D board view of the tests, and the middle of its west arrow (OffBoardTargetOverlay's layout). */
-    private static final Rectangle VIEW = new Rectangle(800, 600);
-    private static final Point WEST_ARROW = new Point(35, 290);
     private static final int ARCHER = 42;
     private static final int CRAB = 44;
     private static final int QUICKDRAW = 45;
 
     /**
-     * The Legacy 2D board (characterization of the overlay): one arrow, at the west edge, as the arm-mounted Long Tom
-     * faces west but not east; a press on it queues the Long Tom's artillery attack on the unit beyond the edge, and
-     * Done sends it with the Long Tom's ammunition.
-     */
-    @Test
-    void theLegacy2DArrowQueuesTheLongTomsAttackOnTheUnitBeyondItsEdge() throws Exception {
-        try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
-            batteries(targeting);
-            List<OverlayImage> arrows = onSwing(() -> arrows(targeting));
-            assertEquals(List.of(new Point(5, 270)), arrows.stream().map(arrow -> new Point(arrow.x(), arrow.y()))
-                  .toList(), "one arrow, at the west edge's middle");
-            assertTrue(onSwing(() -> targeting.overlay.isHit(new Point(WEST_ARROW), VIEW.getSize())));
-            assertEquals(List.of(expected(targeting, ARCHER)), sent(targeting));
-        }
-    }
-
-    /**
-     * Over the GPU window, which draws no overlays: the frame's phase commands lead with the edges whose arrows show,
-     * and the west edge's command queues and sends exactly what the arrow's press sends. Once the Long Tom has fired,
-     * the display selects the next weapon and the command goes, as the arrow does.
+     * The frame's phase commands lead with the edges the selected artillery weapon can fire across, and the west
+     * edge's command queues and sends the Long Tom's attack on the unit beyond it. Once the Long Tom has fired, the
+     * display selects the next weapon and the command goes.
      */
     @Test
     void theDocksCommandOffersTheArrowsEdgeAndSendsWhatItsPressSends() throws Exception {
@@ -83,8 +59,8 @@ class GpuOffBoardTargetsTest {
     }
 
     /**
-     * Two units beyond the west edge: the command asks which one, as the Legacy 2D arrow does, and the question is
-     * native over the GPU window. Esc (its cancel) queues no attack and keeps the command; choosing the second unit
+     * Two units beyond the west edge: the command asks which one, and the question is native over the GPU window.
+     * Esc (its cancel) queues no attack and keeps the command; choosing the second unit
      * sends the attack on it. A command whose arrow has gone (another weapon selected) asks nothing.
      */
     @Test
@@ -154,16 +130,6 @@ class GpuOffBoardTargetsTest {
             targeting.battery("Crab CRB-20.mtf", CRAB, OffBoardDirection.EAST);
             return null;
         });
-    }
-
-    /** EDT: the arrows the overlay draws over the Legacy 2D board view. */
-    private static List<OverlayImage> arrows(GpuTargetingFixture targeting) {
-        var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
-        try {
-            return targeting.overlay.captureLayers(graphics, VIEW);
-        } finally {
-            graphics.dispose();
-        }
     }
 
     /** The Atlas's first Medium Laser. */

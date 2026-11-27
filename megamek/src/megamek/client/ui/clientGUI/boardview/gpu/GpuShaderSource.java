@@ -120,6 +120,7 @@ final class GpuShaderSource {
             case "SPACE_SKY" -> "space-sky.glsl";
             case "HEAT_RADIANCE" -> "heat-radiance.glsl";
             case "OCEAN_FINISH" -> "ocean-finish.glsl";
+            case "ROAD_TRACK" -> "road-track.glsl";
             case "terrain-ground-color-functions" -> "terrain-ground-color.glsl";
             case "water-uniforms" -> "water-uniforms.glsl";
             case "water-wave-functions" -> "water-wave.glsl";
@@ -196,6 +197,8 @@ final class GpuShaderSource {
         functions += read("terrain-patterns.glsl");
         functions += read("water-optics.glsl");
         functions += read("terrain-hexes.glsl");
+        // Its own define keeps it out of programs without it (canopyFlag).
+        functions += read("terrain-canopy.glsl");
         // Fields' ground takes its crops' colours.
         if (source.contains("// sculpt-material-functions")) {
             functions += GpuBiomeVegetation.cropSource();
@@ -224,7 +227,8 @@ final class GpuShaderSource {
             functions += read("terrain-concrete.glsl");
             functions += "\n#ifdef volcanicFlag\n" + magma(false) + "\n#endif\n";
             functions += read("terrain-materials.glsl");
-            functions += read("ground-material.glsl");
+            // The ground's path: one file or the other, never both.
+            functions += read(GroundFamilies.ON ? "ground-material.glsl" : "old-ground-material.glsl");
             functions += read("scar-material.glsl");
             functions += read("terrain-damage.glsl");
             functions += read("terrain-tundra-sward.glsl");

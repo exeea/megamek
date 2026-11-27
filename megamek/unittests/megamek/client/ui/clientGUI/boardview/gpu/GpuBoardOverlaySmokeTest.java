@@ -292,7 +292,7 @@ class GpuBoardOverlaySmokeTest {
                     ModelInstance markers = (ModelInstance) field.get(overlay);
                     assertNotNull(markers);
                     float plane = BoardTacticalGeometry.floatingZ(scene, destination);
-                    float ringZ = plane + (tactical ? 0 : .02f * RADIUS);
+                    float ringZ = plane + .02f * RADIUS;
                     float arrowZ = plane + .09f * RADIUS;
                     int ringVertices = 0;
                     for (var mesh : markers.model.meshes) {
@@ -1054,7 +1054,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     static GpuHud.HudView view(boolean tactical, Coords hovered, int hoveredUnit) {
-        return new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), hovered, hoveredUnit, 0);
+        return new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), hovered, hoveredUnit);
     }
 
     static GpuBoardSource.UiPreferences preferences() {

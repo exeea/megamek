@@ -40,6 +40,7 @@ import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.TipUtil;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Configuration;
@@ -51,8 +52,10 @@ import megamek.common.enums.GamePhase;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.exceptions.LocationFullException;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.interfaces.IEntityRemovalConditions;
@@ -61,6 +64,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rules.RulesManager;
 import megamek.common.units.Aero;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Crew;
 import megamek.common.units.CrewType;
 import megamek.common.units.Entity;
@@ -74,8 +78,7 @@ import org.mockito.MockedStatic;
 
 /**
  * The unit record service with real units: what it captures (the critical table and hit boxes as the record sheet
- * shows them, the unit's vitals and the Unit Display's content), and that each unit action sends what the Unit
- * Display's control sends (UnitDisplayActionsTest records those packets from the Swing panels).
+ * shows them, the unit's vitals, weapons, pilot and extras), and what each unit action sends.
  */
 @ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
@@ -636,6 +639,76 @@ class GpuUnitRecordTest {
     }
 
     @Test
+    void aBridgeLayerAndABridgeKitShowTheirStateAmongTheCarriedItems() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session session = new Session(fixture)) {
+            GpuUnitRecord.Snapshot tank = session.capture(fixture, unit("Bulldog Medium Tank.blk"),
+                  unit -> add(unit, MiscType.createHeavyBridgeLayer(), Tank.LOC_RIGHT));
+            assertEquals(List.of("Bridge Layer (Heavy) (carried bridge, CF 45)"), tank.carried());
+            GpuUnitRecord.Snapshot platoon = session.capture(fixture, unit("Foot Platoon (AFFS) (Laser 3067+).blk"),
+                  unit -> {
+                      add(unit, MiscType.createBridgeKit(), ConvInfantry.LOC_INFANTRY);
+                      ((ConvInfantry) unit).spendBridgeBuildPoints(ConvInfantry.BRIDGE_TYPE_LIGHT);
+                  });
+            assertEquals(List.of("Infantry Bridge Kit (1 Light / 0 Medium bridges left)"), platoon.carried());
+        }
+    }
+
+    @Test
+    void aBayOffersAndLoadsTheAmmunitionOfEachWeaponTypeItHolds() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session session = new Session(fixture)) {
+            session.source.record().setSheetOpen(true);
+            Entity union = unit("Union (3055).blk");
+            WeaponMounted[] added = new WeaponMounted[2];
+            AmmoMounted[] bins = new AmmoMounted[2];
+            GpuUnitRecord.Snapshot record = session.capture(fixture, union, unit -> {
+                // A bay of LRM 20s takes an LRM 15 with two bins of its own
+                WeaponMounted bay = WeaponDisplayData.listedWeapons(unit).stream().filter(weapon -> weapon
+                      .getBayWeapons().stream().anyMatch(member -> member.getName().equals("LRM 20"))).findFirst()
+                      .orElseThrow();
+                WeaponMounted launcher = (WeaponMounted) add(unit, EquipmentType.get("ISLRM15"), bay.getLocation());
+                bins[0] = (AmmoMounted) add(unit, EquipmentType.get("ISLRM15 Ammo"), bay.getLocation());
+                bins[1] = (AmmoMounted) add(unit, EquipmentType.get("ISLRM15 Ammo"), bay.getLocation());
+                bay.addWeaponToBay(launcher);
+                bay.addAmmoToBay(bins[0]);
+                bay.addAmmoToBay(bins[1]);
+                unit.loadWeapon(launcher, bins[0]);
+                added[0] = bay;
+                added[1] = launcher;
+            });
+            int id = union.getId();
+            int bayNum = union.getEquipmentNum(added[0]);
+            int launcherNum = union.getEquipmentNum(added[1]);
+            GpuUnitRecord.RecordWeapon bay = record.weapons().stream().filter(weapon -> weapon.eqNum() == bayNum)
+                  .findFirst().orElseThrow();
+            assertEquals(2, bay.bayLoads().size(), "The LRM 20s and the LRM 15");
+            assertTrue(bay.bayLoads().get(0).name().startsWith("LRM 20"), bay.bayLoads().get(0).name());
+            assertEquals(bay.ammoChoices(), bay.bayLoads().get(0).ammoChoices(),
+                  "The first type is the bay's own list");
+            // The fire orders name the same weapons: one of each type, and the one whose type loads a bin
+            WeaponMounted first = added[0].getBayWeapon(0);
+            assertEquals(List.of(first, added[1]), GpuUnitRecord.ammoWeapons(added[0]));
+            assertSame(added[1], GpuUnitRecord.ammoWeapon(union, added[0], bins[1]));
+            assertSame(first, GpuUnitRecord.ammoWeapon(union, added[0], first.getLinkedAmmo()));
+            GpuUnitRecord.BayLoad load = bay.bayLoads().get(1);
+            assertEquals(List.of(launcherNum, "LRM 15", 0),
+                  List.of(load.memberEqNum(), load.name(), load.loadedAmmo()));
+            assertEquals(List.of(union.getEquipmentNum(bins[0]), union.getEquipmentNum(bins[1])),
+                  load.ammoChoices().stream().map(GpuUnitRecord.AmmoChoice::eqNum).toList());
+
+            session.source.record().setAmmo(id, bayNum, launcherNum, load.ammoChoices().get(1));
+            session.flush();
+            verify(session.client).sendAmmoChange(id, launcherNum, union.getEquipmentNum(bins[1]), id, 0);
+            assertSame(bins[1], GpuTestSupport.onSwing(added[1]::getLinkedAmmo));
+
+            // The bin loaded already, and a weapon that is not in the bay: nothing
+            session.source.record().setAmmo(id, bayNum, launcherNum, load.ammoChoices().get(1));
+            session.source.record().setAmmo(id, bayNum, bayNum, load.ammoChoices().get(0));
+            session.flush();
+            verify(session.client, times(1)).sendAmmoChange(anyInt(), anyInt(), anyInt(), anyInt(), anyInt());
+        }
+    }
+
+    @Test
     void aerospaceUnitsHaveTheirThresholdsAndVitals() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session session = new Session(fixture)) {
             GpuUnitRecord.Snapshot fighter = session.capture(fixture, unit("Cheetah F-11.blk"),
@@ -758,6 +831,15 @@ class GpuUnitRecordTest {
 
     private static GpuUnitRecord.SystemControl system(GpuUnitRecord.Snapshot record, String id) {
         return record.systems().stream().filter(control -> control.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    /** Mounts equipment on a unit in a test's set-up. */
+    private static Mounted<?> add(Entity unit, EquipmentType type, int location) {
+        try {
+            return unit.addEquipment(type, location);
+        } catch (LocationFullException full) {
+            throw new AssertionError(full);
+        }
     }
 
     private static Entity unit(String file) throws Exception {

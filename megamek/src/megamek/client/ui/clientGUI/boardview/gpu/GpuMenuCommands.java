@@ -27,9 +27,8 @@ import org.apache.commons.text.StringEscapeUtils;
 final class GpuMenuCommands {
     private static final Set<String> MOVEMENT_COMMANDS = java.util.Arrays.stream(MoveCommand.values())
           .map(MoveCommand::getCmd).collect(java.util.stream.Collectors.toUnmodifiableSet());
-    /** The Swing menu's items the native windows leave out: the unit overview, and Swing's own GUI scale. */
-    private static final Set<String> SWING_ONLY = Set.of(ClientGUI.VIEW_UNIT_OVERVIEW, ClientGUI.VIEW_INC_GUI_SCALE,
-          ClientGUI.VIEW_DEC_GUI_SCALE);
+    /** The Swing menu's items the native windows leave out: Swing's own GUI scale. */
+    private static final Set<String> SWING_ONLY = Set.of(ClientGUI.VIEW_INC_GUI_SCALE, ClientGUI.VIEW_DEC_GUI_SCALE);
     private final BooleanSupplier closed;
     private final Runnable changed;
     GpuMenuCommands(BooleanSupplier closed, Runnable changed) {

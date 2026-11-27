@@ -100,27 +100,35 @@ class GpuRoadRailSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Depot42 verge capture", failure.get()); }
     }
 
-    /** Records whether overlapping coats were split across atlas pages, without changing the visible geometry. */
+    /**
+     * Records the overlapping coats of a hex and checks their draws keep their order, without changing the visible
+     * geometry: within a draw the coats lie in index order by lift, base coats first, and none below the draw's sort
+     * layer, which is the lift its first coat starts at: 0 for a chunk's merged draw, the coat's own lift for one drawn
+     * apart or a merged draw's continuation in another mesh (GpuTerrainLayer#prepare, #roadGroups; GpuRoads#lifted).
+     */
     @SuppressWarnings("unchecked")
     private static java.util.List<String> installedCoats(GpuTerrain terrain, Coords at) throws Exception {
         var lines = new ArrayList<String>();
         for (Object chunk : (java.util.List<?>) GpuTestSupport.field(terrain, "chunks")) {
             Object tile = ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).get(at);
             if (tile == null) { continue; }
-            var pages = new java.util.HashSet<Integer>();
             var draws = GpuTerrainDepth.snapshot((java.util.List<ModelInstance>) GpuTestSupport.field(GpuTestSupport.field(chunk, "ground"), "overlays"));
+            // Each draw's coats of this hex by their first index: their lifts must not fall as the indices rise.
+            var ordered = new java.util.IdentityHashMap<Object, java.util.TreeMap<Integer, Float>>();
+            int coats = 0;
             for (Object range : (java.util.List<?>) GpuTestSupport.field(tile, "ranges")) {
                 Material material = (Material) GpuTestSupport.field(range, "material");
                 var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
                 if (mask == null) { continue; }
-                pages.add(mask.textureDescription.texture.getTextureObjectHandle());
+                coats++;
                 int start = (int) GpuTestSupport.field(range, "offset"), end = start + (int) GpuTestSupport.field(range, "count");
                 boolean found = false;
                 for (var draw : draws) {
                     if (draw.meshPart.mesh != GpuTestSupport.field(range, "mesh") || draw.meshPart.offset > start
                           || draw.meshPart.offset + draw.meshPart.size < end) { continue; }
-                    assertEquals(GpuRoads.layer(material), GpuRoads.layer(draw.material),
-                          "Coats on separate pages retain their ordering in the actual merged draws");
+                    assertTrue(GpuRoads.layer(material) >= GpuRoads.layer(draw.material),
+                          "No coat lies below its draw's sort layer: " + GpuRoads.layer(material) + " in " + GpuRoads.layer(draw.material));
+                    ordered.computeIfAbsent(draw, ignored -> new java.util.TreeMap<>()).put(start, GpuRoads.layer(material));
                     found = true;
                 }
                 assertTrue(found, "Every affected coat belongs to an installed draw");
@@ -128,7 +136,14 @@ class GpuRoadRailSmokeTest {
                       + mask.textureDescription.texture.getTextureObjectHandle() + " range="
                       + GpuTestSupport.field(range, "offset") + "+" + GpuTestSupport.field(range, "count") + " mask=" + mask.data.pixels().hashCode());
             }
-            assertTrue(pages.size() > 1, "The historical junction still exercises overlapping coats on separate pages");
+            for (var order : ordered.values()) {
+                float previous = Float.NEGATIVE_INFINITY;
+                for (float lift : order.values()) {
+                    assertTrue(lift >= previous, "A draw's coats lie in index order by lift: " + order);
+                    previous = lift;
+                }
+            }
+            assertTrue(coats > 1, "The historical junction still exercises overlapping coats");
         }
         return lines;
     }

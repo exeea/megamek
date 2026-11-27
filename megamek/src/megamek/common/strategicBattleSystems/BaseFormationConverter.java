@@ -39,11 +39,13 @@ import static megamek.common.alphaStrike.BattleForceSUA.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import megamek.client.ui.clientGUI.calculationReport.CalculationReport;
 import megamek.client.ui.clientGUI.calculationReport.DummyCalculationReport;
@@ -143,14 +145,13 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
               "= " + formationSize);
         formation.setSize(formationSize);
 
-        int formationMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getMovement).average().orElse(0));
-        if (formation.isAerospace()) {
-            formationMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getMovement).min().orElse(0));
-        }
+        int formationMove = formationMovement(formation, units);
         report.addLine("Movement:",
               "Average of " + units.stream().map(u -> u.getMovement() + "").collect(joining(", ")),
               "= " + formationMove);
-        formation.setMovement(formationMove);
+        int printedMove = formationMovement(formation, units.stream().mapToInt(SBFUnit::getMovement));
+        formation.setMovement(printedMove);
+        formation.setCurrentMovement(formationMove);
         setMovementMode();
 
         int trspMove = (int) Math.round(units.stream().mapToDouble(SBFUnit::getTrspMovement).average().orElse(0));
@@ -192,12 +193,12 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
 
     void calcFormationSpecialAbilities() {
         report.addLine("Special Abilities:", "");
-        addFormationSpasIfAny(formation, DN, XMEC, COM, HPG, MCS, UCS, MEC, MAS, LMAS,
-              MSW, MFB, SAW, SDS, TRN, FD, HELI, SDCS);
-        addFormationSpasIf2Thirds(formation, AC3, PRB, AECM, ECM, ENG, LPRB, LECM, ORO, RCN, SRCH, SHLD, TAG, WAT);
-        addFormationSpasIfAll(formation, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL, RBT, UMU);
+        addFormationSpas(formation, FORMATION_IF_ANY);
+        addFormationSpas(formation, FORMATION_IF_TWO_THIRDS);
+        addFormationSpas(formation, FORMATION_IF_ALL);
         sumFormationSpas(SBF_OMNI, CAR, CK, CT, IT, CRW, DCC, MDS, MASH, RSD, VTM, VTH,
-              VTS, AT, BOMB, DT, MT, PT, ST, SCR, PNT, IF, MHQ);
+              VTS, AT, ATxD, BOMB, DT, MT, PT, ST, STxD, SCR, PNT, IF, MHQ,
+              ARTAIS, ARTAC, ARTBA, ARTCM5, ARTCM7, ARTCM9, ARTCM12, ARTLT, ARTS, ARTT);
 
         var fuel = formation.getUnits().stream().filter(SBFUnit::isAerospace).mapToInt(SBFUnit::getFUEL).min();
         if (fuel.isPresent()) {
@@ -229,23 +230,39 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
         return (int) formation.getUnits().stream().filter(e -> e.hasSUA(spa)).count();
     }
 
-    private void addFormationSpasIfAny(SBFFormation formation, BattleForceSUA... spas) {
-        addFormationSpas(formation, 1, spas);
+    /** IO:BF p. 261, Step 5B: abilities a Formation has when one, two-thirds or all of its Units have them. */
+    private static final List<BattleForceSUA> FORMATION_IF_ANY = List.of(DN, XMEC, COM, HPG, MCS, UCS, MEC, MAS, LMAS,
+          MSW, MFB, SAW, SDS, TRN, FD, HELI, SDCS);
+    private static final List<BattleForceSUA> FORMATION_IF_TWO_THIRDS = List.of(AC3, PRB, AECM, ECM, ENG, LPRB, LECM,
+          ORO, RCN, SRCH, SHLD, TAG, WAT);
+    private static final List<BattleForceSUA> FORMATION_IF_ALL = List.of(SPC, AMP, BH, EE, FC, SEAL, MAG, PAR, RAIL,
+          RBT, UMU);
+
+    /** IO:BF p. 261, Step 5B: how many of a Formation's Units must have the ability before the Formation has it. */
+    private static int minimumCount(BattleForceSUA sua, int unitCount) {
+        if (FORMATION_IF_TWO_THIRDS.contains(sua)) {
+            return Math.max(unitCount - 1, 1);
+        } else if (FORMATION_IF_ALL.contains(sua)) {
+            return unitCount;
+        } else if (FORMATION_IF_ANY.contains(sua)) {
+            return 1;
+        }
+        throw new IllegalArgumentException(sua + " is not converted from a Unit count");
     }
 
-    private void addFormationSpasIfAll(SBFFormation formation, BattleForceSUA... spas) {
-        addFormationSpas(formation, formation.getUnits().size(), spas);
+    /**
+     * IO:BF p. 261, Step 5B: whether a Formation of these Units has the ability, counting the Units that pass the test.
+     * The conversion counts Units with the ability; play also counts Design Quirks (see {@link SBFDesignQuirks}).
+     */
+    public static boolean formationHasSUA(BattleForceSUA sua, List<SBFUnit> units, Predicate<SBFUnit> unitHasIt) {
+        return units.stream().filter(unitHasIt).count() >= minimumCount(sua, units.size());
     }
 
-    private void addFormationSpasIf2Thirds(SBFFormation formation, BattleForceSUA... spas) {
-        int twoThirds = Math.max(formation.getUnits().size() - 1, 1);
-        addFormationSpas(formation, twoThirds, spas);
-    }
-
-    private void addFormationSpas(SBFFormation formation, int minimumCount, BattleForceSUA[] spas) {
+    private void addFormationSpas(SBFFormation formation, List<BattleForceSUA> spas) {
         for (BattleForceSUA spa : spas) {
             int count = spaCount(formation, spa);
-            if (count >= minimumCount) {
+            int minimumCount = minimumCount(spa, formation.getUnits().size());
+            if (formationHasSUA(spa, formation.getUnits(), unit -> unit.hasSUA(spa))) {
                 report.addLine("",
                       spa + ": " + count + " of " + formation.getUnits().size() + ", minimum " + minimumCount,
                       spa.toString());
@@ -313,15 +330,26 @@ public abstract class BaseFormationConverter<T extends SBFFormation> {
               formation.getType().toString());
     }
 
+    /** IO:BF pp. 171, 258: recalculate MP from the surviving Units using their current movement. */
+    public static int formationMovement(SBFFormation formation, List<SBFUnit> units) {
+        return formationMovement(formation, units.stream().mapToInt(SBFUnit::getCurrentMovement));
+    }
+
+    private static int formationMovement(SBFFormation formation, java.util.stream.IntStream movement) {
+        return formation.isAerospace() ? movement.min().orElse(0) : (int) Math.round(movement.average().orElse(0));
+    }
+
+    public static SBFMovementMode formationMovementMode(List<SBFUnit> units) {
+        return units.stream().map(SBFUnit::getMovementMode)
+              .min(Comparator.comparingInt(mode -> mode.rank)).orElse(SBFMovementMode.UNKNOWN);
+    }
+
     private void setMovementMode() {
-        SBFMovementMode currentMode = SBFMovementMode.UNKNOWN;
+        SBFMovementMode currentMode = formationMovementMode(formation.getUnits());
         Set<String> unitModes = new HashSet<>();
         for (SBFUnit unit : formation.getUnits()) {
-            SBFMovementMode newMode = unit.getMovementMode();
-            unitModes.add(newMode.code.isBlank() ? "(Walk)" : newMode.code);
-            if (newMode.rank < currentMode.rank) {
-                currentMode = newMode;
-            }
+            String code = unit.getMovementMode().code;
+            unitModes.add(code.isBlank() ? "(Walk)" : code);
         }
         report.addLine("Movement Mode:",
               "Most restrictive of: " + String.join(", ", unitModes), currentMode.code);

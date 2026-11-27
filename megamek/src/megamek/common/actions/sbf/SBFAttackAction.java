@@ -33,10 +33,17 @@
 
 package megamek.common.actions.sbf;
 
+import java.util.List;
+
 public interface SBFAttackAction extends SBFAction {
 
     /**
      * @return The game ID of the target of the attack
      */
     int getTargetId();
+
+    /** IDs other than the attacker disclosed by serializing this declaration, including spotters or secondary targets. */
+    default List<Integer> referencedIds() {
+        return List.of(getTargetId());
+    }
 }

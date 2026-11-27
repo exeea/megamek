@@ -12,12 +12,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 import java.awt.event.ActionEvent;
-import java.lang.reflect.Field;
 import java.util.List;
-import java.util.Map;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -112,9 +109,6 @@ class GpuUnitActionsTest {
         try (GpuFiringFixture firing = GpuFiringFixture.create()) {
             // The View menu's switch, which the sheet's field of fire button runs for any weapon but the actor's
             doCallRealMethod().when(firing.gui).actionPerformed(any());
-            Field views = AbstractClientGUI.class.getDeclaredField("boardViews");
-            views.setAccessible(true);
-            views.set(firing.gui, Map.of(0, firing.board.view));
             List<Integer> before = onSwing(() -> {
                 firing.unitDisplay.selectWeapon(GpuFiringFixture.weapon(firing.attacker, "AC/20",
                       Mek.LOC_RIGHT_TORSO));

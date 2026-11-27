@@ -43,7 +43,6 @@ class GpuMapMenuSmokeTest {
     void menuWorksInPreviewAndEditor(boolean editing) throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Requires an OpenGL window");
         AtomicInteger closes = new AtomicInteger();
-        AtomicInteger switches = new AtomicInteger();
         FutureTask<GpuMapSource> setup = new FutureTask<>(() -> {
             BoardEditorSession editor = editing ? new BoardEditorSession() : null;
             Game game = editor == null ? new Game() : editor.game();
@@ -57,9 +56,6 @@ class GpuMapMenuSmokeTest {
             return new GpuMapSource(game, null, editor, () -> {
                 assertTrue(SwingUtilities.isEventDispatchThread(), "Close must use the window's EDT handler");
                 closes.incrementAndGet();
-            }, () -> {
-                assertTrue(SwingUtilities.isEventDispatchThread(), "View switching belongs to the window's EDT handler");
-                switches.incrementAndGet();
             });
         });
         SwingUtilities.invokeAndWait(setup);
@@ -91,12 +87,6 @@ class GpuMapMenuSmokeTest {
                         Actor panel = stage.getRoot().findActor("menu-panel");
                         assertTrue(GpuBoardTestUi.shown(panel));
                         assertTrue(menu.isChecked());
-                        // The editor's Legacy 2D Preview; a preview switches to Legacy 2D in View > Renderer.
-                        assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/boardPreview2D")));
-                        if (editing) {
-                            UiButton preview2D = stage.getRoot().findActor("/boardPreview2D");
-                            assertEquals("Legacy 2D Preview", preview2D.getText().toString());
-                        }
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/viewClientSettings")));
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/helpAbout")));
                         assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/fileBoardSave")));
@@ -132,18 +122,6 @@ class GpuMapMenuSmokeTest {
                         assertTrue(java.util.Arrays.stream(java.awt.Window.getWindows()).noneMatch(java.awt.Window::isShowing),
                               "no Swing About box opened");
                         if (editing) { checkEditorEntries(view, source, output); }
-                        GpuBoardTestUi.click("utility-menu"); settle(view, source);
-                        if (editing) {
-                            GpuBoardTestUi.click("/boardPreview2D"); settle(view, source);
-                        } else {
-                            // checkViewMenu left View closed.
-                            GpuBoardTestUi.click("/view"); settle(view, source);
-                            GpuBoardTestUi.click("/view/viewRenderer"); settle(view, source);
-                            GpuBoardTestUi.click("/view/viewRenderer/viewLegacy2D"); settle(view, source);
-                        }
-                        assertEquals(1, switches.get());
-                        assertEquals(0, closes.get(), "Switching views must not run the close/discard action");
-                        assertFalse(GpuBoardTestUi.shown(panel));
                         GpuBoardTestUi.click("utility-menu"); settle(view, source);
                         Actor modal = stage.getRoot().findActor("map-menu-modal");
                         assertEquals(modal, stage.hit(1, 1, true), "Backdrop intercepts board presses");

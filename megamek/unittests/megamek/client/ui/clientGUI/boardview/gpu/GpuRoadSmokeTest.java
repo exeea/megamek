@@ -602,7 +602,15 @@ class GpuRoadSmokeTest {
             for (float distance : new float[] { 32, 55 }) {
                 Vector3 at = new Vector3(center).mulAdd(along, distance * scale);
                 Vector3 asphalt = pixelColor(pixels, camera.camera.project(new Vector3(at).mulAdd(across, 4 * scale)));
-                Vector3 grass = pixelColor(pixels, camera.camera.project(new Vector3(at).mulAdd(across, 15 * scale)));
+                // The grass beside it, the greenest of six samples: one may land on a dry patch of the grass.
+                Vector3 grass = null;
+                for (float side : new float[] { 15, -15 }) {
+                    for (float step : new float[] { -3, 0, 3 }) {
+                        Vector3 sample = pixelColor(pixels, camera.camera.project(new Vector3(at).mulAdd(along, step * scale)
+                              .mulAdd(across, side * scale)));
+                        if (grass == null || sample.y - sample.z > grass.y - grass.z) { grass = sample; }
+                    }
+                }
                 assertTrue(asphalt.y - asphalt.z < grass.y - grass.z - 6,
                       "Asphalt must remain visible on approach " + direction + " at " + distance
                       + ": asphalt=" + asphalt + ", grass=" + grass);

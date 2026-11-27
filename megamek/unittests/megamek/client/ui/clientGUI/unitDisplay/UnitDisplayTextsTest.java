@@ -1,0 +1,302 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.unitDisplay;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
+import megamek.client.ui.clientGUI.tooltip.TipUtil;
+import megamek.common.Configuration;
+import megamek.common.Player;
+import megamek.common.board.Board;
+import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.enums.ProstheticEnhancementType;
+import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.Mounted;
+import megamek.common.equipment.WeaponMounted;
+import megamek.common.game.Game;
+import megamek.common.loaders.MekFileParser;
+import megamek.common.options.OptionsConstants;
+import megamek.common.units.ConvInfantry;
+import megamek.common.units.Entity;
+import megamek.common.units.Mek;
+import megamek.common.units.Tank;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The unit texts for real units: the weapon list's rows, the weapon statistics, the ammunition list,
+ * the heat build-up and the crew's advantages.
+ */
+class UnitDisplayTextsTest {
+    private static final String UNITS = "testresources/megamek/common/units/";
+    /** Every crew's Edge triggers, which are on unless a player turns them off. */
+    private static final List<String> EDGE_TRIGGERS = List.of("(Mek) Use Edge for head hits",
+          "(Mek) Use Edge for TACs", "(Mek) Use Edge for pilot KOs", "(Mek) Use Edge for explosions.",
+          "(Mek) Use Edge for MASC/Supercharger failures.", "(Aero) Use Edge for atmospheric altitude loss.",
+          "(Aero) Use Edge for explosions.", "(Aero, ASF/CF/SC only) Use Edge for pilot KOs.",
+          "(Aero) Use Edge for crits resulting from 12-to-hit rolls.",
+          "(Aero) Use Edge for crits resulting from nuclear missile hits.",
+          "(Aero, SC/DS/JS/WS/SS) Use Edge for crits resulting in the loss of transported units.",
+          "(Aero) Use Edge for catastrophic critical hits.", "(Vehicle) Use Edge for immobilizing motive system hits.",
+          "(Vehicle) Use Edge for catastrophic critical hits.", "(Vehicle) Use Edge for turret blown off.",
+          "(Infantry) Use Edge for zip line checks.", "(Mek/Aero) Use Edge for failed ejection rolls.",
+          "(General) Use Edge for location breaches.", "Use Edge for autocannon jams (Ultra/RAC/rapid-fire).",
+          "(General) Use Edge for RISC equipment malfunctions.", "Use Edge to avoid fire damage.");
+    private static File originalDataDir;
+
+    private final Game game = new Game();
+    private final Player local = new Player(0, "Local");
+    private int nextId = 1;
+
+    /** Earlier test classes can leave the data folder on testresources; the units' files are in the staged data. */
+    @BeforeAll
+    static void useStagedData() {
+        originalDataDir = Configuration.dataDir();
+        Configuration.setDataDir(null);
+    }
+
+    @AfterAll
+    static void restoreDataDir() {
+        Configuration.setDataDir(originalDataDir);
+    }
+
+    @BeforeEach
+    void setUp() throws Exception {
+        Board board = new Board();
+        board.load(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"));
+        game.setBoard(board);
+        game.setRoundCount(1);
+        game.addPlayer(local.getId(), local);
+    }
+
+    @Test
+    void weaponRowsShowStateMarksMountMarksShotsAndModes() throws Exception {
+        game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CALLED_SHOTS).setValue(true);
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        atlas.setMixedTech(true);
+        List<WeaponMounted> weapons = atlas.getWeaponList();
+        weapons.get(0).setJammedImmediately(true);
+        weapons.get(1).setUsedThisRound(true);
+        Mounted<?> module = atlas.addEquipment(EquipmentType.get("ISRISCLaserPulseModule"), Mek.LOC_RIGHT_ARM);
+        module.setLinked(weapons.get(1));
+        weapons.get(2).setHotLoad(true);
+        weapons.get(2).setMode(1);
+        weapons.get(3).setSplit(true);
+        weapons.get(3).setSecondLocation(Mek.LOC_CENTER_TORSO);
+        weapons.get(4).setDestroyed(true);
+        weapons.get(4).setRepairable(false);
+        weapons.get(5).setFired(true);
+        Mounted<?> atm = atlas.addEquipment(EquipmentType.get("CLATM6"), Mek.LOC_LEFT_ARM);
+        atlas.addEquipment(EquipmentType.get("CLATM6 ER Ammo"), Mek.LOC_LEFT_ARM);
+        Mounted<?> rocket = atlas.addEquipment(EquipmentType.get("RL10"), Mek.LOC_LEFT_TORSO);
+        Mounted<?> bombast = atlas.addEquipment(EquipmentType.get("ISBombastLaser"), Mek.LOC_RIGHT_ARM);
+        Mounted<?> gun = atlas.addEquipment(EquipmentType.get("ISMG"), Mek.LOC_RIGHT_ARM);
+        gun.setRapidFire(true);
+        atlas.loadAllWeapons();
+        // A C3 master switches its mode at the end of the turn
+        Entity command = unit("Atlas AS7-D.mtf");
+        Mounted<?> master = command.addEquipment(EquipmentType.get("ISC3MasterUnit"), Mek.LOC_LEFT_ARM);
+        master.setMode(1);
+        List<String> rows = new ArrayList<>(rowTexts(atlas));
+        rows.add(rowTexts(command).getLast());
+        assertEquals(List.of("(IS) j Medium Laser [LA]  ", "(IS) +Medium Laser+RISC Laser Module [RA]  ",
+              "(IS) LRM 20 [LT] (6/12) is Hot-Loaded Indirect ", "(IS) SRM 6 [LT/CT] (15/15) ",
+              "(IS) **AC/20 [RT] (5/10) ", "(IS) - Medium Laser (R) [CT]  ", "(IS) Medium Laser (R) [CT]  ",
+              "(C) ATM 6 [LA] (10/10) ", "(IS) Rocket Launcher 10 [LT] ",
+              "(IS) Bombast Laser [RA] damage 16 No charge ", "(IS) Machine Gun [RA] (0/0) [Rapid Fire] ",
+              "C3 Computer (Master) [LA] On (next turn, Off) "), rows,
+              "rows of " + List.of(atm.getName(), rocket.getName(), bombast.getName()));
+
+        // The parts the GPU unit record reads: shots, hot-loading, the current and queued mode, rapid fire
+        UnitDisplayData.RowParts launcher = UnitDisplayData.rowParts(game, weapons.get(2));
+        assertEquals(List.of(6, 12, true, "Indirect"), List.of(launcher.loadedShots(), launcher.totalShots(),
+              launcher.hotLoaded(), launcher.mode()));
+        UnitDisplayData.RowParts computer = UnitDisplayData.rowParts(game, (WeaponMounted) master);
+        assertEquals(List.of("On", "Off"), List.of(computer.mode(), computer.pendingMode()));
+        assertEquals(-1, UnitDisplayData.rowParts(game, (WeaponMounted) rocket).totalShots(),
+              "The list shows no shots for a one-shot launcher");
+        assertEquals(true, UnitDisplayData.rowParts(game, (WeaponMounted) gun).rapidFire());
+    }
+
+    @Test
+    void weaponStatsCoverMissilesArtilleryInfantryAndCapitalBays() throws Exception {
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        WeaponMounted atm = (WeaponMounted) atlas.addEquipment(EquipmentType.get("CLATM6"), Mek.LOC_LEFT_ARM);
+        AmmoMounted erAmmo = (AmmoMounted) atlas.addEquipment(EquipmentType.get("CLATM6 ER Ammo"),
+              Mek.LOC_LEFT_ARM);
+        atlas.loadWeapon(atm, erAmmo);
+        Entity tank = unit("Bulldog Medium Tank.blk");
+        tank.addEquipment(EquipmentType.get("ISArrowIVSystem"), Tank.LOC_BODY);
+        tank.loadAllWeapons();
+        Entity platoon = unit("Foot Platoon (AFFS) (Laser 3067+).blk");
+        Entity aegis = unit("Aegis Heavy Cruiser (2372).blk");
+        String none = "---";
+        assertEquals(List.of(
+              List.of("6", "10", "Missile", none, "6", "1 - 7", "8 - 14", "15 - 21", "22 - 28", none, none, none,
+                    none),
+              List.of("4", "7", "Missile", none, "4", "1 - 9", "10 - 18", "19 - 27", "28 - 36", none, none, none, none),
+              List.of("10", "10", "20/10", none, none, "1", "2", "3 - 8", "8", none, none, none, none),
+              List.of("0", "0", "Variable", "0.28", none, "0", "0", "1 - 6", "7 - 8", none, none, none, none, "0=-2",
+                    "1-2=+0", "3-4=+2", "5-6=+4"),
+              List.of("120", "120", "Capital", none, none, "1-12", "13-24", "25-40", none, "40", "40", "40", none)),
+              List.of(statTexts(atlas, atlas.getWeaponList().get(2)),
+                    statTexts(atlas, atm), statTexts(tank, tank.getWeaponList().getLast()),
+                    statTexts(platoon, platoon.getWeaponList().getFirst()),
+                    statTexts(aegis, aegis.getWeaponList().getFirst())));
+    }
+
+    @Test
+    void eachListedWeaponHasItsDamageText() throws Exception {
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        Entity tank = unit("Bulldog Medium Tank.blk");
+        tank.addEquipment(EquipmentType.get("ISArrowIVSystem"), Tank.LOC_BODY);
+        Entity dropShip = unit("Union (3055).blk");
+        assertEquals(List.of("5", "5", "Missile", "Missile", "20", "5", "5"), damageTexts(atlas));
+        assertEquals(List.of("2", "Missile", "Missile", "8", "20/10"), damageTexts(tank));
+        // Bays attack with attack values, which the range display shows
+        assertEquals(Collections.nCopies(15, "Standard"), damageTexts(dropShip));
+    }
+
+    @Test
+    void ammoChoicesAreTheBinsAWeaponCanLoad() throws Exception {
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        WeaponMounted atm = (WeaponMounted) atlas.addEquipment(EquipmentType.get("CLATM6"), Mek.LOC_LEFT_ARM);
+        atlas.addEquipment(EquipmentType.get("CLATM6 Ammo"), Mek.LOC_LEFT_ARM);
+        AmmoMounted erAmmo = (AmmoMounted) atlas.addEquipment(EquipmentType.get("CLATM6 ER Ammo"),
+              Mek.LOC_LEFT_ARM);
+        atlas.loadWeapon(atm, erAmmo);
+        atlas.addEquipment(EquipmentType.get("RL10"), Mek.LOC_LEFT_TORSO);
+        atlas.loadAllWeapons();
+        atlas.loadWeapon(atm, erAmmo);
+        List<String> feeds = new ArrayList<>();
+        for (WeaponMounted weapon : atlas.getWeaponList()) {
+            WeaponDisplayData.AmmoChoices offered = WeaponDisplayData.ammoChoices(atlas, weapon, weapon);
+            feeds.add(offered.feed() + " " + offered.ammo().stream()
+                  .map(ammo -> WeaponDisplayData.formatAmmo(atlas, ammo)).toList());
+        }
+        assertEquals(List.of("NONE []", "NONE []", "BINS [[LT] LRM 20  (6), [LT] LRM 20  (6)]",
+              "BINS [[LT] SRM 6  (15)]", "BINS [[RT] AC/20  (5), [RT] AC/20  (5)]", "NONE []", "NONE []",
+              "BINS [[LA] Standard ATM/6  (10), [LA] Extended-Range ATM/6  (10)]", "FIXED []"), feeds);
+    }
+
+    @Test
+    void heatBuildupCountsCarriedMovedAndFiredHeat() throws Exception {
+        game.setPhase(GamePhase.FIRING);
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        atlas.heat = 5;
+        atlas.heatBuildup = 2;
+        atlas.getWeaponList().get(0).setUsedThisRound(true);
+        atlas.getWeaponList().get(2).setUsedThisRound(true);
+        Entity hot = unit("Atlas AS7-D.mtf");
+        hot.heat = 30;
+        Entity union = unit("Union (3055).blk");
+        union.getWeaponList().get(0).setUsedThisRound(true);
+        union.getWeaponList().get(1).setUsedThisRound(true);
+        // 5 carried + 2 moved + 3 and 6 fired; 30 over 20 sinks; the Union's two fired bays heat their arcs
+        assertEquals(List.of("16 (20)", "30* (20) 10 over", "34 (170)"), List.of(atlas, hot, union).stream()
+              .map(entity -> WeaponDisplayData.heatBuildup(game, entity).text()).toList());
+    }
+
+    @Test
+    void crewAdvantagesListTheActiveAbilitiesByGroup() throws Exception {
+        Entity atlas = unit("Atlas AS7-D.mtf");
+        atlas.getCrew().getOptions().getOption(OptionsConstants.PILOT_MELEE_SPECIALIST).setValue(true);
+        atlas.getCrew().getOptions().getOption(OptionsConstants.PILOT_HOT_DOG).setValue(true);
+        ConvInfantry platoon = (ConvInfantry) unit("Foot Platoon (AFFS) (Laser 3067+).blk");
+        platoon.getCrew().getOptions().getOption(OptionsConstants.MD_PL_ENHANCED).setValue(true);
+        platoon.setProstheticEnhancement1(ProstheticEnhancementType.LASER);
+        platoon.setProstheticEnhancement1Count(2);
+        platoon.getCrew().getOptions().getOption(OptionsConstants.MD_PL_EXTRA_LIMBS).setValue(true);
+        platoon.setExtraneousPair1(ProstheticEnhancementType.LASER);
+        List<String> texts = new ArrayList<>();
+        for (Entity entity : List.of(atlas, platoon)) {
+            texts.add(plain(PilotToolTip.getCrewAdvantages(entity, true).toString()));
+            texts.add(plain(PilotToolTip.getCrewAdvantages(entity, false).toString()));
+            texts.add(abilityLines(entity));
+        }
+        game.getOptions().getOption(OptionsConstants.EDGE).setValue(true);
+        texts.add(plain(PilotToolTip.getCrewAdvantages(atlas, true).toString()));
+        texts.add(abilityLines(atlas));
+        String advantages = "Hot Dog (CamOps)\n  Melee Specialist (CamOps)";
+        String edge = String.join("\n  ", EDGE_TRIGGERS);
+        String implants = "Prosthetic Limbs, Enhanced (Laser x2)\n  Prosthetic Limbs, Extraneous (Enhanced)";
+        // The record's ability groups list what the tooltip lists: the Edge group only while the Edge option is on, and
+        // the extraneous limbs with their enhancements
+        assertEquals(List.of("Advantages:\n  " + advantages, "Advantages (2)", "Advantages\n  " + advantages,
+              "Manei Domini Implants:\n  " + implants + " (Laser x2)", "Manei Domini Implants (2)",
+              "Manei Domini Implants\n  " + implants + " (Laser x2)",
+              "Advantages:\n  " + advantages + "\nEdge:\n  " + edge,
+              "Advantages\n  " + advantages + "\nEdge\n  " + edge), texts);
+    }
+
+    /** The crew's ability groups as lines: each group's name, then its abilities indented. */
+    private static String abilityLines(Entity entity) {
+        List<String> lines = new ArrayList<>();
+        for (TipUtil.OptionGroup group : PilotToolTip.crewAbilities(entity)) {
+            lines.add(group.name());
+            group.options().forEach(option -> lines.add("  " + option));
+        }
+        return String.join("\n", lines);
+    }
+
+    /** A tooltip fragment as text: line breaks kept, tags and no-break spaces gone. */
+    private static String plain(String html) {
+        return html.replaceAll("(?i)<br\\s*/?>", "\n").replaceAll("<[^>]*>", "").replace("&nbsp;", " ").strip();
+    }
+
+    /** The weapon list's row texts of a unit, in the list's order. */
+    private List<String> rowTexts(Entity entity) {
+        return WeaponDisplayData.listedWeapons(entity).stream()
+              .map(weapon -> UnitDisplayData.rowParts(game, weapon).text()).toList();
+    }
+
+    /** The damage text of each listed weapon of a unit. */
+    private List<String> damageTexts(Entity entity) {
+        return WeaponDisplayData.listedWeapons(entity).stream()
+              .map(weapon -> WeaponDisplayData.stats(game, entity, weapon, weapon.getLinkedAmmo(), false).damage())
+              .toList();
+    }
+
+    /**
+     * A weapon's statistics as texts: heat, arc heat, damage, damage per trooper, the range brackets, the attack
+     * values and the infantry range modifiers; a value the weapon has none of reads "---".
+     */
+    private List<String> statTexts(Entity entity, WeaponMounted weapon) {
+        WeaponDisplayData.WeaponStats stats = WeaponDisplayData.stats(game, entity, weapon, weapon.getLinkedAmmo(),
+              false);
+        List<String> attackValues = stats.attackValues().isEmpty() ? List.of("---", "---", "---", "---")
+              : stats.attackValues();
+        List<String> texts = new ArrayList<>(List.of(stats.heat(), stats.arcHeat(), stats.damage(),
+              stats.byTrooper().isEmpty() ? "---" : stats.byTrooper(), stats.min(), stats.shortRange(),
+              stats.mediumRange(), stats.longRange(), stats.extremeRange()));
+        texts.addAll(attackValues);
+        stats.infantryRanges().forEach(range -> texts.add(range.range() + "=" + range.modifier()));
+        return texts;
+    }
+
+    private Entity unit(String file) throws Exception {
+        return add(new MekFileParser(new File(UNITS + file)).getEntity());
+    }
+
+    private Entity unit(File zip, String file) throws Exception {
+        return add(new MekFileParser(zip, file).getEntity());
+    }
+
+    private Entity add(Entity entity) {
+        entity.setId(nextId++);
+        entity.setOwner(local);
+        entity.setPosition(new Coords(5, 4 + entity.getId()));
+        entity.setDeployed(true);
+        game.addEntity(entity, false);
+        return entity;
+    }
+}

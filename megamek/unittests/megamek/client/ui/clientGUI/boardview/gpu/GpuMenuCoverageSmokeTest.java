@@ -114,11 +114,10 @@ class GpuMenuCoverageSmokeTest {
                         }
                     }
                 }
-                assertTrue(items > 50, "the captured menu bar's " + items + " items");
+                assertTrue(items >= 50, "the captured menu bar's " + items + " items");
                 assertEquals(List.of(), missing, "every menu bar item but those the HUD does itself has a button");
-                assertEquals(List.of(Messages.getString("CommonMenuBar.viewRenderer"),
-                      Messages.getString("CommonMenuBar.viewBotCommands")), nested,
-                      "the View menu's renderer and bot commands panel choices, of a Swing board, are left out");
+                assertEquals(List.of(Messages.getString("CommonMenuBar.viewRenderer")), nested,
+                      "the View menu's renderer choice, of a Swing board, is left out");
                 assertEquals(List.of(), ran, "opening pages runs no command");
             });
         }
@@ -147,32 +146,40 @@ class GpuMenuCoverageSmokeTest {
                   "clear", CANCEL_KEY));
         }
         try (Display deployment = new Display(GamePhase.DEPLOYMENT, DeploymentDisplay::new)) {
+            // A deployment turn as MegaMek begins one: the local unit still to deploy, selected (the fixture's unit
+            // stands deployed, and with nothing to deploy MegaMek offers no deployment command).
+            onSwing(() -> {
+                deployment.board.entity.setDeployed(false);
+                ((DeploymentDisplay) deployment.display).selectEntity(deployment.board.entity.getId());
+                return null;
+            });
             assertReachable("deployment", deployment.board.source, Map.of("clear", CANCEL_KEY));
         }
-        // The log and the Menu stand for MegaMek's report and player list toggles.
-        Map<String, String> reports = Map.of("reportReport", "utility-log", "reportPlayerList", "utility-menu",
-              "clear", CANCEL_KEY);
+        // A report phase's only command besides Done is Clear, which Esc stands for.
+        Map<String, String> reports = Map.of("clear", CANCEL_KEY);
         for (GamePhase phase : List.of(GamePhase.FIRING_REPORT, GamePhase.END_REPORT)) {
             try (Display report = new Display(phase, ReportDisplay::new)) {
                 assertReachable(phase.toString(), report.board.source, reports);
             }
         }
         try (Display initiative = new Display(GamePhase.INITIATIVE_REPORT, ReportDisplay::new)) {
-            // MegaMek offers the reroll to a player with a tactical genius; the dock shows it as its second button.
+            // MegaMek offers the reroll to a player with a tactical genius. The initiative card carries it beside its
+            // Continue, the phase's Done, while the dock waits for the board.
             onSwing(() -> {
                 ((ReportDisplay) initiative.display).setRerollInitiativeEnabled(true);
                 return null;
             });
             Map<String, String> standIns = new LinkedHashMap<>(reports);
-            standIns.put("reportRerollInitiative", "dock-secondary");
+            standIns.put("reportRerollInitiative", "initiative-reroll");
+            standIns.put(GpuBoardActions.DONE_ID, "initiative-continue");
             assertReachable(GamePhase.INITIATIVE_REPORT.toString(), initiative.board.source, standIns);
         }
     }
 
     /**
-     * Shows the source's settled frame in a real HUD and checks each of the phase display's commands: the phase
-     * display's Done and Skip are the dock's main and second buttons, any other command a button of the dock's row,
-     * an entry of its More, or the control {@code standIns} names for it (by its actor's name), which must show.
+     * Shows the source's settled frame in a real HUD and checks each of the phase display's commands: the control
+     * {@code standIns} names for it (by its actor's name), which must show; else the phase display's Done and Skip
+     * are the dock's main and second buttons, any other command a button of the dock's row or an entry of its More.
      */
     private static void assertReachable(String phase, GpuBoardSource source, Map<String, String> standIns)
           throws Exception {
@@ -199,7 +206,9 @@ class GpuMenuCoverageSmokeTest {
                 for (BoardScene.Command command : frame.scene().commands()) {
                     String id = command.id();
                     String standIn = standIns.get(id);
-                    boolean reachable = id.equals(info.doneId()) ? shown(hud, "dock-main")
+                    boolean reachable = standIn != null ? CANCEL_KEY.equals(standIn) || WITH_A_CLUB.equals(standIn)
+                          || shown(hud, standIn)
+                          : id.equals(info.doneId()) ? shown(hud, "dock-main")
                           : id.equals(info.skipId()) ? shown(hud, "dock-secondary") || shown(hud, "dock-main")
                           : shown(hud, "dock-command-" + id) || shown(hud, "dock-option-" + id)
                                 || inMore.contains(id) || inMore.contains("dock.option." + id)
@@ -276,14 +285,13 @@ class GpuMenuCoverageSmokeTest {
      * The menu bar's items the Menu leaves out, by action command: loading, which only the lobby does; what the HUD
      * shows or does itself (the unit display, minimap, log, players, forces overview, conditions, key help, camera,
      * hex and field-of-view overlays, the ruler); the Game Master's request, which the Commands page holds; and the
-     * Swing window, cache, board image and nag commands.
+     * Swing window, cache and nag commands.
      */
     private static final Set<String> LEFT_OUT = Set.of(ClientGUI.FILE_GAME_LOAD, ClientGUI.FILE_GAME_QUICK_LOAD,
           ClientGUI.GAME_REQUEST_GAME_MASTER, ClientGUI.GAME_GIVE_UP_GAME_MASTER, ClientGUI.FILE_REFRESH_CACHE,
-          ClientGUI.FILE_REBUILD_CACHE, ClientGUI.BOARD_SAVE_AS_IMAGE, ClientGUI.BOARD_SAVE_AS_IMAGE_UNITS,
-          ClientGUI.VIEW_UNIT_DISPLAY, ClientGUI.VIEW_MINI_MAP, ClientGUI.VIEW_ROUND_REPORT,
-          ClientGUI.VIEW_PLAYER_LIST, ClientGUI.VIEW_ROUNDS_IN_AIR, ClientGUI.VIEW_FORCE_DISPLAY,
-          ClientGUI.VIEW_KEYBINDS_OVERLAY, ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY,
+          ClientGUI.FILE_REBUILD_CACHE,
+          ClientGUI.VIEW_MINI_MAP,
+          ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY,
           ClientGUI.VIEW_RESET_WINDOW_POSITIONS, ClientGUI.VIEW_ZOOM_IN,
           ClientGUI.VIEW_ZOOM_OUT, ClientGUI.VIEW_ZOOM_RESET, ClientGUI.VIEW_ZOOM_OVERVIEW_TOGGLE,
           ClientGUI.VIEW_TOGGLE_ISOMETRIC, ClientGUI.VIEW_TOGGLE_HEX_COORDS, ClientGUI.VIEW_TOGGLE_HEX_TYPES,

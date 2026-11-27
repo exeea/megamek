@@ -42,7 +42,6 @@ import java.util.Map;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -55,8 +54,6 @@ public class ReportDisplay extends StatusBarPhaseDisplay {
     private static final Logger LOGGER = LogManager.getLogger();
 
     public enum ReportCommand implements PhaseCommand {
-        REPORT_REPORT("reportReport"),
-        REPORT_PLAYER_LIST("reportPlayerList"),
         REPORT_REROLL_INITIATIVE("reportRerollInitiative");
 
         final String cmd;
@@ -91,14 +88,7 @@ public class ReportDisplay extends StatusBarPhaseDisplay {
         }
 
         public String getHotKeyDesc() {
-            String result = "";
-
-            if (this == REPORT_REPORT) {
-                result = "<BR>";
-                result += "&nbsp;&nbsp;" + KeyCommandBind.getDesc(KeyCommandBind.ROUND_REPORT);
-            }
-
-            return result;
+            return "";
         }
     }
 
@@ -182,18 +172,8 @@ public class ReportDisplay extends StatusBarPhaseDisplay {
     @Override
     public void ready() {
         butDone.setEnabled(false);
-        setReportEnabled(false);
-        setPlayerListEnabled(false);
         setRerollInitiativeEnabled(false);
         clientgui.getClient().sendDone(true);
-    }
-
-    public void setReportEnabled(boolean enabled) {
-        buttons.get(ReportCommand.REPORT_REPORT).setEnabled(enabled);
-    }
-
-    public void setPlayerListEnabled(boolean enabled) {
-        buttons.get(ReportCommand.REPORT_PLAYER_LIST).setEnabled(enabled);
     }
 
     public void setRerollInitiativeEnabled(boolean enabled) {
@@ -226,17 +206,11 @@ public class ReportDisplay extends StatusBarPhaseDisplay {
     public void actionPerformed(ActionEvent ev) {
         if (ev.getActionCommand().equalsIgnoreCase(ReportCommand.REPORT_REROLL_INITIATIVE.getCmd())) {
             rerollInitiative();
-        } else if ((ev.getActionCommand().equalsIgnoreCase(ReportCommand.REPORT_REPORT.getCmd()))) {
-            GUIP.toggleRoundReportEnabled();
-        } else if ((ev.getActionCommand().equalsIgnoreCase(ReportCommand.REPORT_PLAYER_LIST.getCmd()))) {
-            GUIP.togglePlayerListEnabled();
         }
     }
 
     private void resetButtons() {
         butDone.setEnabled(!clientgui.getClient().getLocalPlayer().isDone());
-        setReportEnabled(true);
-        setPlayerListEnabled(true);
 
         if ((clientgui.getClient().getGame().getPhase() == GamePhase.INITIATIVE_REPORT) && clientgui.getClient()
               .getGame()

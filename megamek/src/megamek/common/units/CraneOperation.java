@@ -165,6 +165,11 @@ public final class CraneOperation implements Serializable {
         return turnsCompleted;
     }
 
+    /** True while the Unit has stayed at its declared loading hex throughout this turn. */
+    public boolean isWaitingInPlace(Entity unit) {
+        return unitPosition.equals(unit.getPosition()) && unit.delta_distance == 0;
+    }
+
     /** @return {@code true} when the cranes have worked the required number of turns */
     public boolean isComplete() {
         return turnsCompleted >= getTurnsRequired();

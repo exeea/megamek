@@ -34,85 +34,19 @@
 package megamek.client.ui.panels.phaseDisplay;
 
 import java.awt.event.ActionEvent;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.List;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.SBFClientGUI;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GamePhaseChangeEvent;
 
+/** Acknowledges the current report. Reports and player lists are shown by the native board. */
 public class SBFReportDisplay extends StatusBarPhaseDisplay {
-
-    public enum ReportCommand implements PhaseCommand {
-        REPORT_REPORT("reportReport"),
-        REPORT_PLAYER_LIST("reportPlayerList");
-
-        final String cmd;
-
-        /**
-         * Priority that determines this buttons order
-         */
-        public int priority;
-
-        ReportCommand(String c) {
-            cmd = c;
-        }
-
-        @Override
-        public String getCmd() {
-            return cmd;
-        }
-
-        @Override
-        public int getPriority() {
-            return priority;
-        }
-
-        @Override
-        public void setPriority(int p) {
-            priority = p;
-        }
-
-        @Override
-        public String toString() {
-            return Messages.getString("ReportDisplay." + getCmd());
-        }
-
-        public String getHotKeyDesc() {
-            String result = "";
-
-            if (this == REPORT_REPORT) {
-                result = "<BR>";
-                result += "&nbsp;&nbsp;" + KeyCommandBind.getDesc(KeyCommandBind.ROUND_REPORT);
-            }
-
-            return result;
-        }
-    }
-
-    // buttons
-    private Map<ReportCommand, MegaMekButton> buttons;
-
-    private static final String RD_REPORT_DISPLAY = "ReportDisplay.";
-    private static final String RD_TOOLTIP = ".tooltip";
-
-
-    /**
-     * Creates and lays out a new movement phase display for the specified clientGUI.getClient().
-     */
     public SBFReportDisplay(SBFClientGUI clientGUI) {
-        super(Objects.requireNonNull(clientGUI));
-
+        super(clientGUI);
         setupStatusBar("");
-        setButtons();
-        setButtonsTooltips();
-
         butDone.setText(Messages.getString("ReportDisplay.Done"));
         butDone.setEnabled(false);
         setupButtonPanel();
@@ -120,94 +54,39 @@ public class SBFReportDisplay extends StatusBarPhaseDisplay {
     }
 
     @Override
-    protected void setButtons() {
-        buttons = new HashMap<>((int) (ReportCommand.values().length * 1.25 + 0.5));
-        for (ReportCommand cmd : ReportCommand.values()) {
-            buttons.put(cmd, createButton(cmd.getCmd(), RD_REPORT_DISPLAY));
-        }
-        numButtonGroups = (int) Math.ceil((buttons.size() + 0.0) / buttonsPerGroup);
+    protected List<MegaMekButton> getButtonList() {
+        return List.of();
     }
 
     @Override
-    protected void setButtonsTooltips() {
-        for (ReportCommand cmd : ReportCommand.values()) {
-            String tt = createToolTip(cmd.getCmd(), RD_REPORT_DISPLAY, cmd.getHotKeyDesc());
-            buttons.get(cmd).setToolTipText(tt);
-        }
-    }
+    protected void setButtons() {}
 
     @Override
-    protected ArrayList<MegaMekButton> getButtonList() {
-        ArrayList<MegaMekButton> buttonList = new ArrayList<>();
-        ReportCommand[] commands = ReportCommand.values();
-        CommandComparator comparator = new CommandComparator();
-        Arrays.sort(commands, comparator);
-        for (ReportCommand cmd : commands) {
-            buttonList.add(buttons.get(cmd));
-        }
-        return buttonList;
-    }
+    protected void setButtonsTooltips() {}
 
     @Override
     public void clear() {}
 
     @Override
+    public void actionPerformed(ActionEvent event) {}
+
+    @Override
     public void ready() {
         butDone.setEnabled(false);
-        setReportEnabled(false);
-        setPlayerListEnabled(false);
         sendDone();
     }
 
-    public void setReportEnabled(boolean enabled) {
-        buttons.get(ReportCommand.REPORT_REPORT).setEnabled(enabled);
-    }
-
-    public void setPlayerListEnabled(boolean enabled) {
-        buttons.get(ReportCommand.REPORT_PLAYER_LIST).setEnabled(enabled);
-    }
-
     @Override
-    public void actionPerformed(ActionEvent ev) {
-        if ((ev.getActionCommand().equalsIgnoreCase(ReportCommand.REPORT_REPORT.getCmd()))) {
-            GUIP.toggleRoundReportEnabled();
-        } else if ((ev.getActionCommand().equalsIgnoreCase(ReportCommand.REPORT_PLAYER_LIST.getCmd()))) {
-            GUIP.togglePlayerListEnabled();
-        }
-    }
-
-    private void resetButtons() {
-        butDone.setEnabled(!clientGUI.getClient().getLocalPlayer().isDone());
-        setReportEnabled(true);
-        setPlayerListEnabled(true);
-    }
-
-    @Override
-    public void gamePhaseChange(GamePhaseChangeEvent e) {
-        if (isIgnoringEvents()) {
-            return;
-        }
-
-        GamePhase phase = clientGUI.getClient().getGame().getPhase();
-
-        switch (phase) {
-            case INITIATIVE_REPORT:
-            case TARGETING_REPORT:
-            case MOVEMENT_REPORT:
-            case OFFBOARD_REPORT:
-            case FIRING_REPORT:
-            case PHYSICAL_REPORT:
-            case END_REPORT:
-            case VICTORY:
-                resetButtons();
+    public void gamePhaseChange(GamePhaseChangeEvent event) {
+        if (!isIgnoringEvents()) {
+            GamePhase phase = event.getNewPhase();
+            if (phase.isReport()) {
+                butDone.setEnabled(!clientGUI.getClient().getLocalPlayer().isDone());
                 setStatusBarWithNotDonePlayers();
-                break;
-            default:
+            } else {
                 setStatusBarText(phase.localizedName());
-                break;
+            }
         }
-
-        //        clientGUI.bingMyTurn();
     }
 
     @Override

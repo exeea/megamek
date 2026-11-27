@@ -502,6 +502,12 @@ final class BoardGeometry {
               || y < Math.min(a.y, Math.min(b.y, c.y)) || y > Math.max(a.y, Math.max(b.y, c.y)))) {
             return false;
         }
+        // A triangle of no area (two corners at one point; the height field's walls hold many) has nothing to hit, but
+        // libGDX takes any ray as meeting it at the ray's own origin (its plane has no normal), so the pick would return
+        // its hex at distance 0 whatever lies under the pointer.
+        float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z, vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        if (nx * nx + ny * ny + nz * nz <= 1e-10f) { return false; }
         return Intersector.intersectRayTriangle(ray, a, b, c, hit);
     }
 

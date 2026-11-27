@@ -79,6 +79,17 @@ public class ObjectiveMarker extends GroundObject implements Cloneable {
     private boolean confirmed = false;
     private boolean falseObjective = false;
     private boolean fragile = false;
+    private boolean headquarters;
+
+    /** Strategic BattleForce HQ counter, IO:BF p. 195. */
+    public boolean isHeadquarters() {
+        return headquarters;
+    }
+
+    public void setHeadquarters(boolean headquarters) {
+        this.headquarters = headquarters;
+    }
+
     private boolean mobile = false;
     private boolean destroyed = false;
     private boolean insideBuilding = false;

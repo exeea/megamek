@@ -123,6 +123,22 @@ class GpuTreeInstancesTest {
         assertArrayEquals(new float[0], dissolves(stand, 2));
     }
 
+    /** A cut (TreeLod#cut) is a new view: the tree takes its level at once, and the dissolve it was in ends. */
+    @Test
+    void acrossACutATreeSwitchesAtOnce() {
+        var stand = stand(100, 1, DURATION);
+        stand.detail(60, 1, DURATION);
+        assertArrayEquals(new float[] { 1 }, dissolves(stand, 1));
+        // A third of the scale in one step: 20 pixels, the impostor's level.
+        assertEquals(0, stand.detail(20, 1.1f, DURATION));
+        assertArrayEquals(new float[0], dissolves(stand, 0));
+        assertArrayEquals(new float[0], dissolves(stand, 1));
+        assertArrayEquals(new float[] { 0 }, dissolves(stand, 3));
+        // Half the scale is the widest step between two levels: still a zoom, which dissolves.
+        var glide = stand(100, 1, DURATION);
+        assertEquals(1.25f, glide.detail(50, 1, DURATION));
+    }
+
     @Test
     void withoutADurationATreeSwitchesAtOnce() {
         var stand = stand(100, 1, 0);

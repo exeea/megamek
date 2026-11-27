@@ -35,10 +35,14 @@ package megamek.client.ui.clientGUI;
 
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
+import megamek.common.event.GameSettingsChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
-import megamek.common.event.entity.GameEntityChangeEvent;
-import megamek.common.event.entity.GameEntityNewEvent;
 
+/**
+ * The SBF client GUI's listener on its {@code SBFGame}, which is the source of truth. It is the one writer of the
+ * board's game ({@code SBFClientGUI.bvGame}): a snapshot of the board, the phase and the round that the board's state
+ * and the 3D board read, never read for rules.
+ */
 public class SBFClientGUIGameListener extends GameListenerAdapter {
 
     private final SBFClientGUI clientGUI;
@@ -49,36 +53,25 @@ public class SBFClientGUIGameListener extends GameListenerAdapter {
 
     @Override
     public void gamePhaseChange(GamePhaseChangeEvent e) {
-        //        // This is a really lame place for this, but I couldn't find a
-        //        // better one without making massive changes (which didn't seem
-        //        // worth it for one little feature).
-        //        if (bv.getLocalPlayer() != client.getLocalPlayer()) {
-        //            // The address based comparison is somewhat important.
-        //            // Use of the /reset command can cause the player to get reset,
-        //            // and the equals function of Player isn't powerful enough.
-        //            bv.setLocalPlayer(client.getLocalPlayer());
-        //        }
-        //        // Make sure the ChatterBox starts out deactivated.
-        //        bv.setChatterBoxActive(false);
-        //
+        // The board's snapshot first (never the lounge, whose Game.setPhase resets that game), then the panel
+        if (!e.getNewPhase().isLounge()) {
+            clientGUI.bvGame.setCurrentRound(clientGUI.getClient().getGame().getCurrentRound());
+            clientGUI.bvGame.setPhase(e.getNewPhase());
+        }
         // Swap to this phase's panel.
         clientGUI.switchPanel(e.getNewPhase());
         clientGUI.menuBar.setPhase(e.getNewPhase());
-        //        clientGUI.cb.moveToEnd();
+    }
+
+    @Override
+    public void gameSettingsChange(GameSettingsChangeEvent event) {
+        clientGUI.bvGame.setPlanetaryConditions(clientGUI.getClient().getGame().getPlanetaryConditions());
     }
 
     @Override
     public void gameBoardNew(GameBoardNewEvent e) {
         clientGUI.bvGame.setBoard(e.getNewBoard());
+        clientGUI.openBoardWindow();
     }
 
-    @Override
-    public void gameEntityChange(GameEntityChangeEvent e) {
-        clientGUI.updateFormationSprites();
-    }
-
-    @Override
-    public void gameEntityNew(GameEntityNewEvent e) {
-        clientGUI.updateFormationSprites();
-    }
 }

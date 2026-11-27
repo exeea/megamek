@@ -55,6 +55,7 @@ public class SBFReportEntry implements ReportEntry {
     protected static final String CSS_HEADER = "header";
 
     private final int messageId;
+    private Integer subjectId;
     private final List<DataEntry> data = new ArrayList<>();
     private boolean endLine = true;
     private boolean endSpace = false;
@@ -169,7 +170,12 @@ public class SBFReportEntry implements ReportEntry {
     }
 
     public SBFReportEntry subject(int id) {
+        subjectId = id;
         return this;
+    }
+
+    public Integer getSubjectId() {
+        return subjectId;
     }
 
     public SBFReportEntry newLines(int count) {

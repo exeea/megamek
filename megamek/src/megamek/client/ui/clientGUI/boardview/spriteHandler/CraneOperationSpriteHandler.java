@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.CraneOperationSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
@@ -85,7 +84,7 @@ public class CraneOperationSpriteHandler extends BoardViewSpriteHandler {
                   operation, unit != null, boardView != null);
             return;
         }
-        if (operation.isLoading() && !CraneOperationSprite.isWaitingInPlace(unit, operation)) {
+        if (operation.isLoading() && !operation.isWaitingInPlace(unit)) {
             LOGGER.debug("[Crane] {}: {} moved away, so no countdown is shown; the End Phase cancels the loading",
                   carrier.getDisplayName(), unit.getDisplayName());
             return;

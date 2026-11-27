@@ -9,14 +9,19 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 
-/** Tiny textured details, baked into a single opaque material per terrain chunk and shared prop page. */
+/**
+ * Tiny textured details (stones and dry grass), baked into a single opaque material per terrain chunk and shared prop
+ * page; and where a captured bush stands, for the scatter stand ({@link #bush}).
+ */
 final class GpuScatter {
     private static final int CELL = 256;
     private static final int BORDER = 32;
     private static final int WIDTH = 2 * CELL;
-    // The white fifth swatch preserves the bushes' authored bark and leaf colours; the sixth shares Mars cliff stone.
+    // The fifth swatch is unused since the bushes left the bake for the scatter stand; it keeps the others' places.
+    // The sixth shares Mars cliff stone.
     private static final String[] MATERIALS = { "terrain/surfaces/scatter-stone", "terrain/surfaces/biome-soil",
           "terrain/surfaces/arid-cliff",
           "vegetation/palm-fronds", null, "terrain/surfaces/mars-cliff", "terrain/surfaces/volcano-cliff" };
@@ -81,23 +86,43 @@ final class GpuScatter {
     }
 
     static float diameter(BoardScene.Feature feature) {
-        if (feature.asset().equals("scatter-plant")) {
-            BoardShape shape = BoardScatter.plant(BoardScene.Surface.GRASS);
-            return (float) Math.hypot(2 * BoardScatter.BUSH_RADIUS, shape.height())
-                  * BoardScatter.bushScale(shape, feature.scale());
-        }
         return (float) Math.hypot(8 * feature.scale() * BoardGeometry.hexScale(),
               feature.height() * BoardGeometry.level());
     }
 
+    /**
+     * Where a captured bush stands, as the scatter stand's placement (a translation, a turn about z and one scale): on the
+     * hex's own ground, never over a receding rim or a transition's slope; null where it may not stand.
+     */
+    static Matrix4 bush(BoardScene.Tile tile, BoardSurface surface, BoardScene.Feature feature) {
+        if (!BoardScatter.allowed(tile)) { return null; }
+        BoardShape bush = BoardScatter.plant(tile.surface());
+        float scale = BoardScatter.bushScale(bush, feature.scale());
+        float[] spot = surface.relief.settle(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale(),
+              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale(), BoardScatter.BUSH_RADIUS * scale);
+        float x = spot[0], y = spot[1], ground = surface.height(x, y);
+        // The turn as a quaternion: Matrix4#rotate(Vector3, float) shares libGDX's static scratch across build threads.
+        Matrix4 transform = new Matrix4().setToTranslation(x, y, ground - .02f * scale)
+              .rotate(new Quaternion(Vector3.Z, feature.rotation())).scale(scale, scale, scale);
+        float radius = 0, low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (var polygon : bush.polygons()) {
+            for (var point : polygon.points()) {
+                Vector3 world = new Vector3(point).mul(transform);
+                radius = Math.max(radius, (float) Math.hypot(world.x - x, world.y - y));
+                low = Math.min(low, world.z);
+                high = Math.max(high, world.z);
+            }
+        }
+        Vector3 base = new Vector3(x, y, low);
+        return surface.relief.visibleScatter(base, high - low) && !surface.relief.obstructed(base, radius, high - low)
+              ? transform : null;
+    }
+
     static void build(MeshPartBuilder mesh, BoardScene.Tile tile, BoardSurface surface, BoardScene.Feature feature) {
         if (!BoardScatter.allowed(tile)) { return; }
-        BoardShape bush = feature.asset().equals("scatter-plant") ? BoardScatter.plant(tile.surface()) : null;
-        float bushScale = bush == null ? 0 : BoardScatter.bushScale(bush, feature.scale());
         // On the hex's own ground, never over a receding rim or a transition's slope.
         float[] spot = surface.relief.settle(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale(),
-              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale(),
-              bush == null ? BoardRelief.metres(.3f) : BoardScatter.BUSH_RADIUS * bushScale);
+              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale(), BoardRelief.metres(.3f));
         float x = spot[0], y = spot[1];
         Matrix4 transform = new Matrix4().setToTranslation(x, y, surface.height(x, y))
               .rotate(Vector3.Z, feature.rotation())
@@ -105,9 +130,8 @@ final class GpuScatter {
                     feature.height() * BoardGeometry.level());
         boolean stone = BoardScatter.stone(feature.asset());
         Color color = color(tile.surface(), feature.asset());
-        float shade = 1;
         if (!stone) {
-            shade = .88f + .24f * feature.rotation() / 360;
+            float shade = .88f + .24f * feature.rotation() / 360;
             color.mul(shade, shade, shade, 1);
         }
         int material = stone
@@ -122,12 +146,6 @@ final class GpuScatter {
         switch (feature.asset()) {
             case "scatter-dry-grass" -> {
                 shape = BoardScatter.shape("grass");
-            }
-            case "scatter-plant" -> {
-                shape = bush;
-                transform.setToTranslation(x, y, surface.height(x, y) - .02f * bushScale)
-                      .rotate(Vector3.Z, feature.rotation()).scale(bushScale, bushScale, bushScale);
-                material = 4;
             }
             case "scatter-rock", "scatter-slab" -> {
                 shape = rock(tile, feature);
@@ -150,8 +168,7 @@ final class GpuScatter {
         if (!surface.relief.visibleScatter(base, high - low)
               || surface.relief.obstructed(base, radius, high - low)) { return; }
         for (BoardShape.Polygon polygon : shape.polygons()) {
-            Color tint = material == 4 ? new Color(polygon.color()).mul(shade, shade, shade, 1) : color;
-            triangle(mesh, polygon, transform, tint, material, shape.height(), surface);
+            triangle(mesh, polygon, transform, color, material, shape.height());
         }
     }
 
@@ -164,18 +181,10 @@ final class GpuScatter {
     }
 
     private static void triangle(MeshPartBuilder mesh, BoardShape.Polygon polygon, Matrix4 transform, Color color,
-          int material, float height, BoardSurface surface) {
+          int material, float height) {
         Vector3[] points = polygon.points();
         Vector3 a = points[0].cpy().mul(transform), b = points[1].cpy().mul(transform), c = points[2].cpy().mul(transform);
         Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
-        if (material == 4) {
-            var kind = BoardScatter.leaf(polygon.material()) ? BoardRelief.Kind.LEAF : BoardRelief.Kind.PLANT;
-            var shade = new BoardRelief.Shade(normal, kind, 1, surface.tile.elevation(), color.r, color.g, color.b);
-            mesh.triangle(GpuTerrain.sculptVertex(a, shade, Float.NaN, surface),
-                  GpuTerrain.sculptVertex(b, shade, Float.NaN, surface),
-                  GpuTerrain.sculptVertex(c, shade, Float.NaN, surface));
-            return;
-        }
         // Project in object space, so turning a stone also turns its grain. Each blade spans the foliage swatch.
         Vector3 face = polygon.normal();
         boolean top = material != 3 && Math.abs(face.z) >= Math.max(Math.abs(face.x), Math.abs(face.y));

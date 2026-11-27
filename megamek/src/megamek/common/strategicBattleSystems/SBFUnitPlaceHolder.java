@@ -43,11 +43,13 @@ public class SBFUnitPlaceHolder implements InGameObject, Serializable {
     private int id;
     private int ownerId;
     private final BoardLocation position;
+    private final SBFRadarZone radarZone;
 
     public SBFUnitPlaceHolder(SBFFormation formation) {
         id = formation.getId();
         ownerId = formation.getOwnerId();
         position = formation.getPosition();
+        radarZone = formation.getRadarZone();
     }
 
     @Override
@@ -83,6 +85,10 @@ public class SBFUnitPlaceHolder implements InGameObject, Serializable {
     @Override
     public String specificName() {
         return "";
+    }
+
+    public SBFRadarZone getRadarZone() {
+        return radarZone;
     }
 
     public BoardLocation getPosition() {

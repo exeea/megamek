@@ -16,6 +16,8 @@ out vec4 v_weights;
 in vec2 a_texCoord0;
 in vec2 a_roadMaskUV;
 in vec4 a_roadMaskRegion;
+// A road coat's maps, its finish offset by 8, and its wet response (GpuRoads#coat).
+in vec4 a_color;
 // Where its mask's alpha lies: 0 nowhere (it covers whole), 1 in its image through u_maskUV (paint), 2 in its road
 // mask's region.
 uniform int u_mask;
@@ -23,6 +25,18 @@ uniform vec4 u_maskUV;
 // World units it is raised by: paint and water lie clear of their ground, an object's footprint is lowered onto it.
 uniform float u_lift;
 out vec2 v_maskUV;
+// A road mask's layer in the board's mask array (GpuRoadMaskAtlas), carried in its region's U offset.
+flat out float v_maskLayer;
+// Where in its mask a road's point lies: outside 0..1 the coat draws nothing (terrain-road.frag), nor does its cover.
+out vec2 v_roadMaskUV;
+// 1 for a paved carriageway's coat (finish -2, its wear): it clears the carriageway to its mask's half-coverage line
+// (ground-map-cover.frag), a line that stays put whatever the mask's density.
+flat out float v_wear;
+// A loose road's track coat on the ground (finish -5, GpuRoads#finish): 1 dirt, 2 gravel by its maps (GpuRoads.MATERIALS),
+// else 0; and the way from its mask's coverage to where across the road a point lies (the cell right of and under it,
+// terrain-road.frag).
+flat out float v_track;
+flat out vec2 v_trackCell;
 #endif
 
 void main() {
@@ -33,7 +47,15 @@ void main() {
     v_weights = a_coverWeights;
 #else
     world.z += u_lift;
-    v_maskUV = u_mask == 2 ? a_roadMaskRegion.xy + a_roadMaskUV * a_roadMaskRegion.zw : u_maskUV.xy + a_texCoord0 * u_maskUV.zw;
+    v_maskLayer = u_mask == 2 ? floor(a_roadMaskRegion.x) : 0.0;
+    v_roadMaskUV = a_roadMaskUV;
+    float maps = floor(a_color.r * 255.0 + .5), finish = floor(a_color.g * 255.0 + .5) - 8.0;
+    v_wear = u_mask == 2 && finish == -2.0 ? 1.0 : 0.0;
+    v_track = u_mask == 2 && finish == -5.0 && (maps == 1.0 || maps == 2.0) ? maps : 0.0;
+    v_trackCell = 4.0 * ceil((fract(a_roadMaskRegion.zw) * 2048.0 + 2.0) / 4.0) / 2048.0;
+    // A road mask's place carries its tint in the integer parts (GpuRoadMaskAtlas.Place).
+    v_maskUV = u_mask == 2 ? vec2(a_roadMaskRegion.x - v_maskLayer, fract(a_roadMaskRegion.y)) + a_roadMaskUV * fract(a_roadMaskRegion.zw)
+          : u_maskUV.xy + a_texCoord0 * u_maskUV.zw;
 #endif
     gl_Position = u_projViewTrans * world;
 }

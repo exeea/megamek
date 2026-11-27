@@ -56,7 +56,6 @@ import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.actions.GhostTargetAction;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -362,7 +361,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         }
 
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
-            clientgui.maybeShowUnitDisplay();
         }
 
         setupButtonPanel();
@@ -423,9 +421,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         }
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplayState().displayEntity(currentEntity());
-        if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
-        }
         clientgui.getUnitDisplayState().selectFirstWeapon();
     }
 
@@ -825,7 +820,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
         }
 
         if (clientgui.getClient().isMyTurn() && (currentEntity() != null)) {
-            clientgui.maybeShowUnitDisplay();
             clientgui.centerOnUnit(currentEntity());
         }
     }
@@ -852,7 +846,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay {
                 selectEntity(selectedUnit.getId());
             }
         } else {
-            clientgui.maybeShowUnitDisplay();
             clientgui.getUnitDisplayState().displayEntity(selectedUnit);
             if (selectedUnit.isDeployed()) {
                 clientgui.centerOnUnit(selectedUnit);

@@ -144,7 +144,10 @@ final class GpuForcesPanel implements GpuHud.Component {
     private final Table searchRow = new Table();
     private final Cell<Actor> searchCell;
     private final Table list = new Table();
+    /** Next pending, the phase's next-unit command: in the strip, the open list's head and the rail's head. */
     private final UiButton stripNext;
+    private final UiButton next;
+    private final UiButton railNext;
     /** The units' rows and the groups' headers, kept across rebuilds so that their pointer state stays with them. */
     private final Map<Integer, ForceRow> rows = new HashMap<>();
     private final Map<String, GroupHeader> headers = new HashMap<>();
@@ -195,6 +198,9 @@ final class GpuForcesPanel implements GpuHud.Component {
             unfolded = state.forcesPinned || hovered;
         });
 
+        next = nextIcon("forces-next");
+        railNext = nextIcon("forces-rail-next");
+
         openHead.setName("forces-head");
         openHead.pad(0, 12, 0, 6);
         openHead.add(ui.label(UiTheme.upper(text("GpuBoard.hud.forces.yourForce")), "hud-title", 14, UiTheme.TEXT))
@@ -203,6 +209,7 @@ final class GpuForcesPanel implements GpuHud.Component {
         summary.setName("forces-summary");
         openHead.add(openDisc).padRight(5);
         openHead.add(summary).growX().left();
+        openHead.add(next).size(28).padLeft(2);
         openHead.add(searchToggle).size(28).padLeft(2);
         openHead.add(pin).size(28).padLeft(2);
         openHead.add(overview).size(28).padLeft(2);
@@ -211,6 +218,7 @@ final class GpuForcesPanel implements GpuHud.Component {
         railCount = ui.label("", "hud-medium", 12, UiTheme.MUTED);
         railHead.add(railDisc).padRight(5);
         railHead.add(railCount);
+        railHead.add(railNext).size(28).padLeft(6);
         headCell = full.add(openHead).growX().height(HEAD_HEIGHT);
         full.row();
         full.add(ui.solid(UiTheme.LINE)).growX().height(1).row();
@@ -283,7 +291,16 @@ final class GpuForcesPanel implements GpuHud.Component {
         return folded;
     }
 
-    /** The phase's next-unit command, as the strip's Next pending runs it. */
+    /** Next pending as an icon with its tip, for the open list's head and the rail's. */
+    private UiButton nextIcon(String name) {
+        UiButton button = ui.button("hud-icon", "skip", null, null);
+        button.setName(name);
+        ui.tip(button).getActor().setText(text("GpuBoard.hud.forces.nextPending"));
+        onChange(button, this::runNext);
+        return button;
+    }
+
+    /** The phase's next-unit command, as the Next pending buttons run it. */
     private void runNext() {
         BoardScene.Command command = nextCommand();
         if (command != null && command.enabled()) {
@@ -320,6 +337,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         }
         BoardScene.Command command = nextCommand();
         stripNext.setDisabled(pending == 0 || command == null || !command.enabled());
+        next.setDisabled(stripNext.isDisabled());
+        railNext.setDisabled(stripNext.isDisabled());
         pin.pressed(state.forcesPinned);
         Table wanted = sheet ? strip : full;
         if (content.getActor() != wanted) {

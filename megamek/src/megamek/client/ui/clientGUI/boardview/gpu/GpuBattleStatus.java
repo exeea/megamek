@@ -295,7 +295,7 @@ final class GpuBattleStatus {
     private ArcKey arcKey;
 
     /**
-     * Lists the local player's units ({@code Game.getPlayerEntities}, as the Legacy 2D unit overview) and every other
+     * Lists the local player's units ({@code Game.getPlayerEntities}) and every other
      * {@code visible} unit; units that are not {@code identified} stay anonymous. {@code activeTurn} is the turn the
      * client lets the local player act in now, or null. An unchanged capture returns the previous snapshot, so the
      * render thread can compare by identity.
@@ -472,48 +472,59 @@ final class GpuBattleStatus {
         return player == null ? 0 : player.getColour().getColour().getRGB();
     }
 
-    /** Own; otherwise ally unless {@code Player.isEnemyOf} calls the owner an enemy. No owner counts as enemy. */
+    /** Own; otherwise ally unless {@link #enemy} calls the owner an enemy. */
     private static Side side(boolean own, Player owner, Player local) {
-        return own ? Side.OWN : owner == null || owner.isEnemyOf(local) ? Side.ENEMY : Side.ALLY;
+        return own ? Side.OWN : enemy(owner, local) ? Side.ENEMY : Side.ALLY;
     }
 
     /**
-     * The attack actions each unit has declared this phase, one per weapon, from the game's pending actions (the list
-     * BoardView.refreshAttacks draws its arrows from). Searchlight illumination is no attack and is not counted. In
-     * the physical phase the charges, death from above attacks and rams declared while moving count too, although the
-     * board draws no arrow for them: the game keeps them in lists of their own until they resolve at the end of that
-     * phase. As in BoardView.addAttack, a handheld weapon's attack counts for the unit carrying it, and an artillery
-     * attack aimed at a hex stays secret when its owner is the local player's enemy. During the local player's firing
-     * turn the pending actions also hold the attacks FiringDisplay has queued but not yet sent.
+     * Whether {@code owner} is the local player's enemy, as {@code Player.isEnemyOf} says (two players without a team
+     * are enemies). No owner counts as enemy.
      */
+    static boolean enemy(Player owner, Player local) {
+        return owner == null || owner.isEnemyOf(local);
+    }
+
+    /** How many attacks each unit has declared this phase, one per weapon: {@link #declared}, by attacking unit. */
     private static Map<Integer, Integer> declaredAttacks(Game game, Player local) {
-        Stream<EntityAction> actions = game.getActionsVector().stream();
-        if (game.getPhase().isPhysical()) {
-            actions = Stream.concat(actions, Stream.concat(game.getChargesVector().stream(),
-                  game.getRamsVector().stream()));
-        }
         Map<Integer, Integer> counts = new HashMap<>();
-        actions.filter(action -> action instanceof AttackAction && !(action instanceof SearchlightAttackAction))
-              .map(AttackAction.class::cast)
-              .forEach(attack -> {
-                  Entity weapon = game.getEntity(attack.getEntityId());
-                  Entity attacker = weapon == null ? null : weapon.getAttackingEntity();
-                  boolean secret = attack instanceof WeaponAttackAction
-                        && attack.getTargetType() == Targetable.TYPE_HEX_ARTILLERY && !friendly(weapon, local);
-                  if (attacker != null && !secret) {
-                      counts.merge(attacker.getId(), 1, Integer::sum);
-                  }
-              });
+        declared(game, local, game.getPhase().isPhysical())
+              .forEach(attack -> counts.merge(attacker(game, attack).getId(), 1, Integer::sum));
         return counts;
     }
 
     /**
-     * Whether {@code weapon}'s owner is not the local player's enemy, by the rule {@code side} uses
-     * ({@code Player.isEnemyOf}: two players without a team are enemies); false when either is unknown.
+     * The attack actions the units have declared in a phase, one per weapon, from the game's pending actions (the list
+     * BoardView.refreshAttacks draws its arrows from). Searchlight illumination is no attack and is left out. In a
+     * {@code physical} phase the charges, death from above attacks and rams declared while moving count too, although
+     * the board draws no arrow for them: the game keeps them in lists of their own until they resolve at the end of
+     * that phase. As in BoardView.addAttack, a handheld weapon's attack counts for the unit carrying it
+     * ({@link #attacker}, never null here), and an artillery attack aimed at a hex stays secret when its owner is the
+     * local player's enemy. During the local player's firing turn the pending actions also hold the attacks
+     * FiringDisplay has queued but not yet sent.
      */
+    static Stream<AttackAction> declared(Game game, Player local, boolean physical) {
+        Stream<EntityAction> actions = game.getActionsVector().stream();
+        if (physical) {
+            actions = Stream.concat(actions, Stream.concat(game.getChargesVector().stream(),
+                  game.getRamsVector().stream()));
+        }
+        return actions.filter(action -> action instanceof AttackAction && !(action instanceof SearchlightAttackAction))
+              .map(AttackAction.class::cast)
+              .filter(attack -> attacker(game, attack) != null && !(attack instanceof WeaponAttackAction
+                    && attack.getTargetType() == Targetable.TYPE_HEX_ARTILLERY
+                    && !friendly(game.getEntity(attack.getEntityId()), local)));
+    }
+
+    /** The unit making {@code attack}: its weapon's attacking entity, a handheld weapon's carrier; null if unknown. */
+    static Entity attacker(Game game, AttackAction attack) {
+        Entity weapon = game.getEntity(attack.getEntityId());
+        return weapon == null ? null : weapon.getAttackingEntity();
+    }
+
+    /** Whether {@code weapon}'s owner is not the local player's {@link #enemy}; false when the weapon is unknown. */
     private static boolean friendly(Entity weapon, Player local) {
-        Player owner = weapon == null ? null : weapon.getOwner();
-        return owner != null && !owner.isEnemyOf(local);
+        return !enemy(weapon == null ? null : weapon.getOwner(), local);
     }
 
     /**

@@ -60,6 +60,11 @@ class GpuPhaseHeaderSmokeTest {
     private static final String SHOT_01 = "01-initiative.jpg";
     private static final List<String> CONDITIONS = List.of("Temperature:  60\u00B0C", "Gravity:  0.5g",
           "Light:  Full Moon Night", "Fog:  Heavy Fog");
+    /**
+     * The phrases of CONDITIONS that differ from the standard ones, as GpuBoardActions#notableConditions
+     * words them: unusual conditions, which the conditions card shows in every phase.
+     */
+    private static final List<String> NOTABLE = List.of("Full Moon Night", "Heavy Fog", "60°C", "0.5g");
     private static final List<String> G1_PANELS = List.of("phase-header", "conditions-card", "initiative-card");
 
     @Test
@@ -173,7 +178,9 @@ class GpuPhaseHeaderSmokeTest {
      * E rule 6 over GpuHud's own layout of all its components, with the client's form of the initiative card (no
      * dice, a roll line per side): in the initiative report and in movement at 900 x 600, 1280 x 720 and 1920 x 1080,
      * each shown G1 panel lies in the window, overlaps no other shown panel and lets no child run out of it sideways;
-     * the initiative card shows in the initiative report only, and from 1280 x 720 it fits without scrolling.
+     * the initiative card shows in the initiative report only, where the phase header and the conditions wait for
+     * the board (the card names the phase and carries its own Continue), and from 1280 x 720 it fits without
+     * scrolling.
      */
     @Test
     void theThreePanelsStayInTheWindowAndClearOfTheOtherPanelsInTheHudLayout() {
@@ -203,7 +210,7 @@ class GpuPhaseHeaderSmokeTest {
                         List<Rectangle> panels = hud.panelBounds();
                         for (String panel : G1_PANELS) {
                             Actor actor = hud.stage.getRoot().findActor(panel);
-                            assertEquals(status == initiative || !panel.equals("initiative-card"), shown(actor),
+                            assertEquals(panel.equals("initiative-card") == (status == initiative), shown(actor),
                                   panel + " in " + name);
                             if (shown(actor)) {
                                 Rectangle area = GpuHudTestStage.bounds(actor);
@@ -367,10 +374,11 @@ class GpuPhaseHeaderSmokeTest {
 
     /** The panels of a frame whose phase display reports the given planetary condition lines. */
     private static GpuHudData panels(List<String> lines) {
-        return new GpuHudData(new GpuBoardActions.PhaseInfo("", false, "", "", "", List.of(), lines),
-              GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
-              GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY,
-              GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+        GpuBoardActions.PhaseInfo phase = new GpuBoardActions.PhaseInfo("", false, "", "", "", List.of(), lines,
+              lines.isEmpty() ? List.of() : NOTABLE);
+        return new GpuHudData(phase, GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
+              GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE,
+              GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     private static GpuHud.Inputs inputs(GpuHudTestStage hud, GpuBoardSource.Frame frame, boolean conditions) {

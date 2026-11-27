@@ -7,7 +7,15 @@ import static org.mockito.Mockito.*;
 import java.io.File;
 import java.util.List;
 
+import javax.swing.JMenuItem;
+import javax.swing.JToolTip;
+import javax.swing.plaf.basic.BasicHTML;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.text.View;
+
 import megamek.client.Client;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
@@ -20,6 +28,43 @@ import org.junit.jupiter.api.Test;
 
 /** Selection and equipment behavior without any inspector, Swing list, or dialog. */
 class UnitDisplayStateTest {
+    @Test
+    void theTargetSummaryRendersTheEntireFiringSolution() {
+        UnitDisplayState state = new UnitDisplayState(null);
+        state.setTarget(null, "<b>Extra information &amp; modifiers</b>");
+        state.setRange("8");
+        state.setToHit("7+ to hit<br>Movement +2");
+
+        String rendered = tooltipText(state.getTargetSummary());
+        assertTrue(rendered.contains(Messages.getString("MekDisplay.NoTarget")), rendered);
+        assertTrue(rendered.contains(Messages.getString("MekDisplay.Range") + " 8"), rendered);
+        assertTrue(rendered.contains("7+ to hit"), rendered);
+        assertTrue(rendered.contains("Movement +2"), rendered);
+        assertTrue(rendered.contains("Extra information & modifiers"), rendered);
+
+        state.clearToHit();
+        state.setRange(null);
+        state.setTarget(null, null);
+        rendered = tooltipText(state.getTargetSummary());
+        assertTrue(rendered.contains("---"), rendered);
+        assertFalse(rendered.contains("null"), rendered);
+    }
+
+    /** The summary as a Swing tooltip renders it (the map menu shows it as one). */
+    private static String tooltipText(String summary) {
+        JMenuItem item = new JMenuItem();
+        item.setToolTipText(summary);
+        JToolTip tooltip = item.createToolTip();
+        tooltip.setTipText(item.getToolTipText());
+        View view = assertInstanceOf(View.class, tooltip.getClientProperty(BasicHTML.propertyKey));
+        Document document = view.getDocument();
+        try {
+            return document.getText(0, document.getLength());
+        } catch (BadLocationException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
     @Test
     void cyclingUsesTheGameRulesAndClearsSelectionWhenNoOtherWeaponIsAvailable() throws Exception {
         UnitDisplayState state = new UnitDisplayState(null);

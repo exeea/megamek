@@ -45,13 +45,24 @@ struct WaterImpact {
     float foam;
 };
 
+// The foam noise read in a pool's two restarting phases, blended so that its contrast holds through each restart.
+float waterChurn(vec2 a, vec2 b, vec2 weights) {
+    return 0.5 + ((texture(u_surfaceNoise, vec3(a, WATER_DETAIL)).b - 0.5) * weights.x
+          + (texture(u_surfaceNoise, vec3(b, WATER_DETAIL)).b - 0.5) * weights.y)
+          * inversesqrt(weights.x * weights.x + weights.y * weights.y);
+}
+
 // A fall churns the pool it lands in: a boil round its landing line, rings pushed outward and the churned water
 // flowing away. The landing lines of every fall nearby meet at the corners they share, so the boil runs on
-// round those corners and across hexes without a seam; behind a curtain the water churns right to the wall.
+// round those corners and across hexes without a seam. A boil is as large as its fall: it fades out over a little
+// more than twice the fall's radius from the landing and, behind the curtain, reaches back toward the wall over a
+// band that grows with it (GpuWaterShader.BOIL_REACH lists the falls whose boil reaches a pool), so a thread churns a
+// small boil and a whole crest a wide one. Its white water breaks into lobes about the boil's own size and frays
+// into lace: dense at the landing, yet never flat or solid.
 // Position, shoreline distance and landing lines are in hex widths; phase and weights come from pool advection.
 WaterImpact waterFallImpacts(vec2 position, float shore, float noise, float phase, vec2 weights,
       float effects, inout vec2 slope) {
-    float boil = 0.0;
+    float strength = 0.0, radii = 0.0, reaches = 0.0;
     vec2 push = vec2(0.0);
     for (int i = 0; i < 12; i++) {
         if (i >= u_splashCount) break;
@@ -62,18 +73,16 @@ WaterImpact waterFallImpacts(vec2 position, float shore, float noise, float phas
         vec2 offset = position - (line.xy + along * t);
         float gap = length(offset);
         vec2 outward = offset / max(gap, 1e-4);
-        // Between the landing and the wall behind the curtain, about as far as it is thrown, all churns.
         float behind = smoothstep(0.0, 0.5, -dot(outward, normalize(vec2(along.y, -along.x))));
-        float reach = 1.0 - smoothstep(radius * 0.2, radius * 1.8,
-              max(gap - 0.085 * behind, 0.0) + noise * radius * 0.6);
+        float reach = 1.0 - smoothstep(radius * 0.3, radius * 2.4, max(gap - radius * 0.7 * behind, 0.0));
         float ring = sin(gap * 70.0 - u_rainTime * 8.0 + noise * 6.0);
         slope += outward * ring * reach * 0.22 * effects;
-        boil = max(boil, reach);
+        strength = max(strength, reach);
         push += outward * reach;
+        radii += radius * reach;
+        reaches += reach;
     }
-    // The impact breaks up before reaching a bank; shoreline foam still follows the actual waterline.
-    boil *= effects * smoothstep(0.004, 0.06, shore);
-    float bubbles = 0.0, impact = 0.0;
+    float boil = 0.0, bubbles = 0.0, impact = 0.0;
     // Without a nearby landing boil is zero, so neither bubbles nor impact contributes. The uniform branch
     // keeps mip selection defined for every fragment of materials that do have falling water nearby.
     if (u_splashCount > 0) {
@@ -82,13 +91,21 @@ WaterImpact waterFallImpacts(vec2 position, float shore, float noise, float phas
         vec2 drift = push * (0.06 / max(length(push), 1.0));
         vec2 bubbleA = position - drift * ((phase - 0.5) * FLOW_CYCLE);
         vec2 bubbleB = position - drift * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37;
-        bubbles = 0.5 + ((texture(u_surfaceNoise, vec3(bubbleA * 3.4 + 0.61, WATER_DETAIL)).b - 0.5) * weights.x
-              + (texture(u_surfaceNoise, vec3(bubbleB * 3.4 + 0.61, WATER_DETAIL)).b - 0.5) * weights.y)
-              * inversesqrt(weights.x * weights.x + weights.y * weights.y);
-        // Solid white right below the fall, breaking into patches and then lace as the foam spreads.
-        float settle = 1.0 - boil;
-        impact = smoothstep(settle, settle + 0.15, bubbles * 0.6 + (noise + 0.5) * 0.4)
-              * smoothstep(0.0, 0.15, boil);
+        bubbles = waterChurn(bubbleA * 3.4 + 0.61, bubbleB * 3.4 + 0.61, weights);
+        // Lobes about the boil's own size: the bubbles' scale for a thread's, a coarser one for a whole crest's;
+        // lace finer than both frays them.
+        float coarse = waterChurn(bubbleA * 0.85 + 0.29, bubbleB * 0.85 + 0.29, weights);
+        float lace = waterChurn(bubbleA * 9.0 + 0.43, bubbleB * 9.0 + 0.43, weights);
+        float churned = mix(bubbles, coarse, smoothstep(0.05, 0.15, radii / max(reaches, 1e-4))) * 0.6
+              + lace * 0.25 + (noise + 0.5) * 0.15;
+        // The impact breaks up raggedly before reaching a bank; shoreline foam still follows the actual waterline.
+        strength *= effects * smoothstep(0.004, 0.06, shore + (churned - 0.5) * 0.06);
+        // Dense white water at the landing, with holes, breaking into patches and then lace as the foam spreads; even
+        // where it is densest the lace lets the water show through, so in a fall's shadow it never lies flat.
+        float settle = mix(0.78, 0.32, strength);
+        impact = smoothstep(settle, settle + 0.1, churned) * smoothstep(0.0, 0.1, strength)
+              * mix(0.7, 1.0, smoothstep(0.35, 0.65, lace));
+        boil = strength * mix(0.55, 1.0, smoothstep(0.3, 0.7, churned));
     }
     return WaterImpact(boil, bubbles, impact);
 }

@@ -314,9 +314,10 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     color = (body * (1.0 - fresnel) + reflection + glint * (1.0 - foam)) * edge;
     alpha = (bodyAlpha * (1.0 - fresnel) + fresnel) * edge;
     // Foam is never flat white: thicker and thinner froth, and bubbles churning below a fall, whose freshly
-    // aerated water glows brightest.
+    // aerated water glows brightest; the churned foam's bubbles stand out in relief, in shade as much as in sun.
     float grain = mix(noise + 0.5, bubbles, boil);
-    vec3 foamReflectance = materialReflectance(froth * ((0.78 + 0.34 * grain) * (1.0 + 0.25 * boil)));
+    vec3 foamReflectance = materialReflectance(froth * ((mix(0.78, 0.5, boil) + mix(0.34, 0.9, boil) * grain)
+          * (1.0 + 0.25 * boil)));
     color = mix(color, foamReflectance * illumination.whiteLight, foam);
     alpha = mix(alpha, 1.0, foam);
     float grid = terrainGrid(position);

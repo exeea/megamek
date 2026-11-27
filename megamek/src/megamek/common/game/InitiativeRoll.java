@@ -67,6 +67,20 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
      */
     private Vector<int[]> keptDice = new Vector<>();
 
+    private boolean automatic;
+
+    /** An automatic initiative success has a fixed margin and has no dice (IO:BF p. 223). */
+    public void automaticResult(boolean won) {
+        clear();
+        automatic = true;
+        int value = won ? 1 : 0;
+        rolls.add(value);
+        originalRolls.add(value);
+        wasRollReplaced.add(false);
+        bonuses.add(InitiativeBonusBreakdown.zero());
+        keepDice(null);
+    }
+
     public InitiativeRoll() {
 
     }
@@ -81,6 +95,7 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
      */
     public InitiativeRoll(InitiativeRoll other) {
         // Integer, Boolean and InitiativeBonusBreakdown are immutable, so copying the vectors themselves is sufficient.
+        automatic = other.automatic;
         rolls.addAll(other.rolls);
         originalRolls.addAll(other.originalRolls);
         wasRollReplaced.addAll(other.wasRollReplaced);
@@ -91,6 +106,7 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
     }
 
     public void clear() {
+        automatic = false;
         rolls.removeAllElements();
         originalRolls.removeAllElements();
         bonuses.removeAllElements();
@@ -257,6 +273,9 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
 
     @Override
     public String toString() {
+        if (automatic) {
+            return getRoll(0) == 1 ? "automatic win (margin 1)" : "automatic loss";
+        }
         StringBuilder stringBuilder = new StringBuilder();
 
         boolean tacticalGenius = false;

@@ -12,64 +12,219 @@ import java.util.Arrays;
  * face is written once for each.
  */
 final class ChunkMesh {
-    /** Floats a vertex. */
-    static final int FLOATS = 14;
+    /** Floats a vertex; a hex with a cover border has three more (TerrainField#COVER_LAYOUT). */
+    static final int FLOATS = 14, COVER_FLOATS = 17;
 
     private ChunkMesh() { }
 
-    /** {@code bounds}: min x, y, z, max x, y, z of every vertex. */
-    record Hex(float[] direct, short[] directIndices, float[] levelTops, short[] levelTopIndices, float[] bounds) { }
+    /**
+     * {@code bounds}: min x, y, z, max x, y, z of every vertex. {@code palette}: the covers of the hex's draw, whose
+     * entries its vertices' weights are for; null for a hex without cover weights.
+     */
+    record Hex(float[] direct, short[] directIndices, float[] levelTops, short[] levelTopIndices, float[] bounds,
+          int[] palette) {
+        int floats() { return palette == null ? FLOATS : COVER_FLOATS; }
+    }
 
-    static Hex of(ChunkField.Block block) {
-        Writer direct = new Writer(block), tops = new Writer(block);
+    /**
+     * {@code water}: the block's hex where its ground lies under that hex's water (FieldShore), or the field water a
+     * land block's low ground lies under (FieldWater#beside), else null. {@code palette}: the covers of the block's
+     * draw ({@link FieldCover#draws}); null where the block has no cover.
+     */
+    static Hex of(ChunkField.Block block, BoardScene.Tile water, int[] palette) { return of(block, water, null, palette, null); }
+
+    /**
+     * {@link #of(ChunkField.Block, BoardScene.Tile, int[])}, the water's height at each sample from {@code shore}
+     * (FieldShore#water: a descending stream's graded surface); its level where shore is null. {@code untaken}: per edge
+     * the open water across it that the field does not take (FieldWater#untakenWater), or null: a wall under it is wet.
+     */
+    static Hex of(ChunkField.Block block, BoardScene.Tile water, FieldShore shore, int[] palette, BoardScene.Tile[] untaken) {
+        // A water hex's ground carries its water everywhere; land beside it only where it lies under the water.
+        boolean own = water != null && water.coords().equals(block.coords());
+        // Up to the hex's level: the bench and the bank's wet strip above the water (terrain-sculpt.frag's river bank).
+        boolean[] wet = water == null || own ? null
+              : wet(block, block.ground(), BoardGeometry.waterZ(water) + .99f * BoardGeometry.hexScale());
+        Writer direct = new Writer(block, water, shore, wet, palette);
+        Writer tops = new Writer(block, own ? water : null, shore, null, palette);
         direct.triangles(block.ground(), false);
-        direct.triangles(block.faces(), true);
-        direct.triangles(block.walls(), true);
-        tops.triangles(block.levelTops(), false);
-        return new Hex(direct.vertices(), direct.indices(), tops.vertices(), tops.indices(), block.bounds());
+        direct.bank(block.faces());
+        direct.walls(block.walls(), untaken);
+        // Level tops under water carry it too, so they stay off the cached tops' materials.
+        (own ? direct : tops).triangles(block.levelTops(), false);
+        return new Hex(direct.vertices(), direct.indices(), tops.vertices(), tops.indices(), block.bounds(), palette);
+    }
+
+    /**
+     * The samples of a land block's ground triangles {@code list} that carry the water beside it, whose surface is
+     * {@code surface} high: those below it and the others of their triangles, so a triangle the waterline crosses is
+     * wet whole and the change to dry cover lies just above the water.
+     */
+    private static boolean[] wet(ChunkField.Block block, int[] list, float surface) {
+        boolean[] wet = new boolean[block.size()];
+        float[] z = block.z();
+        for (int i = 0; i < list.length; i += 3) {
+            if (z[list[i]] < surface || z[list[i + 1]] < surface || z[list[i + 2]] < surface) {
+                wet[list[i]] = wet[list[i + 1]] = wet[list[i + 2]] = true;
+            }
+        }
+        return wet;
+    }
+
+    /** Sample {@code v}'s a_fieldParent, four floats into {@code out} from {@code o}; what is draped on it carries the same. */
+    static void parent(ChunkField.Block block, int v, float[] out, int o) {
+        float[] parents = block.parents();
+        int p = v * 6;
+        boolean own = Float.isNaN(parents[p]);
+        out[o] = own ? 0 : parents[p];
+        out[o + 1] = own ? 0 : parents[p + 1];
+        out[o + 2] = own ? 0 : parents[p + 2];
+        out[o + 3] = (own ? octahedral(block.nx()[v], block.ny()[v], block.nz()[v])
+              : octahedral(parents[p + 3], parents[p + 4], parents[p + 5])) + (block.sides()[v] << 20);
+    }
+
+    /** A unit normal as two 10-bit octahedral coordinates in one exact integer (field-morph.glsl decodes it). */
+    static int octahedral(float x, float y, float z) {
+        float sum = Math.abs(x) + Math.abs(y) + Math.abs(z);
+        float u = x / sum, v = y / sum;
+        if (z < 0) {
+            float ou = (1 - Math.abs(v)) * Math.signum(u == 0 ? 1 : u), ov = (1 - Math.abs(u)) * Math.signum(v == 0 ? 1 : v);
+            u = ou;
+            v = ov;
+        }
+        int a = Math.round((u * .5f + .5f) * 1023), b = Math.round((v * .5f + .5f) * 1023);
+        return a | b << 10;
     }
 
     /** One group's vertices, each sample written once a kind (top cover or step face). */
     private static final class Writer {
         final ChunkField.Block block;
-        final float[] parents;
-        final int[] sides;
-        final int[] cover, face;
-        float[] vertices = new float[FLOATS * 64];
+        final BoardScene.Tile water;
+        /** The water's height at a sample (FieldShore#water); null: its level. */
+        final FieldShore shore;
+        /** Which samples carry the water: null for all (a water hex's own ground). */
+        final boolean[] wet;
+        final int[] cover, face, drown, soak;
+        /** The draw's entry of each of the hex's own entries; null without cover weights. */
+        final int[] slots;
+        /** Which of the draw's entries are a wall's foot share, a bit each (a_fieldCoverCut's second byte). */
+        final int feet;
+        final int floats;
+        float[] vertices;
         short[] indices = new short[192];
         int count, indexCount;
 
-        Writer(ChunkField.Block block) {
+        Writer(ChunkField.Block block, BoardScene.Tile water, FieldShore shore, boolean[] wet, int[] palette) {
             this.block = block;
-            parents = block.parents();
-            sides = block.sides();
+            this.water = water;
+            this.shore = shore;
+            this.wet = wet;
+            int bits = 0;
+            if (palette == null) {
+                slots = null;
+            } else {
+                int[] covers = block.cover().covers();
+                slots = new int[covers.length];
+                for (int e = 0; e < covers.length; e++) { slots[e] = FieldCover.slot(palette, covers[e]); }
+                for (int e = 0; e < palette.length; e++) { if (palette[e] >= FieldCover.FOOT) { bits |= 1 << e; } }
+            }
+            feet = bits;
+            floats = palette == null ? FLOATS : COVER_FLOATS;
+            vertices = new float[floats * 64];
             cover = new int[block.size()];
             face = new int[block.size()];
+            drown = new int[block.size()];
+            soak = new int[block.size()];
             Arrays.fill(cover, -1);
             Arrays.fill(face, -1);
+            Arrays.fill(drown, -1);
+            Arrays.fill(soak, -1);
         }
 
         void triangles(int[] list, boolean faces) {
             for (int i = 0; i < list.length; i++) {
                 if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
-                indices[indexCount++] = (short) vertex(list[i], faces);
+                indices[indexCount++] = (short) vertex(list[i], faces, false, null);
             }
         }
 
-        private int vertex(int v, boolean faces) {
-            int[] written = faces ? face : cover;
+        /**
+         * The step faces' triangles (the bank's slope): faces, but a triangle any sample of which lies under the water
+         * this block carries (inside today's waterline, below its surface) is written as the block's wet ground is, so
+         * a bank's slope under the water looks as the bed beside it does, as today's submerged bank does.
+         */
+        void bank(int[] list) {
+            float[] x = block.x(), y = block.y(), z = block.z();
+            for (int i = 0; i + 2 < list.length; i += 3) {
+                boolean drowned = false;
+                for (int k = 0; water != null && k < 3; k++) {
+                    int v = list[i + k];
+                    float surface = shore == null ? BoardGeometry.waterZ(water)
+                          : shore.water(water.coords(), x[v], y[v]);
+                    drowned |= z[v] < surface && (shore == null || shore.distance(x[v], y[v]) > 0);
+                }
+                for (int k = 0; k < 3; k++) {
+                    if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
+                    indices[indexCount++] = (short) vertex(list[i + k], !drowned, drowned, null);
+                }
+            }
+        }
+
+        /**
+         * The walls' triangles: faces, but where a wall stands under open water the field does not take (a canal beside a
+         * quay's plate: {@code untaken}, per edge), a triangle any sample of which lies below that water's surface is
+         * written with its optics as wet rock, as today's walls under water are (GpuWaterCover#coveredFace).
+         */
+        void walls(int[] list, BoardScene.Tile[] untaken) {
+            float[] z = block.z();
+            for (int i = 0; i + 2 < list.length; i += 3) {
+                BoardScene.Tile under = untaken == null ? null : untaken[block.edge(list, i)];
+                if (under != null) {
+                    float surface = BoardGeometry.waterZ(under);
+                    if (z[list[i]] >= surface && z[list[i + 1]] >= surface && z[list[i + 2]] >= surface) { under = null; }
+                }
+                for (int k = 0; k < 3; k++) {
+                    if (indexCount == indices.length) { indices = Arrays.copyOf(indices, indices.length * 2); }
+                    indices[indexCount++] = (short) vertex(list[i + k], true, false, under);
+                }
+            }
+        }
+
+        private int vertex(int v, boolean faces, boolean drowned, BoardScene.Tile soaked) {
+            int[] written = faces ? soaked != null ? soak : face : drowned ? drown : cover;
             if (written[v] >= 0) { return written[v]; }
-            if ((count + 1) * FLOATS > vertices.length) { vertices = Arrays.copyOf(vertices, vertices.length * 2); }
-            int o = count * FLOATS;
+            if ((count + 1) * floats > vertices.length) { vertices = Arrays.copyOf(vertices, vertices.length * 2); }
+            int o = count * floats;
             vertices[o] = block.x()[v];
             vertices[o + 1] = block.y()[v];
             vertices[o + 2] = block.z()[v];
             float u, w;
-            if (faces) {
+            if (faces && soaked != null) {
+                // Under the water: water-tagged as today's covered quay wall is (GpuWaterCover#coveredFace's ground
+                // branch: the water's level and palette in the colour, foot and rim in the shore's order).
+                vertices[o + 3] = GpuTerrain.waterColor(block.faceOcclusion(v), BoardGeometry.waterZ(soaked),
+                      GpuTerrain.shoreTint(GpuWaterShader.palette(soaked.liquid()), 0)).toFloatBits();
+                u = block.faceFoot()[v];
+                w = GpuTerrain.shoreRim(block.faceRim()[v], soaked);
+            } else if (faces) {
                 vertices[o + 3] = GpuTerrain.packedShade(BoardRelief.Kind.CLIFF, block.faceOcclusion(v), block.rock()[v], block.bed(v),
                       block.projection()[v]);
+                // A level ledge of whole rock over a water hex's water (a fall's dry rim, FieldBoard#crestUnder): the
+                // cliff byte 138, ground shading's bare ledge, read as rock on the plane.
+                if (block.steps()[v] < 0 && block.nz()[v] > .85f) {
+                    com.badlogic.gdx.graphics.Color ledge = GpuTerrain.shadeColor(BoardRelief.Kind.CLIFF, block.faceOcclusion(v),
+                          block.rock()[v], block.bed(v), Float.NaN);
+                    ledge.b = 138 / 255f;
+                    vertices[o + 3] = ledge.toFloatBits();
+                }
                 u = block.faceRim()[v];
                 w = block.faceFoot()[v];
+            } else if (water != null && (drowned || wet == null || wet[v])) {
+                // A water hex's ground carries its water as today's wet ground does (GpuTerrain#sculptVertex).
+                vertices[o + 3] = GpuTerrain.waterColor(block.occlusion(v), shore == null ? BoardGeometry.waterZ(water)
+                      : shore.water(water.coords(), block.x()[v], block.y()[v]),
+                      GpuTerrain.shoreTint(GpuWaterShader.palette(water.liquid()), block.steps()[v])).toFloatBits();
+                u = block.footMetres(v);
+                w = GpuTerrain.shoreRim(block.rimMetres(v), water);
             } else {
                 vertices[o + 3] = GpuTerrain.packedShade(BoardRelief.Kind.GROUND, block.occlusion(v), block.level(),
                       block.coverTint(v), Float.NaN);
@@ -87,31 +242,36 @@ final class ChunkMesh {
             vertices[o + 9] = Float.intBitsToFloat(role | rock << 8);
             // a_fieldParent: the coarse parent's offset and normal, octahedral (a sample that is its own parent: no
             // offset, its own normal), and the neighbouring chunk the sample borders.
-            int p = v * 6;
-            boolean own = Float.isNaN(parents[p]);
-            vertices[o + 10] = own ? 0 : parents[p];
-            vertices[o + 11] = own ? 0 : parents[p + 1];
-            vertices[o + 12] = own ? 0 : parents[p + 2];
-            vertices[o + 13] = (own ? octahedral(block.nx()[v], block.ny()[v], block.nz()[v])
-                  : octahedral(parents[p + 3], parents[p + 4], parents[p + 5])) + (sides[v] << 20);
+            parent(block, v, vertices, o + 10);
+            if (slots != null) {
+                FieldCover.Hex covers = block.cover();
+                vertices[o + 14] = weights(covers, v * 8);
+                vertices[o + 15] = weights(covers, v * 8 + 4);
+                vertices[o + 16] = cuts(covers.cut(), v * 4, feet);
+            }
             written[v] = count;
             return count++;
         }
 
-        /** A unit normal as two 10-bit octahedral coordinates in one exact integer (field-morph.glsl decodes it). */
-        private static int octahedral(float x, float y, float z) {
-            float sum = Math.abs(x) + Math.abs(y) + Math.abs(z);
-            float u = x / sum, v = y / sum;
-            if (z < 0) {
-                float ou = (1 - Math.abs(v)) * Math.signum(u == 0 ? 1 : u), ov = (1 - Math.abs(u)) * Math.signum(v == 0 ? 1 : v);
-                u = ou;
-                v = ov;
-            }
-            int a = Math.round((u * .5f + .5f) * 1023), b = Math.round((v * .5f + .5f) * 1023);
-            return a | b << 10;
+        /**
+         * a_fieldCover, a_fieldCoverParent: a sample's weights on the draw's four entries as normalized bytes, their
+         * sum 255 (so never a NaN pattern: a top byte of 127 leaves at most 128 below it, an infinity's bits).
+         */
+        private float weights(FieldCover.Hex covers, int at) {
+            int bits = 0;
+            for (int e = 0; e < slots.length; e++) { bits |= (covers.weights()[at + e] & 255) << 8 * slots[e]; }
+            return Float.intBitsToFloat(bits);
         }
 
-        float[] vertices() { return Arrays.copyOf(vertices, count * FLOATS); }
+        /**
+         * a_fieldCoverCut as normalized bytes: the authored transition's share, the draw's foot entries (a bit each), the
+         * coarse parent's share, 0 (so never a NaN pattern).
+         */
+        private static float cuts(byte[] cut, int at, int feet) {
+            return Float.intBitsToFloat(cut[at] & 255 | feet << 8 | (cut[at + 2] & 255) << 16);
+        }
+
+        float[] vertices() { return Arrays.copyOf(vertices, count * floats); }
 
         short[] indices() { return Arrays.copyOf(indices, indexCount); }
     }

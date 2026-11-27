@@ -46,7 +46,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.SBFClientGUI;
-import megamek.client.ui.dialogs.phaseDisplay.SBFJumpChoiceDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
@@ -121,7 +121,7 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         game().addGameListener(this);
         // TODO: rather have clientGUI take BVListeners and forward all events -> dont have to deal with changing
         //  BoardViews
-        clientGUI.boardViews().forEach(b -> b.addBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.addBoardViewListener(this));
     }
 
     @Override
@@ -133,7 +133,8 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         }
     }
 
-    private void selectFormation(@Nullable SBFFormation formation) {
+    @Override
+    protected void selectFormation(@Nullable SBFFormation formation) {
         if (formation == null) {
             currentFormation = SBFFormation.NONE;
             clientGUI.clearMovementEnvelope();
@@ -226,30 +227,32 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
     @Override
     public void ready() {
         Optional<SBFFormation> formation = game().getFormation(currentFormation);
-        if (formation.isEmpty() || plannedMovement == null) {
+        SBFMovePath path = plannedMovement;
+        if (formation.isEmpty() || path == null || !(game().getTurn() instanceof SBFFormationTurn turn)) {
             return;
         }
 
-        if (plannedMovement.getSteps().isEmpty() || planJump(formation.get()).isConfirmed()) {
-            clientGUI.getClient().moveUnit(plannedMovement);
+        if ((path.getSteps().isEmpty() || planJump(formation.get(), path).isConfirmed())
+              && path == plannedMovement && stillActing(path.getEntityId(), turn)) {
+            clientGUI.getClient().moveUnit(path);
             endMyTurn();
         }
     }
 
-    private DialogResult planJump(SBFFormation formation) {
+    private DialogResult planJump(SBFFormation formation, SBFMovePath path) {
         // TODO SBF RULES Can you use JUMP if you remain in the hex?
         if (formation.getJumpMove() > 0) {
             List<Integer> choices = Stream.iterate(0, n -> n + 1).limit(formation.getJumpMove() + 1).toList();
-            SBFJumpChoiceDialog jumpChoiceDialog = new SBFJumpChoiceDialog(clientGUI.getFrame(), choices);
-            jumpChoiceDialog.setLocationRelativeTo(clientGUI.getFrame());
-            jumpChoiceDialog.pack();
-            DialogResult result = jumpChoiceDialog.showDialog();
-            if (result.isConfirmed()) {
-                plannedMovement.setJumpUsed(jumpChoiceDialog.getFirstChoice());
+            Integer chosen = clientGUI.askChoice(Messages.getString("SBFTargetDialog.title"),
+                  "Choose the JUMP points to use:", choices.stream()
+                        .map(n -> new DialogRow((n > 0) ? Integer.toString(n) : "None", "", null, true)).toList());
+            if (chosen == null) {
+                return DialogResult.CANCELLED;
             }
-            return result;
+            path.setJumpUsed(choices.get(chosen));
+            return DialogResult.CONFIRMED;
         } else {
-            plannedMovement.setJumpUsed(0);
+            path.setJumpUsed(0);
             return DialogResult.CONFIRMED;
         }
     }
@@ -267,7 +270,7 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientGUI.boardViews().forEach(b -> b.removeBoardViewListener(this));
+        clientGUI.boardStates().forEach(b -> b.removeBoardViewListener(this));
     }
 
     private void beginMyTurn() {
@@ -322,12 +325,7 @@ public class SBFMovementDisplay extends SBFActionPhaseDisplay {
         Map<BoardLocation, SBFMovePath> mvEnvData;
         SBFMovePath mp = new SBFMovePath(formation.getId(), formation.getPosition(), game());
 
-        int maxMP = formation.getMovement();
-        // TO:AR PG 18 - Forth Printing.
-        if (game().usesSprintingMove()) {
-            double sprintingMovementPoints = maxMP * 1.5;
-            maxMP = (int) Math.floor(sprintingMovementPoints);
-        }
+        int maxMP = SBFMovePath.maximumMovementPoints(formation, game());
 
         SBFMovePathFinder pathFinder = SBFMovePathFinder.moveEnvelopeFinder(maxMP, game());
         pathFinder.run(mp);

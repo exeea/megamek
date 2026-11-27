@@ -49,9 +49,16 @@ public interface SBFRuleOptionsUser {
      */
     SBFRuleOptions getOptions();
 
-    /**
-     * @return True when this game uses Detection and Reconnaissance, IO:BF p.195 aka double-blind.
-     */
+    /** Expanded Woods and Jungle terrain, IO:BF pp. 200–203. */
+    default boolean usesAdvancedTerrain() {
+        return getOptions().booleanOption(SBFRuleOptions.MOVE_ADVANCED_TERRAIN);
+    }
+
+    default boolean usesExpandedWoods() {
+        return usesAdvancedTerrain() || getOptions().booleanOption(SBFRuleOptions.MOVE_EXPANDED_WOODS);
+    }
+
+    /** Detection and Reconnaissance, IO:BF p. 195. */
     default boolean usesDoubleBlind() {
         return getOptions().booleanOption(SBFRuleOptions.BASE_RECON);
     }
@@ -70,6 +77,25 @@ public interface SBFRuleOptionsUser {
     @Deprecated(since = "0.51.0", forRemoval = true)
     default boolean usesBattlefieldInt() {
         return getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT);
+    }
+
+    /** The optional Design Quirks rules, IO:BF p. 226: "If the players are using the optional Design Quirks rules". */
+    default boolean usesDesignQuirks() {
+        return getOptions().booleanOption(SBFRuleOptions.DESIGN_QUIRKS);
+    }
+
+    /** Urban Hexes (Buildings), IO:BF pp. 215-218. */
+    default boolean usesUrbanCombat() {
+        return getOptions().booleanOption(SBFRuleOptions.URBAN_COMBAT);
+    }
+
+    /**
+     * @return True when Formations may be adjusted at all: by the full rule (IO:BF p. 198) or, when players chose it, only
+     *       for Forced Withdrawals (IO:BF p. 172)
+     */
+    default boolean adjustsFormations() {
+        return getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FORMATIONS)
+              || getOptions().booleanOption(SBFRuleOptions.BASE_ADJUST_FOR_WITHDRAWAL);
     }
 
     /**

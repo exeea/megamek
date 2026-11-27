@@ -204,7 +204,7 @@ class GpuMovementDisplayAccessTest {
                 return display.getLastEnvelope();
             });
             assertEquals(fromWaypoint.mp(), hidden.mp());
-            assertEquals(List.of(), onSwing(moving::envelopeSprites));
+            assertEquals(List.of(), onSwing(moving::envelopeMarks));
             assertSame(Envelope.NONE, onSwing(() -> {
                 display.computeMovementEnvelope(moving.unit);
                 return display.getLastEnvelope();

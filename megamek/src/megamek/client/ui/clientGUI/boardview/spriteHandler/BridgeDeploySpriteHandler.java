@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.equipment.BridgeLayerLogic;
@@ -51,7 +50,7 @@ import megamek.common.units.Entity;
  * Manages bridge-deployment indicator sprites for Bridge-Layer (AVLB) units (TM p.242 / TW). A unit that has declared a
  * deployment must remain stationary for a turn before the folding bridge is placed; this handler draws a partial bridge
  * (with a turns-to-finish counter) on the target hex of every unit with a pending deployment, reusing the same
- * {@link BridgeBuildSprite} the infantry bridge build uses, so the in-progress deployment is visible just like an
+ * {@link TacticalMark.BridgeBuild} the infantry bridge build uses, so the in-progress deployment is visible just like an
  * engineer-built bridge. The pending state is read from the synced entities' bridgelayer mounts.
  *
  * @author MegaMek Team (with Claude Code assistance)

@@ -62,7 +62,6 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.client.ui.widget.MekPanelTabStrip;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
 import megamek.common.ToHitData;
@@ -496,9 +495,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
 
         clientgui.getUnitDisplayState().displayEntity(entity);
-        if (GUIP.getMoveDisplayTabDuringMovePhases()) {
-            clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
-        }
 
         clientgui.centerOnUnit(entity);
 
@@ -576,7 +572,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
      * Does turn start stuff
      */
     private void beginMyTurn() {
-        clientgui.maybeShowUnitDisplay();
         GameTurn turn = clientgui.getClient().getMyTurn();
         // There's special processing for countering break grapple.
         if (turn instanceof CounterGrappleTurn) {
@@ -615,7 +610,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
             (next != null) &&
             (currentEntity() != null) &&
               (next.getOwnerId() != currentEntity().getOwnerId())) {
-            clientgui.maybeShowUnitDisplay();
         }
         currentEntity = Entity.NONE;
         target(null);
@@ -2484,7 +2478,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
                     selectEntity(e.getId());
                 }
             } else {
-                clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplayState().displayEntity(e);
                 clientgui.centerOnUnit(e);
             }

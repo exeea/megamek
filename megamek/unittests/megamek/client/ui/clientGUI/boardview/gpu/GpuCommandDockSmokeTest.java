@@ -1806,7 +1806,7 @@ class GpuCommandDockSmokeTest {
         boolean busy = dock.state().history.running();
         dock.state().update(shot.status(), GpuUnitRecord.Snapshot.EMPTY, busy);
         return new GpuHud.Inputs(frame, new GpuHud.HudView(false, busy, Map.of(), Map.of(), Map.of(), null,
-              Entity.NONE, 0), null, shot.preferences(), GpuHud.Metrics.of(hud.width(), hud.height()), List.of());
+              Entity.NONE), null, shot.preferences(), GpuHud.Metrics.of(hud.width(), hud.height()), List.of());
     }
 
     /** GpuHud's middle band between the left column and the right column (the log's width while it is open). */

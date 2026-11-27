@@ -158,6 +158,28 @@ final class GpuBuilding implements Disposable {
         return GeneratedKit.kit(file, design.endsWith("-square"), at < 0 ? null : asset.substring(at + 1), footprintScale);
     }
 
+    /**
+     * A building asset's ground outline on a hex whose kit links across {@code links} (GeneratedKit#outline), in model
+     * units; null where the asset has no generated kit.
+     */
+    static List<double[]> outline(String asset, float footprintScale, int links) {
+        if (!kitAsset(asset)) { return null; }
+        File file = megamek.common.board.TilesetScenery.customBuildingFile(asset);
+        if (!file.getName().endsWith(".json")) { return null; }
+        int at = asset.indexOf('@');
+        String design = at < 0 ? asset : asset.substring(0, at);
+        return GeneratedKit.outline(file, design.endsWith("-square"), at < 0 ? null : asset.substring(at + 1), footprintScale, links);
+    }
+
+    /** The walkway a building asset's kit lays round its ground storey (GeneratedKit#walkway), in model units; 0 for none. */
+    static double walkway(String asset) {
+        if (!kitAsset(asset)) { return 0; }
+        File file = megamek.common.board.TilesetScenery.customBuildingFile(asset);
+        if (!file.getName().endsWith(".json")) { return 0; }
+        int at = asset.indexOf('@');
+        return GeneratedKit.walkway(file, at < 0 ? null : asset.substring(at + 1));
+    }
+
     /** Whether {@code asset} draws as a kit ({@link #kit(String, float)}) where it has a kit file: a building's, not a wall's. */
     static boolean kitAsset(String asset) {
         return asset.startsWith("buildings/") && !BoardWall.supports(asset);

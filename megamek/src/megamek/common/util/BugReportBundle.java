@@ -467,29 +467,6 @@ public class BugReportBundle {
     }
 
     /**
-     * Finds the most recently changed game summary folder, for when there is no current game to name one. A game
-     * that crashed or was abandoned leaves its folder behind, and that is often the game the report is about.
-     *
-     * @param minimapDirectory the folder holding one sub-folder per game, normally {@code gameSummaries/minimap}
-     *
-     * @return the newest game folder, or {@code null} when there is none
-     */
-    public static @Nullable File newestGameSummaryDirectory(File minimapDirectory) {
-        File[] gameDirectories = minimapDirectory.listFiles(File::isDirectory);
-        if ((gameDirectories == null) || (gameDirectories.length == 0)) {
-            return null;
-        }
-
-        File newestDirectory = gameDirectories[0];
-        for (File gameDirectory : gameDirectories) {
-            if (gameDirectory.lastModified() > newestDirectory.lastModified()) {
-                newestDirectory = gameDirectory;
-            }
-        }
-        return newestDirectory;
-    }
-
-    /**
      * Collects the rolled, compressed log archives for every basename in the manifest, newest first.
      *
      * @return the rolled logs, newest first; empty when none have been rolled yet

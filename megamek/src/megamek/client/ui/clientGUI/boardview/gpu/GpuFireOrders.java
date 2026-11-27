@@ -17,6 +17,7 @@ import javax.swing.SwingUtilities;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
@@ -87,7 +88,9 @@ final class GpuFireOrders implements AutoCloseable {
      * "". {@code damage} is the value before " dmg": "{per hit}x{rack}" for cluster weapons, else the Unit Display's.
      * {@code mode} is "" without modes. {@code ammo} lists the bins it may switch to (its one fixed bin, or none), each
      * by its carrier and number; {@code loadedAmmo} is the loaded bin's index among them (-1 none) and {@code shots}
-     * that bin's shots (-1 none). The TN column shows {@code target}: the target of the weapon's queued attack, else
+     * that bin's shots (-1 none); {@code loadedBins} holds the index of every loaded bin, one for each weapon type of
+     * a bay, the first being {@code loadedAmmo}. The TN column shows {@code target}: the target of the weapon's queued
+     * attack, else
      * the focus, else {@code TargetKey.NONE}; {@code value} and {@code odds} are its roll (TargetRoll values, odds
      * 0-100), and {@code reason} the rules' or the display's reason, non-empty only for an impossible shot.
      * {@code usable}: it can be assigned (valid for the phase) or is queued. {@code aimable}: it may make an aimed shot
@@ -95,10 +98,12 @@ final class GpuFireOrders implements AutoCloseable {
      * none.
      */
     record WeaponRow(int eqNum, String name, String location, String kind, String damage, int heat, String mode,
-          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, int shots, TargetKey target, int value, double odds,
-          String reason, boolean usable, boolean locationDestroyed, boolean aimable, String aimedAt) {
+          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, List<Integer> loadedBins, int shots, TargetKey target,
+          int value, double odds, String reason, boolean usable, boolean locationDestroyed, boolean aimable,
+          String aimedAt) {
         WeaponRow {
             ammo = List.copyOf(ammo);
+            loadedBins = List.copyOf(loadedBins);
         }
     }
 
@@ -484,7 +489,8 @@ final class GpuFireOrders implements AutoCloseable {
               (selected == null) ? null : solution(game, actor, selected, selectedNum, shots.get(selectedNum),
                     shown, actor.isUseNaturalAptitudeGunnery(game, selected)),
               ((selected == null) && shown) ? frontArc(game, actor) : null,
-              badges(badgeKey(fd, actor, queue, focusKey), carded),
+              GUIPreferences.getInstance().getShowFiringSolutions()
+                    ? badges(badgeKey(fd, actor, queue, focusKey), carded) : List.of(),
               hoverBest(game, fd, actor, hover, queue, carded), drafted(actor.getId()),
               GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining,
               aimChoice(game, fd, actor, queue)));
@@ -802,7 +808,7 @@ final class GpuFireOrders implements AutoCloseable {
             WeaponMounted weapon = weapon(actor, eqNum);
             AmmoMounted bin = (weapon == null) ? null : bins(actor, weapon).stream().filter(choice::is).findFirst()
                   .orElse(null);
-            if ((bin == null) || (bin == GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo())) {
+            if ((bin == null) || (bin == loader(actor, weapon, bin).getLinkedAmmo())) {
                 return;
             }
             WeaponAttackAction attack = queued(fd.getAttacks(), actor, eqNum);
@@ -1015,7 +1021,8 @@ final class GpuFireOrders implements AutoCloseable {
           WeaponMounted weapon, Targetable target, @Nullable AmmoMounted bin, int aim) {
         Game game = source.currentView().game;
         List<EntityAction> before = fd.getAttacks();
-        AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
+        WeaponMounted loader = loader(actor, weapon, bin);
+        AmmoMounted loaded = loader.getLinkedAmmo();
         Map<TargetKey, Integer> serialsBefore = Map.copyOf(serials);
         TargetKey lead = lead(game, actor, before);
         // The canonical order with a stand-in for the new attack (never queued) at the attack's place
@@ -1033,7 +1040,7 @@ final class GpuFireOrders implements AutoCloseable {
             return true;
         }
         if (declared == null) {
-            if (GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo() != loaded) {
+            if (loader.getLinkedAmmo() != loaded) {
                 load(fd, actor, weapon, loaded);
             }
             fd.replaceAttacks(before);
@@ -1153,7 +1160,7 @@ final class GpuFireOrders implements AutoCloseable {
         if ((bin == null) || !bins(actor, weapon).contains(bin)) {
             return false;
         }
-        WeaponMounted member = GpuUnitRecord.ammoWeapon(weapon);
+        WeaponMounted member = loader(actor, weapon, bin);
         WeaponDisplayData.loadAmmo(((ClientGUI) fd.getClientGUI()).getClient(), actor, weapon, member, bin);
         weaponState(fd).updateForEntity(actor);
         fd.updateTarget();
@@ -1591,9 +1598,17 @@ final class GpuFireOrders implements AutoCloseable {
         return ((weapon != null) && (weapon.getEntity() == actor)) ? weapon : null;
     }
 
-    /** The bins the Unit Display's ammunition list offers for the weapon, in its order. */
+    /** The bins the weapon may load, in the ammunition list's order; a bay's by weapon type, its first type first. */
     private static List<AmmoMounted> bins(Entity actor, WeaponMounted weapon) {
-        return WeaponDisplayData.ammoChoices(actor, weapon, GpuUnitRecord.ammoWeapon(weapon)).ammo();
+        return GpuUnitRecord.ammoWeapons(weapon).stream()
+              .flatMap(member -> WeaponDisplayData.ammoChoices(actor, weapon, member).ammo().stream()).distinct()
+              .toList();
+    }
+
+    /** The weapon that loads the bin: the weapon itself, or the bay's first weapon of the type the bin is for. */
+    private static WeaponMounted loader(Entity actor, WeaponMounted weapon, @Nullable AmmoMounted bin) {
+        WeaponMounted member = (bin == null) ? null : GpuUnitRecord.ammoWeapon(actor, weapon, bin);
+        return (member == null) ? GpuUnitRecord.ammoWeapon(weapon) : member;
     }
 
     private static boolean canTwist(Entity actor, int direction) {
@@ -1617,13 +1632,16 @@ final class GpuFireOrders implements AutoCloseable {
             // A weapon that cannot switch shows its one bin.
             bins = List.of(loaded);
         }
+        List<AmmoMounted> listed = bins;
+        List<Integer> loadedBins = GpuUnitRecord.ammoWeapons(weapon).stream()
+              .map(member -> listed.indexOf(member.getLinkedAmmo())).filter(index -> index >= 0).distinct().toList();
         int location = weapon.getLocation();
         Targetable target = shot.target().equals(TargetKey.NONE) ? null : resolve(game, shot.target());
         int aimed = aimed(shot.attack());
         return new WeaponRow(eqNum, weapon.getPlainDesc(), parts.location(), kind(weapon.getType()),
               damage(game, actor, weapon), weapon.getCurrentHeat(), (parts.mode() == null) ? "" : parts.mode(),
               bins.stream().map(bin -> GpuUnitRecord.AmmoChoice.of(actor, bin)).toList(),
-              (loaded == null) ? -1 : bins.indexOf(loaded),
+              (loaded == null) ? -1 : bins.indexOf(loaded), loadedBins,
               parts.loadedShots(), shot.target(), value(shot.toHit()), odds(shot.toHit(), aptitude),
               reason(shot.toHit()), queued || actor.isWeaponValidForPhase(weapon),
               (location >= 0) && actor.isLocationBad(location), !aimingMode(fd, actor, weapon, target).isNone(),

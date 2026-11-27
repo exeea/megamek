@@ -324,6 +324,14 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
             side = vec3(-direction.y, direction.x, 0.0);
             rest = vec3(direction, mix(.2, .75, grassRandom(seed + 51u)));
         }
+        if (!wheat) {
+            // A blade leaning over ground its cover clears (a road, its verge) does not grow: the ground under its tip
+            // at rest must grow it too. The tip at rest, not as the wind moves it, so that no blade comes and goes with a
+            // gust. No reserve beyond that: a loose road's own fringe thins the cover, and the blades with it.
+            vec2 reach = height * rest.xy / length(rest);
+            vec2 grows = textureLod(u_groundCover, (root.xy + reach - u_groundMap.xy) * u_groundMap.z, 0.0).rg;
+            if ((sward ? grows.g : grows.r) < grassRandom(seed + 97u)) { return false; }
+        }
         float alongWind = dot(rest.xy, u_wind.xy);
         vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);
         float acrossLength = length(acrossWind);

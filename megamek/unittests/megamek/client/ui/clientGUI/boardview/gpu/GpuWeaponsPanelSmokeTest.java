@@ -796,7 +796,8 @@ class GpuWeaponsPanelSmokeTest {
     private static GpuFireOrders.WeaponRow weapon(int eqNum, String name, String location, String damage, int heat,
           List<GpuUnitRecord.AmmoChoice> ammo, int shots, int target, int value, double odds, String reason) {
         return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, "", ammo, ammo.isEmpty() ? -1 : 0,
-              shots, TargetKey.unit(target), value, odds, reason, true, false, false, "");
+              ammo.isEmpty() ? List.of() : List.of(0), shots, TargetKey.unit(target), value, odds, reason, true, false,
+              false, "");
     }
 
     /** A unit target in the front arc. */
@@ -857,8 +858,8 @@ class GpuWeaponsPanelSmokeTest {
         List<GpuFireOrders.WeaponRow> weapons = fire.weapons().stream().map(row -> fire.attacks().stream()
               .anyMatch(attack -> attack.eqNum() == row.eqNum()) ? row : new GpuFireOrders.WeaponRow(row.eqNum(),
               row.name(), row.location(), row.kind(), row.damage(), row.heat(), row.mode(), row.ammo(),
-              row.loadedAmmo(), row.shots(), key, row.value(), row.odds(), row.reason(), row.usable(),
-              row.locationDestroyed(), row.aimable(), row.aimedAt())).toList();
+              row.loadedAmmo(), row.loadedBins(), row.shots(), key, row.value(), row.odds(), row.reason(),
+              row.usable(), row.locationDestroyed(), row.aimable(), row.aimedAt())).toList();
         String name = GpuHudFixtures.status().units().stream().filter(unit -> unit.id() == focus).findFirst()
               .orElseThrow().name();
         return new GpuFireOrders.Snapshot(true, true, fire.actorId(), new GpuFireOrders.Focus(key, name, null),

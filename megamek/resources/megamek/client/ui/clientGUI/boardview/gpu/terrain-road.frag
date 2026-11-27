@@ -16,7 +16,8 @@ uniform sampler2D u_normalTexture;
 #endif
 uniform float u_groundResponse;
 #ifdef roadMaskFlag
-uniform sampler2D u_roadMask;
+// The board's road masks, a layer each page (GpuRoadMaskAtlas); a coat's region holds its layer in its U offset.
+uniform sampler2DArray u_roadMask;
 flat in vec4 v_roadMaskRegion;
 in vec2 v_roadMaskUV;
 #endif
@@ -251,6 +252,33 @@ vec4 wearHash(vec2 cell) {
     return fract((p.xxyz + p.yzzw) * p.zywx);
 }
 
+// Board hexes in the wear frame (metres east and south; HexTile#centerX, #centerY): 30 m corner to corner (BoardRelief
+// #metres), HexTile.HEIGHT over MODEL_WIDTH of that tall, columns 22.5 m apart, the odd ones half a hex lower.
+const float HEX_TALL = 30.0 * 72.0 / 83.125;
+
+// The board hex border nearest p: its outward unit normal (xy) and how far inside it p lies (z).
+vec3 hexBorder(vec2 p) {
+    float column = floor((p.x - 15.0) / 22.5);
+    vec2 q = vec2(1e9);
+    for (int i = 0; i < 2; i++) {
+        float c = column + float(i), lower = mod(c, 2.0) * .5;
+        vec2 centre = vec2(c * 22.5 + 15.0, (floor(p.y / HEX_TALL - lower) + lower + .5) * HEX_TALL);
+        if (dot(p - centre, p - centre) < dot(q, q)) q = p - centre;
+    }
+    // The north and south sides, then the four slanted ones, from the corners (15, 0) and (7.5, HEX_TALL / 2).
+    vec2 slant = normalize(vec2(HEX_TALL * .5, 7.5));
+    float level = HEX_TALL * .5 - abs(q.y), side = 15.0 * slant.x - dot(abs(q), slant);
+    return level < side ? vec3(0.0, sign(q.y), level) : vec3(slant * sign(q), side);
+}
+
+// How far a long feature across the road, centred r before the fragment and w to either side of its centre line, lies
+// along the fragment's nearest hex border (hexBorder): 1 within a metre of it and within about 15 degrees, gone by
+// half a metre more and 25 degrees. There it would read as the board's seam between two hexes: it is not drawn.
+float seamed(vec2 r, vec2 heading, vec3 border, float w) {
+    return smoothstep(.9, .97, abs(dot(heading, border.xy)))
+          * (1.0 - smoothstep(1.0, 1.5, abs(border.z + dot(r, border.xy)) - w));
+}
+
 // A line of half width w at distance d, averaged over a pixel: a line thinner than the pixel fades rather than aliases.
 float wearLine(float d, float w, float pixel) {
     float drawn = max(w, pixel * .5);
@@ -333,6 +361,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
     // Features of 8 m cells, each in its own frame along the traffic: thermal cracks across the road, sealed or open;
     // repairs, utility trenches, potholes, skid marks and oil stains.
     vec2 g = floor(m / 8.0);
+    vec3 border = hexBorder(m);
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 cell = g + vec2(x, y);
@@ -344,7 +373,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
                 if (abs(v) > 7.0 || pixel > .35) continue;
                 float d = u + (wearNoise(m, 1.9, h.w, pixel).r - .5) * .4;
                 float line = wearLine(d, k.x < .45 ? .045 : .008 + .012 * decay, pixel)
-                      * smoothstep(7.0, 5.5, abs(v) + k.y * 3.0) * marks;
+                      * smoothstep(7.0, 5.5, abs(v) + k.y * 3.0) * marks * (1.0 - seamed(r, heading, border, .2));
                 if (k.x < .45) sealant = max(sealant, line); else crack = max(crack, line);
             } else if (kind < .7) {
                 continue;
@@ -354,9 +383,11 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
                 vec2 extent = kind < .75 ? vec2(.7 + 2.2 * k.y, .6 + 1.6 * k.z) : vec2(.3 + .25 * k.y, 7.0);
                 float inside = min(extent.x - abs(u), extent.y - abs(v));
                 if (inside < -.05) continue;
-                float area = clamp(inside / pixel + .5, 0.0, 1.0);
+                // A trench along a hex border is not dug (seamed).
+                float keep = kind < .75 ? 1.0 : 1.0 - seamed(r, heading, border, extent.x);
+                float area = clamp(inside / pixel + .5, 0.0, 1.0) * keep;
                 if (kind > .75 && k.w < .5) cut = max(cut, area); else fresh = max(fresh, area);
-                seam = max(seam, wearLine(inside, .025, pixel));
+                seam = max(seam, wearLine(inside, .025, pixel) * keep);
             } else if (kind < .78 + .1 * decay) {
                 float radius = .25 + .55 * k.y;
                 float d = length(r) + (wearNoise(m, .6, h.w, pixel).r - .5) * .3 * radius;
@@ -422,13 +453,11 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
 //   beyond it, and a hint of washboard and potholes in the wheel paths. B is where across the whole road the point lies
 //   (BoardRoad#track: 0 on a centre line, 1 at the footprint's edge); RG's length falls to a half across a junction's hub
 //   (BoardRoad#trackHub).
-const float TRACK_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: gravel's B range
+// Its sizes, and where its stone or soil lies, are the ground map's too (ground-map-cover.frag): grass stands where
+// the coat shows ground.
+// ROAD_TRACK
 const float TRACK_WHEEL = 1.08; // BoardRoad.WHEEL_OFFSET in metres: the wheel tracks' centres, where joins carry their ruts
-const float GRAVEL_EDGE = 3.4;  // a gravel road's graded edge (BoardRoad.GRAVEL_EDGE)
-const float GRAVEL_STRAY = .5;  // and how far beyond it stray stones run into the grass
-const float RUT_OFFSET = .9;    // BoardRoad.RUT_OFFSET in metres: a dirt track's ruts either side of its course
-const float RUT_RANGE = 2.9;    // BoardRoad.RUT_OFFSET + RUT_REACH in metres: dirt's B range
-const float RUT_HALF = .3;      // a rut's half width
+const float GRAVEL_STRAY = .5;  // how far beyond a gravel road's graded edge stray stones run into the grass
 // The dirt maps hold the photographed soil at the old grey-brown maps' brightness (other dirt patches keep theirs):
 // a track's own ground is the photograph's.
 const float DIRT_LIGHT = 1.85;
@@ -522,8 +551,8 @@ float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, flo
     float kept = max(min(firm, tongues), stones);
     // Past the firm edge the stone thins out into the grass over most of a metre, as a dirt track's soil does
     // (dirtTrack): in patches between ever fewer tufts, under a film of grit nearest the road. The blades thin out there
-    // too (BoardRoad#grass). Where the road ends, so does its fringe.
-    float gaps = smoothstep(-.8, 0.0, min(-outside, ends - 1.0));
+    // too (ground-map-cover.frag). Where the road ends, so does its fringe.
+    float gaps = trackFringe(-outside, ends);
     float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
     float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
     alpha = built ? coverage : max(clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
@@ -542,20 +571,17 @@ float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bo
     float broad = wearNoise(m, 400.0, .57, pixel).r;
     // Grass and crumbs nibble at a rut's edges, at the size of a tuft and of the soil's own clods.
     float off = abs(rut) + (slow.g - .5) * .1 + (tuft.b - .5) * .14 + (grain - .5) * .08;
-    float pressed = 1.0 - smoothstep(RUT_HALF - .08, RUT_HALF + .02, off);
+    float pressed = rutPressed(off);
     // Loose soil outside the ruts, in a ragged band; inside them the crown's bare patches, most beside the ruts.
-    float band = rut - RUT_HALF - .2 - .5 * clump.r - (tuft.g - .5) * .25 - (grain - .5) * .1;
-    float crown = -rut - RUT_HALF;
-    float bare = .55 * clump.g + .3 * tuft.r + .15 * grain - .62 - 1.1 * crown;
-    float soil = rut > 0.0 ? -band : bare;
+    float soil = dirtSoil(rut, clump.rg, tuft.rg, grain);
     float kept = max(soil, pressed - .5);
     // Where it wears out (its end, or its ruts' run-on over a paved road's landing) it crumbles at the soil's own grain.
     float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g) - (grain - .5) * 1.4 * (1.0 - coverage);
     kept = min(kept, ends - .5);
     // Past that edge the soil thins out into the grass over most of a metre: bare between ever fewer tufts, under a
-    // film of dust nearest the track. The blades thin out there too (BoardRoad#grass). Where the coat ends, RUT_REACH
+    // film of dust nearest the track. The blades thin out there too (ground-map-cover.frag). Where the coat ends, RUT_REACH
     // past the ruts (BoardRoad#rutReach), the soil field lies below -.8, and where the track ends so does its end term.
-    float gaps = smoothstep(-.8, 0.0, min(soil, ends - 1.0));
+    float gaps = trackFringe(soil, ends);
     float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
     float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
     alpha = built ? coverage : max(clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
@@ -608,7 +634,23 @@ void main() {
     bool roadHidden = false;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
-    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
+    // The mask's place (GpuRoadMaskAtlas.Place): its layer, and its cell's corner and size, with a tint (1 + red, green,
+    // blue) in their integer parts, or none where its colour is data.
+    float maskLayer = floor(v_roadMaskRegion.x);
+    vec3 maskTint = floor(v_roadMaskRegion.yzw);
+    vec4 maskCell = vec4(v_roadMaskRegion.x - maskLayer, v_roadMaskRegion.yzw - maskTint);
+    vec2 maskAt = maskCell.xy + maskUV * maskCell.zw;
+    roadColor.a = texture(u_roadMask, vec3(maskAt, maskLayer)).r;
+    if (maskTint.x > .5) {
+        roadColor.rgb = vec3(maskTint.x - 1.0, maskTint.yz) / 255.0;
+    } else {
+        // Red, green and blue lie a cell right of, under, and right of and under the coverage: its texels and their
+        // doubled edge, to whole 4-texel blocks.
+        vec2 cell = 4.0 * ceil((maskCell.zw * 2048.0 + 2.0) / 4.0) / 2048.0;
+        roadColor.rgb = vec3(texture(u_roadMask, vec3(maskAt + vec2(cell.x, 0.0), maskLayer)).r,
+              texture(u_roadMask, vec3(maskAt + vec2(0.0, cell.y), maskLayer)).r,
+              texture(u_roadMask, vec3(maskAt + cell, maskLayer)).r);
+    }
     roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
 #if __VERSION__ >= 450
     // A quad wholly off its mask draws nothing: it stops before the material. Fine derivatives make it the quad's

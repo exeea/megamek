@@ -59,7 +59,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
-import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiMenuList;
@@ -298,7 +297,7 @@ class GpuChatToastModalSmokeTest {
                 levels.forEach(level -> service.add(level, level + " toast", null));
                 return service.capture();
             });
-            assertEquals(BoardToastOverlay.MAX_VISIBLE, five.toasts().size());
+            assertEquals(GpuToasts.MAX_VISIBLE, five.toasts().size());
             stack.update(inputs(harness, frame(five), null));
             settle(harness, .3f);
             List<Actor> rows = rows(stack);

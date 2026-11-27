@@ -7,12 +7,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
 
@@ -245,7 +247,7 @@ final class BoardSurface {
     private static final float FALL_LIP_WIDTH = .045f;
     private static final float FALL_LIP_DROP = .5f;
     /** Share of each ray from the waterline to the hex centre over which a bed descends; the rest is its plateau. */
-    private static final float PLATEAU = .75f;
+    static final float PLATEAU = .75f;
     /**
      * Water depth over a fall's lip, in hex-scale units: the bed rises to a ledge the water pours over, so the wall
      * beneath the fall closes up to just under the sheet. No pool is shallower, so both sides of a corner agree.
@@ -284,29 +286,7 @@ final class BoardSurface {
 
         /** {@link #height(float, float)} with the tolerance its caller read once from the settings. */
         float height(float x, float y, float tolerance) {
-            if (x < Math.min(a.x, Math.min(b.x, c.x)) - tolerance
-                  || x > Math.max(a.x, Math.max(b.x, c.x)) + tolerance
-                  || y < Math.min(a.y, Math.min(b.y, c.y)) - tolerance
-                  || y > Math.max(a.y, Math.max(b.y, c.y)) + tolerance) { return Float.NEGATIVE_INFINITY; }
-            float denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
-            if (Math.abs(denominator) < 0.00001f) {
-                return Float.NEGATIVE_INFINITY;
-            }
-            float u = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
-            float v = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
-            float w = 1 - u - v;
-            // World-space tolerance keeps rounded edge samples on thin bank triangles even far from the origin.
-            // A fixed barycentric tolerance can miss the bank and drop the exposed wall to the riverbed.
-            float squared = tolerance * tolerance / (denominator * denominator);
-            if ((u >= 0 || u * u <= squared * (square(b.x - c.x) + square(b.y - c.y)))
-                  && (v >= 0 || v * v <= squared * (square(c.x - a.x) + square(c.y - a.y)))
-                  && (w >= 0 || w * w <= squared * (square(a.x - b.x) + square(a.y - b.y)))) {
-                u = Math.max(0, u);
-                v = Math.max(0, v);
-                w = Math.max(0, w);
-                return (u * a.z + v * b.z + w * c.z) / (u + v + w);
-            }
-            return Float.NEGATIVE_INFINITY;
+            return FieldSupport.height(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, x, y, tolerance);
         }
     }
     record Side(Vector3 a, Vector3 b, float lowA, float lowB, int edge) { }
@@ -450,9 +430,17 @@ final class BoardSurface {
     private final boolean columns;
     private final List<Face> edgeTopography = new ArrayList<>();
     private List<Face> wallFaces;
+    /** The quay walls of this hex's extensions (BoardConcrete#extensions), which are among its faces. */
+    private final List<Face> quayWalls = new ArrayList<>();
+    /** The paved tops over this hex's quay extensions (#quay), which are among its faces too. */
+    private final List<Face> quayTops = new ArrayList<>();
+    /** How far, in metres, a quay extension's top lies over ground at its own level (#quay). */
+    private static final float SLAB = .03f;
     private float wallFloor = Float.NaN;
     /** A height-field hex's step faces and walls, from its block ({@link ChunkField}); null where today's draws it. */
     private List<Face> fieldWalls;
+    /** A height-field hex's morph parents for what is draped on it ({@link FieldDrape}); null where today's draws it. */
+    FieldDrape fieldDrape;
     /**
      * Open mouths by edge: connected liquid continues there, so no bank rises across that edge and a wall exposed
      * on it starts at the bed rather than at the hex's own top.
@@ -475,6 +463,8 @@ final class BoardSurface {
     private final Vector3[] joinB = new Vector3[6];
     /** Per falling edge, the crest its water pours over; null elsewhere. */
     private final Crest[] crests = new Crest[6];
+    /** A height-field hex's falls: the stretch of today's crest each pours over (#fieldFalls). */
+    private final float[][] fallStretch = new float[6][];
     /**
      * The bed's outer ring, along the waterline and out along the crests: the top of the walls that stand under falls.
      */
@@ -634,7 +624,7 @@ final class BoardSurface {
         } else if (tile.ultraSublevel()) {
             // A closed, flat cap below the mouth; neighbouring columns supply the pit's cliffs.
             fan(corners, center.z, Finish.TOP);
-        } else if (tile.liquid().present()) {
+        } else if (tile.liquid().present() && block == null) {
             river(scene);
         } else if (block != null) {
             // The height field's hex: its tops here, its step faces and walls in walls().
@@ -668,7 +658,9 @@ final class BoardSurface {
             pavementGaps();
             reserveRoads();
             dig();
+            quay(scene);
             relief.field(faces);
+            if (fieldWalls == null) { closeTJunctions(List.of(faces), joints()); }
             int roughStart = faces.size();
             relief.boulders(faces);
             roughModels = BoardRough.place(this);
@@ -681,6 +673,7 @@ final class BoardSurface {
     private void fieldFaces(ChunkField.Block block) {
         Vector3[] cover = new Vector3[block.size()], face = new Vector3[block.size()];
         fieldWalls = new ArrayList<>();
+        fieldDrape = new FieldDrape(block);
         for (int[] list : List.of(block.levelTops(), block.ground())) {
             for (int i = 0; i < list.length; i += 3) {
                 faces.add(new Face(fieldVertex(block, list[i], cover, false), fieldVertex(block, list[i + 1], cover, false),
@@ -693,10 +686,157 @@ final class BoardSurface {
                       fieldVertex(block, list[i + 2], face, true), Finish.WALL, block.edge(list, i)));
             }
         }
-        // Today's rim and talus rocks, along the field's moved rows.
+        // A water hex's ground under its water is bed (FieldWater).
+        if (tile.liquid().present()) { FieldWater.bed(faces, BoardGeometry.waterZ(tile)); }
+        // Today's rim and talus rocks along the field's moved rows; they, the field stones, boulders and rough cover
+        // stand on the field's own ground.
         float[][][] rows = new float[6][][];
         for (int e = 0; e < 6; e++) { rows[e] = block.row(e); }
-        relief.fieldRocks(faces, center, rows);
+        relief.fieldGround(rows, new FieldSupport(block)::height);
+        relief.fieldRocks(faces, center);
+    }
+
+    /** A height-field water hex's waterline, round its hex, and the edges its water runs on through (FieldWater). */
+    void fieldWater(Vector3[] line, int mouths) {
+        waterline = line;
+        crestLine = line;
+        openMouths = mouths;
+    }
+
+    /**
+     * Gives this height-field water hex the falls it has without the field (FieldWater), as much of each as its water
+     * depth lets flow (FieldShore#flowing, the descending stream's rule): a run of crests joined round a corner pours
+     * over its middle stretch, the whole of it from depth 2. A whole crest and its ends' joins are that surface's; a
+     * shorter one is the same curve between two of its points, its cut ends free. So today's fall renderers draw
+     * today's fall, narrower for less water. Returns that surface: its water is the pool pulled back from each crest,
+     * where a whole sheet's lip starts (#fieldLip gives a shorter one's).
+     */
+    BoardSurface fieldFalls() {
+        BoardSurface today = new BoardSurface(scene, tile, lod);
+        pour(today, pourStretches(today));
+        // Today's blocks on each lip and its shoulders, on today's crests (cliffs' BoardRelief#fieldFallRocks).
+        int lips = 0;
+        for (Side fall : today.waterfalls) { lips |= 1 << fall.edge(); }
+        if (lips != 0 && today.crestLine != null) { relief.fieldFallRocks(faces, today.crestLine, lips); }
+        return today;
+    }
+
+    /**
+     * Trims this surface's own falls, today's whole ones, to the stretch the hex's water depth lets pour, as
+     * #fieldFalls gives a height-field hex: for a field water hex whose field surface is not at hand (the water
+     * field's pools beyond a chunk), so its falls land and churn where the field's do.
+     */
+    void pourByDepth() { pour(this, pourStretches(this)); }
+
+    /**
+     * The stretch each fall edge of hex {@code tile} pours over (#pourStretches, measured along today's crest curve), for
+     * the height field before any field surface exists (FieldBoard#height): per edge e {from, to} in t along the straight
+     * hex edge from corner e to corner e + 1, the poured crest's two ends projected on it; {0, 1} where all of it pours,
+     * null where nothing pours or no fall stands. Builds today's surface of the hex once.
+     */
+    static float[][] pourEdges(BoardScene scene, BoardScene.Tile tile) {
+        BoardSurface today = new BoardSurface(scene, tile, TerrainLod.FULL);
+        float[][] stretch = pourStretches(today), edges = new float[6][];
+        for (Side fall : today.waterfalls) {
+            int e = fall.edge();
+            float[] s = stretch[e];
+            if (s == null) { continue; }
+            if (s[0] == 0 && s[1] == 1) {
+                edges[e] = new float[] { 0, 1 };
+                continue;
+            }
+            Vector3 a = BoardGeometry.corner(tile.coords(), 0, e), b = BoardGeometry.corner(tile.coords(), 0, (e + 1) % 6);
+            float t0 = Math.clamp(along(a, b, today.crests[e].point(s[0])), 0, 1);
+            float t1 = Math.clamp(along(a, b, today.crests[e].point(s[1])), 0, 1);
+            edges[e] = new float[] { Math.min(t0, t1), Math.max(t0, t1) };
+        }
+        return edges;
+    }
+
+    /**
+     * The stretch of each of {@code today}'s fall crests the hex's water depth lets pour (FieldShore#pouring), as
+     * {from, to} of the crest's length; null where none pours. A run of crests joined round a corner pours over its
+     * middle stretch.
+     */
+    private static float[][] pourStretches(BoardSurface today) {
+        float[][] stretch = new float[6][];
+        boolean[] done = new boolean[6];
+        for (int start = 0; start < 12; start++) {
+            int first = start % 6;
+            // A run starts at a crest whose start no fall of this hex runs into (the second round takes a closed ring).
+            if (done[first] || today.crests[first] == null
+                  || start < 6 && today.joinA[first] != null && today.crests[(first + 5) % 6] != null) { continue; }
+            int count = 1;
+            while (count < 6 && today.crests[(first + count) % 6] != null && today.joinA[(first + count) % 6] != null
+                  && !done[(first + count) % 6]) { count++; }
+            float[] lengths = new float[count];
+            float total = 0;
+            for (int k = 0; k < count; k++) {
+                Crest crest = today.crests[(first + k) % 6];
+                Vector3 previous = crest.point(0);
+                for (int i = 1; i <= 8; i++) {
+                    Vector3 next = crest.point(i / 8f);
+                    lengths[k] += (float) Math.hypot(next.x - previous.x, next.y - previous.y);
+                    previous = next;
+                }
+                total += lengths[k];
+            }
+            float trim = (total - FieldShore.pouring(Math.max(0, today.tile.waterDepth()), total)) / 2, before = 0;
+            for (int k = 0; k < count; k++) {
+                int edge = (first + k) % 6;
+                done[edge] = true;
+                float from = Math.clamp((trim - before) / lengths[k], 0, 1), to = Math.clamp((total - trim - before) / lengths[k], 0, 1);
+                before += lengths[k];
+                if (to > from) { stretch[edge] = new float[] { from, to }; }
+            }
+        }
+        return stretch;
+    }
+
+    /**
+     * This surface's falls: {@code today}'s (this surface itself for #pourByDepth), each over its stretch: a whole
+     * crest and its ends' joins as today's, a shorter one the same curve between two of its points, its cut ends free.
+     */
+    private void pour(BoardSurface today, float[][] stretch) {
+        List<Side> whole = List.copyOf(today.waterfalls);
+        if (today == this) { waterfalls.clear(); }
+        for (Side fall : whole) {
+            int edge = fall.edge();
+            if (stretch[edge] == null) {
+                if (today == this) { crests[edge] = null; joinA[edge] = null; joinB[edge] = null; }
+                continue;
+            }
+            float from = stretch[edge][0], to = stretch[edge][1];
+            fallStretch[edge] = stretch[edge];
+            Crest crest = today.crests[edge];
+            if (from == 0 && to == 1) {
+                crests[edge] = crest;
+                joinA[edge] = today.joinA[edge];
+                joinB[edge] = today.joinB[edge];
+                waterfalls.add(fall);
+                continue;
+            }
+            Vector3 a = crest.point(from), b = crest.point(to);
+            crests[edge] = new Crest(a, b, crest.tangent(from), crest.tangent(to), crest.corner(), crest.outward(), 0, crest.level());
+            joinA[edge] = from == 0 ? today.joinA[edge] : null;
+            joinB[edge] = to == 1 ? today.joinB[edge] : null;
+            waterfalls.add(new Side(new Vector3(a), new Vector3(b), fall.lowA(), fall.lowB(), edge));
+        }
+    }
+
+    /** The stretch of today's crest over an edge that this field hex's fall pours over (#fieldFalls): from, to of its length; null for none. */
+    float[] fieldStretch(int edge) { return fallStretch[edge]; }
+
+    /** Where the sheet of this field hex's fall starts at s of its crest: the pool's edge there (GpuWaterfall#grid's first row). */
+    Vector3 fieldLip(Side fall, float s) {
+        Crest crest = crests[fall.edge()];
+        return crest.point(s).mulAdd(crest.normal(s), -lipWidth(fall.edge(), s, fallLip(crest.level(), fall.lowA())));
+    }
+
+    /** A height-field water hex whose water descends (FieldWater): its graded water, read from its water faces. */
+    void fieldGrade() {
+        gradedWater = true;
+        waterSupport = new GpuBiomeVegetation.Support(waterFaces);
     }
 
     /** A block sample as a vertex of one kind, top cover or step face, with today's shading data. */
@@ -1626,10 +1766,8 @@ final class BoardSurface {
         float[] steep = new float[6], scour = new float[6];
         for (int edge = 0; edge < 6; edge++) {
             scour[edge] = plunge[edge] ? 1 : 0;
-            float land = shore[edge] == 0 ? 0 : rise[edge] > 0 ? .4f + .3f * rise[edge] : rise[edge] == 0 ? -.6f : 0;
             // Under a slope that runs on down to the bed the bed takes its full depth near the slope's foot.
-            steep[edge] = relief.slope(edge) ? 2
-                  : Math.clamp(land + .25f * (tile.waterDepth() - 1), -.7f, 1);
+            steep[edge] = relief.slope(edge) ? 2 : bankSteep(shore[edge] == 0 ? Float.NaN : rise[edge], tile.waterDepth());
         }
         float[] rim = new float[count];
         for (int i = 0; i < count; i++) {
@@ -1697,8 +1835,7 @@ final class BoardSurface {
             for (int i = 0; i < count; i++) {
                 // Each ray drops as the banks beside it do.
                 float s = alongBanks(steep, i);
-                float d = s >= 0 ? 1 - (float) Math.pow(1 - descent, 1 + 2 * s)
-                      : (float) Math.pow(descent, 1 - 1.5f * s);
+                float d = descend(descent, s);
                 float px = center.x + (outer[i].x - center.x) * scale, py = center.y + (outer[i].y - center.y) * scale;
                 // Bars and pools between the rim and the plateau, which stays at the game depth.
                 float bed = (rim[i] + (full - rim[i]) * d)
@@ -1992,7 +2129,22 @@ final class BoardSurface {
         return canonical;
     }
 
-    private static float shallowBed(float bed, float x, float y, float weight) {
+    /**
+     * How steeply a bed falls under its bank (-.7 gentle to 1 steep), from how many levels the land beside rises above the
+     * water ({@code rise}; NaN where no bank meets it, as between two water hexes) and the water's depth in levels:
+     * steeply under higher ground and in deep water, gently off land at the water's own level, where shallows reach out.
+     */
+    static float bankSteep(float rise, float waterDepth) {
+        float land = Float.isNaN(rise) ? 0 : rise > 0 ? .4f + .3f * rise : rise == 0 ? -.6f : 0;
+        return Math.clamp(land + .25f * (waterDepth - 1), -.7f, 1);
+    }
+
+    /** How far down a bed is at {@code x} of its fall from rim (0) to floor (1), as steeply as {@link #bankSteep}. */
+    static float descend(float x, float steep) {
+        return steep >= 0 ? 1 - (float) Math.pow(1 - x, 1 + 2 * steep) : (float) Math.pow(x, 1 - 1.5f * steep);
+    }
+
+    static float shallowBed(float bed, float x, float y, float weight) {
         float bar = BoardRelief.smooth((meander(x, y, 9.7f) + .15f) / .5f);
         return Math.max(bed - 2.5f * BoardGeometry.hexScale() * bar * weight, -.6f * BoardGeometry.hexScale());
     }
@@ -2006,7 +2158,7 @@ final class BoardSurface {
     }
 
     /** Smooth world noise, roughly in [-1, 1], for banks and beds: swells of about 12 m with 4 m detail. */
-    private static float meander(float x, float y, float seed) {
+    static float meander(float x, float y, float seed) {
         float m = BoardRelief.metres(1);
         return .7f * BoardRelief.gradient(x / (12 * m) + seed, y / (12 * m) - seed)
               + .3f * BoardRelief.gradient(x / (4 * m) - seed, y / (4 * m) + seed);
@@ -2941,10 +3093,12 @@ final class BoardSurface {
      * as does whatever still stands off the road's edge. Level roads on level ground keep the top.
      */
     private void reserveRoads() {
+        // A height-field hex's ground comes with its roads in it (FieldRoads); their paint lies on its faces.
+        if (fieldWalls != null) { return; }
         bank = new BoardRoadBank(scene, tile, relief);
         if (!bank.active()) {
             bank = null;
-        } else if (tile.liquid().present()) {
+        } else if (tile.liquid().present() && fieldWalls == null) {
             // A water hex's shore reaches into the dry hexes around, whose ground it shares: split on the same grid, it
             // eases alike, though the field leaves the water's own cell as it is. Its vertices move in place, as its
             // water shares them.
@@ -3004,6 +3158,12 @@ final class BoardSurface {
     private static BoardRoadCut roadCut(BoardScene scene, BoardScene.Tile tile) {
         if (!BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
         var grades = grades(scene, tile, false, true);
+        if (tile.liquid().present() && !cell(scene, tile.coords(), true).equals(cell(scene, tile.coords(), false))) {
+            // A water hex whose outline a straightened quay moved takes road ground only from the roads that run into
+            // it: a carriageway beside it reaching over its shore stays the land's, cut at the quay. A shore keeping
+            // its outline takes that ground as any hex does (at a bridge's mouth, say), so the road meets it flush.
+            grades.removeIf(grade -> grade.tile() != tile && !runsInto(grade.tile(), tile));
+        }
         if (grades.isEmpty()) { return null; }
         boolean level = !tile.liquid().present() && grades.stream().noneMatch(grade -> grade.graded()
               || grade.tile().floor() != tile.floor());
@@ -3014,6 +3174,14 @@ final class BoardSurface {
         if (level) { return null; }
         return new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), BoardRoadGrade.ground(tile) * BoardGeometry.level(),
               grades, boardEdges(scene, tile));
+    }
+
+    /** Whether a hex's road leaves it toward a neighbouring hex. */
+    private static boolean runsInto(BoardScene.Tile from, BoardScene.Tile to) {
+        for (int d = 0; d < 6; d++) {
+            if (from.coords().translated(d).equals(to.coords())) { return (from.wayExits() & 1 << d) != 0; }
+        }
+        return false;
     }
 
     /**
@@ -3040,11 +3208,17 @@ final class BoardSurface {
 
     /**
      * Whether a face of this hex's top is road surface a neighbour's carriageway reserves here, which that road paints;
-     * other ground here, such as the ground under a bridge it runs onto, lies apart from that road.
+     * other ground here, such as the ground under a bridge it runs onto, lies apart from that road. A height-field hex's
+     * faces are its whole ground: those reaching into the road's reserved ground carry it.
      */
     boolean carries(Face face, BoardScene.Tile source) {
         var grade = BoardRoadGrade.of(scene, source, true);
-        if (grade == null || !reservedFaces.contains(face)) { return false; }
+        if (grade == null) { return false; }
+        if (fieldWalls != null) {
+            return grade.contains(face.a().x, face.a().y) || grade.contains(face.b().x, face.b().y)
+                  || grade.contains(face.c().x, face.c().y);
+        }
+        if (!reservedFaces.contains(face)) { return false; }
         return grade.contains((face.a().x + face.b().x + face.c().x) / 3, (face.a().y + face.b().y + face.c().y) / 3);
     }
 
@@ -3123,6 +3297,36 @@ final class BoardSurface {
         return false;
     }
 
+    /**
+     * The cut of the carriageways round a natural hex that its containment walls are found along
+     * (BoardRoadCut#containmentWalls), as #reserveWalls makes it, for the height field (FieldRoads#walls). Null where
+     * no carriageway reaches the hex, on poured ground, and with the walls off.
+     */
+    static BoardRoadCut containmentCut(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.surface() == BoardScene.Surface.CONCRETE || !BoardRelief.tuning().containmentWalls()) { return null; }
+        List<BoardRoadGrade> grades = grades(scene, tile, false, true);
+        return grades.isEmpty() ? null : new BoardRoadCut(new Area(), cell(scene, tile.coords(), true),
+              BoardGeometry.center(tile.coords(), tile.groundLevel()).z, grades, boardEdges(scene, tile));
+    }
+
+    /**
+     * The precast walls where this hex's natural ground, with these walls, still stands over a road's edge
+     * (BoardRoadCut#containmentWalls).
+     */
+    private void contain(BoardRoadCut cut, List<Face> walls) {
+        containmentWalls.clear();
+        if (!natural() || !BoardRelief.tuning().containmentWalls()) { return; }
+        List<Face> ground = new ArrayList<>(groundFaces());
+        ground.addAll(walls);
+        cut.containmentWalls(ground, reservedRoad, relief, containmentWalls);
+    }
+
+    /** A height-field hex's precast walls: the panels its block was cut along (FieldRoads#walls). */
+    void contained(List<Face> panels) {
+        containmentWalls.clear();
+        containmentWalls.addAll(panels);
+    }
+
     /** Slopes ease into the roads around, as the top does, and give way to the carriageways that reserve their ground. */
     private List<Face> reserveWalls(List<Face> walls, float floor) {
         // A water hex's walls stand past its cell, on ground the roads' banks ease. Built here, as a water hex restored
@@ -3137,12 +3341,7 @@ final class BoardSurface {
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
               roadAround(), field, natural(), false));
         result.addAll(curtains);
-        containmentWalls.clear();
-        if (natural() && BoardRelief.tuning().containmentWalls()) {
-            List<Face> ground = new ArrayList<>(groundFaces());
-            ground.addAll(result);
-            cut.containmentWalls(ground, reservedRoad, relief, containmentWalls);
-        }
+        contain(cut, result);
         return result;
     }
 
@@ -3259,6 +3458,9 @@ final class BoardSurface {
     /** Banks and exposed bars continue the land across their own edge, even on a hex with several shore materials. */
     BoardScene.Surface family(Face face) {
         if (gaps.contains(face)) { return groundBelow(); }
+        // On the height field, rock shed by a cliff takes the cliff's family wherever it lies (BoardRelief#shed).
+        BoardScene.Surface shed = relief.shed(face);
+        if (shed != null) { return shed; }
         BoardScene.Tile land = tile.liquid().present() && face.landEdge() >= 0 ? neighbor(scene, face.landEdge()) : null;
         return land != null && !land.liquid().present() ? land.surface() : BoardScene.Surface.values()[relief.family()];
     }
@@ -3335,19 +3537,14 @@ final class BoardSurface {
      * between the two slabs. A side that collapsed where the fit's walls mitre round a corner has no gap of its own.
      */
     private void pavementGaps() {
-        float scale = BoardGeometry.hexScale(), gap = PAVEMENT_GAP * scale;
-        float[] inset = new float[6];
-        for (int edge = 0; edge < 6; edge++) {
-            BoardScene.Tile next = neighbor(scene, edge);
-            if (next != null && tile.pavementApart(next, BoardGeometry.edgeDirection(edge))
-                  && moved(edge).dst(moved((edge + 1) % 6)) >= .01f * scale) { inset[edge] = gap; }
-        }
-        for (int edge = 0; edge < 6; edge++) {
-            if (inset[edge] == 0) { continue; }
-            int end = (edge + 1) % 6;
-            Vector3 a = moved(edge), b = moved(end), inward = inward(edge);
-            List<Boundary> strip = List.of(p -> (p.x - a.x) * inward.x + (p.y - a.y) * inward.y - gap,
-                  gapEnd(edge, edge, inset, b), gapEnd(edge, end, inset, a));
+        Vector3[] corners = new Vector3[6];
+        for (int k = 0; k < 6; k++) { corners[k] = moved(k); }
+        for (float[] planes : gapStrips(scene, tile, corners)) {
+            List<Boundary> strip = new ArrayList<>();
+            for (int i = 0; i < planes.length; i += 6) {
+                float nx = planes[i], ny = planes[i + 1], px = planes[i + 3], py = planes[i + 4];
+                strip.add(p -> (p.x - px) * nx + (p.y - py) * ny);
+            }
             List<Face> tops = new ArrayList<>(), others = new ArrayList<>(), ground = new ArrayList<>();
             for (Face face : faces) { (face.finish() == Finish.TOP && !gaps.contains(face) ? tops : others).add(face); }
             subtract(tops, strip, relief, ground::add);
@@ -3360,29 +3557,66 @@ final class BoardSurface {
     }
 
     /**
-     * The end of an edge's gap at its corner {@code k}, as the {@link Boundary} that holds {@code keep}: square where the
-     * cut stops inside the pavement, the third hex there joining both the others; else along the {@link #slabCorner}.
+     * The strips where a paved hex's slab stops short of its separated sides, on its outline's {@code corners} as the
+     * concrete fit moved them: per strip three planes of six floats (normal x, y, 0 and a point), inside where every
+     * distance is at most 0; the hex's own edge closes the strip. Today's pavement (#pavementGaps) and the height field
+     * (FieldBoard#gaps) cut the same strips.
      */
-    private Boundary gapEnd(int edge, int k, float[] inset, Vector3 keep) {
+    static List<float[]> gapStrips(BoardScene scene, BoardScene.Tile tile, Vector3[] corners) {
+        float scale = BoardGeometry.hexScale(), gap = PAVEMENT_GAP * scale;
+        float[] inset = new float[6];
+        for (int edge = 0; edge < 6; edge++) {
+            BoardScene.Tile next = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+            if (next != null && tile.pavementApart(next, BoardGeometry.edgeDirection(edge))
+                  && corners[edge].dst(corners[(edge + 1) % 6]) >= .01f * scale) { inset[edge] = gap; }
+        }
+        List<float[]> strips = new ArrayList<>();
+        for (int edge = 0; edge < 6; edge++) {
+            if (inset[edge] == 0) { continue; }
+            int end = (edge + 1) % 6;
+            Vector3 a = corners[edge], b = corners[end], inward = inward(corners, edge);
+            float[] planes = new float[18];
+            plane(planes, 0, inward.x, inward.y, a.x + inward.x * gap, a.y + inward.y * gap, a.z);
+            gapEnd(scene, tile, corners, edge, edge, inset, b, planes, 6);
+            gapEnd(scene, tile, corners, edge, end, inset, a, planes, 12);
+            strips.add(planes);
+        }
+        return strips;
+    }
+
+    private static void plane(float[] planes, int at, float nx, float ny, float px, float py, float pz) {
+        planes[at] = nx;
+        planes[at + 1] = ny;
+        planes[at + 2] = 0;
+        planes[at + 3] = px;
+        planes[at + 4] = py;
+        planes[at + 5] = pz;
+    }
+
+    /**
+     * The end of an edge's gap at its corner {@code k}, the plane at {@code at} on the side that holds {@code keep}: square
+     * where the cut stops inside the pavement, the third hex there joining both the others; else along the
+     * {@link #slabCorner}.
+     */
+    private static void gapEnd(BoardScene scene, BoardScene.Tile tile, Vector3[] corners, int edge, int k, float[] inset,
+          Vector3 keep, float[] planes, int at) {
         int other = k == edge ? (edge + 5) % 6 : k;
-        BoardScene.Tile third = neighbor(scene, other), across = neighbor(scene, edge);
+        BoardScene.Tile third = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(other)));
+        BoardScene.Tile across = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
         boolean stops = inset[other] == 0 && third != null && third.surface() == BoardScene.Surface.CONCRETE
               && !third.liquid().present() && third.elevation() == tile.elevation()
-              && moved(other).dst(moved((other + 1) % 6)) >= .01f * BoardGeometry.hexScale()
+              && corners[other].dst(corners[(other + 1) % 6]) >= .01f * BoardGeometry.hexScale()
               && !across.pavementApart(third, across.coords().direction(third.coords()));
-        return through(moved(k), stops ? moved(k).add(inward(edge)) : slabCorner(k, inset), keep);
+        Vector3 p = corners[k], q = stops ? new Vector3(p).add(inward(corners, edge)) : slabCorner(corners, k, inset);
+        // The side of the line from p through q that holds keep.
+        float nx = q.y - p.y, ny = p.x - q.x, len = (float) Math.hypot(nx, ny);
+        float sign = (keep.x - p.x) * nx + (keep.y - p.y) * ny > 0 ? -1 : 1;
+        plane(planes, at, sign * nx / len, sign * ny / len, p.x, p.y, p.z);
     }
 
     /** The inward unit normal of an edge as the concrete fit moved it. */
-    private Vector3 inward(int edge) {
-        return moved((edge + 1) % 6).sub(moved(edge)).crs(Vector3.Z).nor().scl(-1);
-    }
-
-    /** The side of the line from {@code p} through {@code q} that holds {@code keep}, as a {@link Boundary}. */
-    private static Boundary through(Vector3 p, Vector3 q, Vector3 keep) {
-        float nx = q.y - p.y, ny = p.x - q.x;
-        float sign = (keep.x - p.x) * nx + (keep.y - p.y) * ny > 0 ? -1 : 1;
-        return point -> sign * ((point.x - p.x) * nx + (point.y - p.y) * ny);
+    private static Vector3 inward(Vector3[] corners, int edge) {
+        return new Vector3(corners[(edge + 1) % 6]).sub(corners[edge]).crs(Vector3.Z).nor().scl(-1);
     }
 
     /**
@@ -3390,13 +3624,13 @@ final class BoardSurface {
      * point, so a gap's strips join in a mitre round the corner and end along an edge that keeps its place. A collapsed
      * edge is passed over.
      */
-    private Vector3 slabCorner(int k, float[] inset) {
+    private static Vector3 slabCorner(Vector3[] corners, int k, float[] inset) {
         int before = (k + 5) % 6, after = k;
-        Vector3 corner = moved(k);
+        Vector3 corner = corners[k];
         float least = .01f * BoardGeometry.hexScale();
-        for (int i = 0; i < 5 && moved(before).dst(moved((before + 1) % 6)) < least; i++) { before = (before + 5) % 6; }
-        for (int i = 0; i < 5 && moved(after).dst(moved((after + 1) % 6)) < least; i++) { after = (after + 1) % 6; }
-        Vector3 first = inward(before), second = inward(after);
+        for (int i = 0; i < 5 && corners[before].dst(corners[(before + 1) % 6]) < least; i++) { before = (before + 5) % 6; }
+        for (int i = 0; i < 5 && corners[after].dst(corners[(after + 1) % 6]) < least; i++) { after = (after + 1) % 6; }
+        Vector3 first = inward(corners, before), second = inward(corners, after);
         float c1 = first.x * corner.x + first.y * corner.y + inset[before], c2 = second.x * corner.x + second.y * corner.y + inset[after];
         float determinant = first.x * second.y - first.y * second.x;
         if (Math.abs(determinant) < .01f) {
@@ -3427,9 +3661,12 @@ final class BoardSurface {
         dug = faces.stream().anyMatch(face -> face.finish() == Finish.DUG);
     }
 
-    /** Whether scenery may dig {@code face} away: the hex's own top, but not a road over it. */
+    /**
+     * Whether scenery may dig {@code face} away: the hex's own top, but not a road over it. A height-field hex's ground
+     * comes already dug (FieldStamps).
+     */
     private boolean diggable(Face face) {
-        return face.finish() == Finish.TOP && !reservedFaces.contains(face);
+        return fieldWalls == null && face.finish() == Finish.TOP && !reservedFaces.contains(face);
     }
 
     /** One side of a convex region ({@link #subtract}): its signed distance at a point, positive outside. */
@@ -3493,6 +3730,80 @@ final class BoardSurface {
 
     private static float square(float value) { return value * value; }
 
+    /**
+     * More quay where a structure stands past this hex's fitted side (BoardConcrete#extensions): a paved top at the hex's
+     * level over each extension, and a quay wall down each run of its chain to the ground across that side.
+     */
+    /** This hex's quay extensions as drawn: their paved tops and quay walls (#quay); the height field draws them too. */
+    List<Face> quay() {
+        List<Face> result = new ArrayList<>(quayTops);
+        result.addAll(quayWalls);
+        return result;
+    }
+
+    private void quay(BoardScene scene) {
+        for (List<Vector3> polygon : BoardConcrete.of(scene).extensions(scene, tile)) {
+            // The ground across: the side whose middle lies nearest the first and last corners' middle.
+            Vector3 a = polygon.getFirst(), z = polygon.getLast();
+            float mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2, nearestSide = Float.MAX_VALUE;
+            int edge = 0;
+            for (int e = 0; e < 6; e++) {
+                Vector3 p = BoardGeometry.corner(tile.coords(), 0, e), q = BoardGeometry.corner(tile.coords(), 0, e + 1);
+                float d = (p.x + q.x) / 2 - mx, d2 = (p.y + q.y) / 2 - my, distance = d * d + d2 * d2;
+                if (distance < nearestSide) { nearestSide = distance; edge = e; }
+            }
+            BoardScene.Tile across = neighbor(scene, edge);
+            float low = across == null ? center.z - BoardGeometry.level() : BoardGeometry.groundZ(across);
+            // Over ground at its own level the top lies a slab's edge higher, as a kit's walkway does: two tops in one
+            // plane would flicker.
+            float top = center.z + (Math.abs(low - center.z) < BoardRelief.metres(.01f) ? BoardRelief.metres(SLAB) : 0);
+            // One vertex a corner, shared by the top's faces: the relief shades a vertex by its identity.
+            List<Vector3> ring = new ArrayList<>(polygon.size());
+            for (Vector3 corner : polygon) { ring.add(new Vector3(corner).add(0, 0, top)); }
+            Vector3 first = ring.getFirst();
+            for (int i = 1; i + 1 < ring.size(); i++) {
+                Vector3 b = ring.get(i), c = ring.get(i + 1);
+                boolean up = (b.x - first.x) * (c.y - first.y) - (b.y - first.y) * (c.x - first.x) > 0;
+                Face face = up ? new Face(first, b, c, Finish.TOP, -1) : new Face(first, c, b, Finish.TOP, -1);
+                faces.add(face);
+                quayTops.add(face);
+            }
+            // The relief shades only its own vertices: each corner of the extension's top takes the shading of the hex's
+            // paving nearest it, so the top is drawn and blended as that paving (GpuTerrain#prepareSculpt), not as
+            // formed stone.
+            for (Vector3 at : ring) {
+                BoardRelief.Shade nearest = null;
+                float best = Float.MAX_VALUE;
+                for (Face face : faces) {
+                    if (face.finish() != Finish.TOP) { continue; }
+                    for (Vector3 v : new Vector3[] { face.a(), face.b(), face.c() }) {
+                        BoardRelief.Shade shade = relief.shade(v);
+                        if (shade == null || shade.kind() != BoardRelief.Kind.GROUND || v.dst2(at) >= best) { continue; }
+                        best = v.dst2(at);
+                        nearest = shade;
+                    }
+                }
+                if (nearest != null) { relief.fieldShade(at, nearest); }
+            }
+            if (low >= top) { continue; }
+            int walled = quayWalls.size();
+            // The walls are faces of the hex, bound to no side of it: a wall face of a side beside water is cut by every
+            // triangle of that water it crosses (GpuWaterCover), and a chain crosses the water hex from end to end.
+            // The last one closes the top's side on the fitted line: where that line runs on past the hex's corner over
+            // water, the top would stand open toward the land.
+            for (int i = 0; i < polygon.size(); i++) {
+                Vector3 p = new Vector3(polygon.get(i)).add(0, 0, top);
+                Vector3 q = new Vector3(polygon.get((i + 1) % polygon.size())).add(0, 0, top);
+                Vector3 pl = new Vector3(p.x, p.y, low), ql = new Vector3(q.x, q.y, low);
+                // Facing out of the hex, away from its middle; the closing one faces it.
+                boolean out = (p.x - center.x) * (q.y - p.y) + (p.y - center.y) * (p.x - q.x) > 0 == i + 1 < polygon.size();
+                quayWalls.add(out ? new Face(p, pl, ql, Finish.WALL, -1) : new Face(p, ql, pl, Finish.WALL, -1));
+                quayWalls.add(out ? new Face(p, ql, q, Finish.WALL, -1) : new Face(p, q, ql, Finish.WALL, -1));
+            }
+            faces.addAll(quayWalls.subList(walled, quayWalls.size()));
+        }
+    }
+
     /** Derived once per immutable terrain snapshot; repeated pointer rays reuse the rendered topology. */
     List<Face> walls(BoardScene scene, float floor) {
         return walls(scene, floor, Map.of());
@@ -3514,6 +3825,143 @@ final class BoardSurface {
         return result;
     }
 
+    /** A position to a thousandth of a unit: copies of one point compare alike. */
+    private record Spot(int x, int y, int z) {
+        Spot(Vector3 p) { this(Math.round(p.x * 1000), Math.round(p.y * 1000), Math.round(p.z * 1000)); }
+    }
+
+    /**
+     * Closes the T junctions the bank's grid cuts ({@code cuts}, BoardRoadBank#cut) leave among these lists' faces: a
+     * face the bank split meets one it left whole along a straight edge (a wall split on the grid under a whole top),
+     * and a cut point lying inside the whole face's edge rasterizes as pinholes. Every edge only one face uses takes a
+     * copy of each such point lying strictly inside it, shaded along that edge, and its face is cut ear by ear in its
+     * own plane, which points on its own edges leave flat. A point a hair from an end is that end at another height, no
+     * junction. Dressing stays apart; the lists change in place, and a road face's pieces stay the road's.
+     */
+    private void closeTJunctions(List<List<Face>> lists, Set<Vector3> cuts) {
+        List<Face> all = new ArrayList<>();
+        lists.forEach(list -> list.stream().filter(f -> f.finish() != Finish.DRESSING && f.finish() != Finish.OUTCROP)
+              .forEach(all::add));
+        Set<Vector3> used = Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<Set<Spot>, Integer> uses = new HashMap<>();
+        for (var f : all) {
+            for (int i = 0; i < 3; i++) {
+                used.add(corner(f, i));
+                uses.merge(side(f, i), 1, Integer::sum);
+            }
+        }
+        // The cut points the faces use, by cell.
+        float cell = 4 * BoardGeometry.hexScale(), tolerance = .001f * BoardGeometry.hexScale();
+        Map<List<Integer>, List<Vector3>> points = new HashMap<>();
+        for (Vector3 v : cuts) {
+            if (used.contains(v)) {
+                points.computeIfAbsent(List.of((int) Math.floor(v.x / cell), (int) Math.floor(v.y / cell)),
+                      k -> new ArrayList<>()).add(v);
+            }
+        }
+        if (points.isEmpty()) { return; }
+        Map<Face, List<Face>> split = new IdentityHashMap<>();
+        for (var f : all) {
+            List<Vector3> ring = new ArrayList<>();
+            for (int i = 0; i < 3; i++) {
+                Vector3 p = corner(f, i), q = corner(f, i + 1), d = new Vector3(q).sub(p);
+                ring.add(p);
+                TreeMap<Float, Vector3> inside = new TreeMap<>();
+                Set<Spot> taken = new HashSet<>(List.of(new Spot(p), new Spot(q)));
+                for (int x = (int) Math.floor(Math.min(p.x, q.x) / cell);
+                      uses.get(side(f, i)) == 1 && x <= Math.floor(Math.max(p.x, q.x) / cell); x++) {
+                    for (int y = (int) Math.floor(Math.min(p.y, q.y) / cell);
+                          y <= Math.floor(Math.max(p.y, q.y) / cell); y++) {
+                        for (Vector3 v : points.getOrDefault(List.of(x, y), List.of())) {
+                            float u = new Vector3(v).sub(p).dot(d) / d.len2();
+                            if (u > 0 && u < 1 && new Vector3(p).mulAdd(d, u).dst(v) <= tolerance
+                                  && v.dst(p) > 10 * tolerance && v.dst(q) > 10 * tolerance
+                                  && taken.add(new Spot(v))) { inside.put(u, v); }
+                        }
+                    }
+                }
+                inside.forEach((u, v) -> {
+                    Vector3 copy = new Vector3(v);
+                    relief.interpolateShade(p, q, u, copy);
+                    ring.add(copy);
+                });
+            }
+            List<Face> pieces = ring.size() > 3 ? fan(ring, f) : null;
+            if (pieces != null) { split.put(f, pieces); }
+        }
+        for (var list : lists) {
+            for (int i = list.size() - 1; i >= 0; i--) {
+                var pieces = split.get(list.get(i));
+                if (pieces != null) {
+                    list.remove(i);
+                    list.addAll(i, pieces);
+                }
+            }
+        }
+        if (reservedRoad.stream().anyMatch(split::containsKey)) {
+            List<Face> road = new ArrayList<>();
+            reservedRoad.forEach(f -> road.addAll(split.getOrDefault(f, List.of(f))));
+            reservedRoad.forEach(reservedFaces::remove);
+            reservedRoad = List.copyOf(road);
+            reservedFaces.addAll(road);
+        }
+    }
+
+    /** The points a face left whole may lack on its edge: the bank's grid cuts and the emitted road's own vertices. */
+    private Set<Vector3> joints() {
+        Set<Vector3> points = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (bank != null) { points.addAll(bank.cut); }
+        reservedRoad.forEach(f -> points.addAll(List.of(f.a(), f.b(), f.c())));
+        return points;
+    }
+
+    private static Vector3 corner(Face f, int i) { return i % 3 == 0 ? f.a() : i % 3 == 1 ? f.b() : f.c(); }
+
+    /** A face's edge from corner i, by its ends' spots. */
+    private static Set<Spot> side(Face f, int i) {
+        Spot p = new Spot(corner(f, i)), q = new Spot(corner(f, i + 1));
+        return p.equals(q) ? Set.of(p) : Set.of(p, q);
+    }
+
+    /**
+     * A face's convex outline (its corners and points on its edges) cut ear by ear in the plane its normal sees most
+     * of, with its winding; an ear holds no other point, not even on its cut. Null if it cannot be cut.
+     */
+    private static List<Face> fan(List<Vector3> ring, Face like) {
+        Vector3 n = new Vector3(like.b()).sub(like.a()).crs(new Vector3(like.c()).sub(like.a()));
+        int drop = Math.abs(n.x) >= Math.abs(n.y) && Math.abs(n.x) >= Math.abs(n.z) ? 0
+              : Math.abs(n.y) >= Math.abs(n.z) ? 1 : 2;
+        // Seen along y the plane's axes are x and z, which turn against the normal's y.
+        float turn = Math.signum(drop == 0 ? n.x : drop == 1 ? -n.y : n.z);
+        List<Vector3> left = new ArrayList<>(ring);
+        List<Face> pieces = new ArrayList<>();
+        while (left.size() > 2) {
+            int size = left.size(), ear = -1;
+            for (int i = 0; i < size && ear < 0; i++) {
+                Vector3 a = left.get((i + size - 1) % size), b = left.get(i), c = left.get((i + 1) % size);
+                if (turn * planeCross(a, b, c, drop) <= 1e-9f * a.dst2(c)) { continue; }
+                boolean empty = true;
+                for (Vector3 o : left) {
+                    empty &= o == a || o == b || o == c || turn * planeCross(a, b, o, drop) < 0
+                          || turn * planeCross(b, c, o, drop) < 0 || turn * planeCross(c, a, o, drop) < 0;
+                }
+                if (empty) { ear = i; }
+            }
+            if (ear < 0) { return null; }
+            pieces.add(new Face(left.get((ear + size - 1) % size), left.get(ear), left.get((ear + 1) % size),
+                  like.finish(), like.landEdge(), like.scatter()));
+            left.remove(ear);
+        }
+        return pieces;
+    }
+
+    /** Twice the signed area of a triangle in the plane seen along the given axis. */
+    private static float planeCross(Vector3 a, Vector3 b, Vector3 c, int drop) {
+        float ax = drop == 0 ? a.y : a.x, ay = drop == 2 ? a.y : a.z,
+              bx = drop == 0 ? b.y : b.x, by = drop == 2 ? b.y : b.z;
+        return (bx - ax) * ((drop == 2 ? c.y : c.z) - ay) - (by - ay) * ((drop == 0 ? c.y : c.x) - ax);
+    }
+
     /** Neighbours must have completed construction; only their immutable edge topography is borrowed. */
     List<Face> walls(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         if (wallFaces == null || wallFloor != floor) {
@@ -3529,6 +3977,11 @@ final class BoardSurface {
                 var lower = scene.tile(tile.coords().translated(d));
                 if (lower == null || lower.elevation() >= tile.elevation()) { continue; }
                 for (var tunnel : BoardTunnel.entrances(scene, lower)) { tunnel.cut(wallFaces, relief); }
+            }
+            // The walls meet the hex's own ground at the bank's grid cuts and the road's vertices (#closeTJunctions).
+            if (fieldWalls == null && !columns) {
+                wallFaces = new ArrayList<>(wallFaces);
+                closeTJunctions(List.of(faces.subList(0, faces.size() - rough.size()), wallFaces), joints());
             }
             wallFloor = floor;
         }

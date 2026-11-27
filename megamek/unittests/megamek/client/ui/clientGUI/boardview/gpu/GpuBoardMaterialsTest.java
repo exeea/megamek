@@ -46,6 +46,34 @@ class GpuBoardMaterialsTest {
     @AfterEach
     void restoreAssets() { Configuration.setDataDir(previousData); }
 
+    /**
+     * The compact ground (ground-material.glsl) takes a role's finish as its map's mean roughness and nothing else.
+     * That is the whole finish only while no ground material declares metal, an emission or scattering, as none of the
+     * shipped ones does. Such a map is welcome: this names the material that needs the compact ground's finish rule
+     * kind built for it.
+     */
+    @Test
+    void groundMaterialsCarryNoMetalEmissionOrScattering() throws Exception {
+        File shipped = new File(previousData, "models/board/textures");
+        var roles = new HashSet<String>();
+        for (String field : List.of("SCULPT_MATERIALS", "FLOORS")) {
+            var names = GpuTerrain.class.getDeclaredField(field);
+            names.setAccessible(true);
+            Object value = names.get(null);
+            Stream<String> flat = value instanceof String[][] families
+                  ? Stream.of(families).flatMap(Stream::of) : Stream.of((String[]) value);
+            flat.filter(role -> role != null).forEach(roles::add);
+        }
+        assertTrue(roles.size() > 20, "The ground's roles were found: " + roles);
+        for (String role : roles) {
+            var material = GodotMaterial.read(new File(shipped, "terrain/surfaces/" + role + ".tres"), shipped);
+            assertTrue(material.metallic() == 0 && material.metallicMap() == null && !material.emissionEnabled()
+                        && material.emission() == null && !material.subsurfaceEnabled(),
+                  "This ground material declares metal, an emission or scattering; ground-material.glsl takes a"
+                        + " role's mean roughness alone until its finish rule kind is built: build it for " + role);
+        }
+    }
+
     @Test
     void readsMaterialMakerAndGodotEditorResources() throws Exception {
         var material = GodotMaterial.read(textures.resolve("terrain/surfaces/test.tres").toFile(), textures.toFile());

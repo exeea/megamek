@@ -135,6 +135,7 @@ public final class ObjectiveDeserializer {
         if (node.has(DESTRUCTIBLE)) {
             marker.setInvulnerable(!node.get(DESTRUCTIBLE).asBoolean());
         }
+        marker.setHeadquarters(node.path("headquarters").asBoolean(false));
         parseScheme(marker, node);
         if (node.hasNonNull(SCAN_REVEALS)) {
             marker.setScanRevealsNote(node.get(SCAN_REVEALS).asText());

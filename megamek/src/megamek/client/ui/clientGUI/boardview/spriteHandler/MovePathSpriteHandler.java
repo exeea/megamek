@@ -33,10 +33,14 @@
 
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
+import java.awt.Color;
+
 import jakarta.annotation.Nullable;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.sprite.sbf.SBFStepSprite;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
+import megamek.client.ui.clientGUI.boardview.TacticalStyle;
+import megamek.common.board.Coords;
 import megamek.common.strategicBattleSystems.SBFMovePath;
 import megamek.common.strategicBattleSystems.SBFMoveStep;
 
@@ -47,22 +51,26 @@ public class MovePathSpriteHandler extends BoardViewSpriteHandler {
     }
 
     /**
-     * Clears the current sprites and creates new sprites for all formations.
+     * Replaces the planned route on the board, including the cost at its destination.
      */
     public void update(@Nullable SBFMovePath movePath) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
-            return;
-        }
         if (movePath == null) {
             return;
         }
-
         for (SBFMoveStep step : movePath.getSteps()) {
-            currentSprites.add(new SBFStepSprite((BoardView) clientGUI.boardViews().getFirst(), step, movePath));
+            BoardClientState state = clientGUI.getBoardState(step.getDestination().boardId());
+            if (state == null) {
+                continue;
+            }
+            Color color = (step.isIllegal() || movePath.isIllegal()) ? GUIP.getMoveIllegalColor()
+                  : GUIP.getMoveDefaultColor();
+            Coords coords = step.getDestination().coords();
+            addMark(state, movePath.isEndStep(step)
+                  ? new TacticalMark.Flag(coords, color, movePath.getMpUpTo(step) + " MP", null,
+                  TacticalMark.Flag.NO_FACING)
+                  : new TacticalMark.RouteDot(coords, color, TacticalStyle.ROUTE_TRAIL_DIAMETER));
         }
-
-        clientGUI.boardViews().getFirst().addSprites(currentSprites);
     }
 
     @Override

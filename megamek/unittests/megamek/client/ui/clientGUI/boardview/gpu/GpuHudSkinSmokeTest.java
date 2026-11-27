@@ -7,9 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -98,7 +95,7 @@ class GpuHudSkinSmokeTest {
      * when filtered perfectly.
      */
     private static final float THIN_VISIBLE = .35f;
-    /** The same for a face drawn below its size: the model line samples mip level 1 at 2.3:1, which leaves gaps. */
+    /** The same for a face drawn below its size (the model line): its raster is drawn minified, which leaves gaps. */
     private static final float MODEL_LINE_VISIBLE = .25f;
 
     /**
@@ -115,9 +112,8 @@ class GpuHudSkinSmokeTest {
     /**
      * Every font of the skin has a glyph for each character of HUD_CHARACTERS, and each hud font draws them visibly at
      * 1 pixel per unit; the thin marks and the arrows' shafts stay visible at eight sub-pixel offsets, at the font's
-     * size and at the kit's model line. Before the hud glyphs were mipmapped with transparent white around their ink,
-     * the model line lost the hyphen of "AS7-D" at some offsets; arrows from Bitter Medium at 0.65 of the font's size
-     * lost their shafts at some offsets in hud-utility, hud-sub and hud-mini.
+     * size and at the kit's model line. The model line once lost the hyphen of "AS7-D" at some offsets, and arrows from
+     * Bitter Medium at 0.65 of the font's size lost their shafts at some offsets in hud-utility, hud-sub and hud-mini.
      */
     @Test
     void everyFontDrawsHudCharactersAtEverySubPixelOffset() {
@@ -145,15 +141,11 @@ class GpuHudSkinSmokeTest {
                           new GlyphLayout(font, " ").width, 1e-4f, hud.name() + " space width");
                     font.getRegions().forEach(region -> pages.add(region.getTexture()));
                 }
-                // Filtering mixes a glyph's ink with the texels around it; transparent black would darken its edges.
+                // Filtering mixes a glyph's ink with the texels around it; a colour around the ink would darken its
+                // edges. The pages hold coverage only, read as white with the coverage as alpha.
                 for (Texture page : pages) {
-                    ByteBuffer bytes = page.getTextureData().consumePixmap().getPixels().duplicate();
-                    IntBuffer texels = bytes.position(0).order(ByteOrder.BIG_ENDIAN).asIntBuffer();
-                    while (texels.hasRemaining()) {
-                        int rgba = texels.get();
-                        assertTrue((rgba & 0xFF) > 0 || rgba == 0xFFFFFF00, () -> "hud glyph page texel "
-                              + Integer.toHexString(rgba) + " is ink or transparent white");
-                    }
+                    assertEquals(Pixmap.Format.Alpha, page.getTextureData().getFormat(),
+                          "hud glyph pages hold coverage");
                 }
                 Stage stage = new Stage(new ScreenViewport());
                 try {

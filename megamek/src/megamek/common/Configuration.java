@@ -484,10 +484,6 @@ public final class Configuration {
         }
     }
 
-    public static File gameSummaryImagesBVDir() {
-        return new File(PreferenceManager.getClientPreferences().getLogDirectory() + "/gameSummaries/board");
-    }
-
     public static File gameSummaryImagesMMDir() {
         return new File(PreferenceManager.getClientPreferences().getLogDirectory() + "/gameSummaries/minimap");
     }

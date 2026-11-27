@@ -27,7 +27,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.ResolvedAttack;
@@ -667,10 +666,10 @@ class GpuReportLogTest {
     void roundsInTheAirArePublishedAndOnlyAChangeReplacesTheSnapshot() {
         GpuReportLog log = new GpuReportLog();
         List<List<Report>> history = List.of(List.of(new Report(3000)));
-        var own = new RoundsInAirDialog.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
-              "0607", "Homing");
-        var enemy = new RoundsInAirDialog.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
-              "Unknown", "Unknown");
+        var own = new RoundsInAir.Row(2, "Team 1", "Raven's Nest", "Long Tom Artillery Vehicle", "2 turn(s)",
+              "0607", "Homing", false);
+        var enemy = new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle", "1 turn(s)",
+              "Unknown", "Unknown", true);
 
         var inbound = log.capture(history, 1, GamePhase.FIRING, List.of(enemy, own), id -> null);
 
@@ -694,8 +693,8 @@ class GpuReportLogTest {
                 fixture.source.refresh();
             });
 
-            assertEquals(List.of(new RoundsInAirDialog.Row(2, "Team 2", "OpFor", "(unknown unit)", "2 turn(s)",
-                  "Unknown", "Unknown")), fixture.source.takeFrame().reports().inFlight());
+            assertEquals(List.of(new RoundsInAir.Row(2, "Team 2", "OpFor", "(unknown unit)", "2 turn(s)",
+                  "Unknown", "Unknown", true)), fixture.source.takeFrame().reports().inFlight());
         }
     }
 

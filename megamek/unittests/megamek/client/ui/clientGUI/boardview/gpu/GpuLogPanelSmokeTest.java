@@ -42,13 +42,15 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Clipboard;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
-import megamek.client.ui.dialogs.RoundsInAirDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.strategicBattleSystems.SBFGame;
+import megamek.common.strategicBattleSystems.SBFPublicReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -89,7 +91,12 @@ class GpuLogPanelSmokeTest {
         GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
 
         Panel(GpuHudTestStage hud) {
+            this(hud, false);
+        }
+
+        Panel(GpuHudTestStage hud, boolean strategic) {
             hud.window.clearChildren();
+            when(source.strategic()).thenReturn(strategic);
             log = new GpuLogPanel(hud.kit, source, state, menu);
             root = (Table) log.actor();
             hud.window.addActor(root);
@@ -149,6 +156,36 @@ class GpuLogPanelSmokeTest {
         UiButton card(int index) {
             return cardActors().get(index);
         }
+    }
+
+    @Test
+    void strategicReportShowsSetupAndTheBattleOutcomeInTheNativeLog() {
+        GpuHudTestStage.run(hud -> {
+            Panel panel = new Panel(hud, true);
+            SBFGame game = new SBFGame();
+            GpuSbfCapture capture = new GpuSbfCapture(game, () -> 1);
+            game.setCurrentRound(0);
+            game.setPhase(GamePhase.DEPLOYMENT);
+            game.addReports(List.of(new SBFReportHeader(1005), new SBFPublicReportEntry(1068).add("Blue").add(9)));
+            panel.show(hud, status(GamePhase.DEPLOYMENT, 0), capture.reports());
+            assertEquals(List.of("INITIATIVE PHASE FOR START OF GAME DEPLOYMENT", "Blue has initiative 9."),
+                  panel.list());
+
+            game.setCurrentRound(1);
+            game.setPhase(GamePhase.VICTORY);
+            game.addReports(List.of(new SBFReportHeader(2000), new SBFPublicReportEntry(3404).add("Scout"),
+                  new SBFReportHeader(3000), new SBFPublicReportEntry(2012),
+                  new SBFReportHeader(3399), new SBFPublicReportEntry(3403).add("Red").add("Scout"),
+                  new SBFReportHeader(3502), new SBFPublicReportEntry(3501).add("Blue")));
+            panel.show(hud, status(GamePhase.VICTORY, 1), capture.reports());
+            assertEquals("Blue wins the battle.", panel.<Label>find("sbf-report-text").getText().toString());
+            assertEquals(List.of("BATTLE OUTCOME", "Blue wins the battle.", "END PHASE", "Red routs and loses Scout.",
+                  "COMBAT RESOLUTION", "Attack missed.", "MOVEMENT PHASE", "Scout withdraws at its home map edge."),
+                  panel.list());
+            assertNull(panel.find("log-tabs"));
+            assertNull(panel.find("log-filters"));
+            assertNull(panel.find("log-totals"));
+        });
     }
 
     @Test
@@ -293,8 +330,8 @@ class GpuLogPanelSmokeTest {
         GpuHudTestStage.run(hud -> {
             Panel panel = new Panel(hud);
             Round round = scripted();
-            RoundsInAirDialog.Row inbound = new RoundsInAirDialog.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle",
-                  "1 turn(s)", "0607", "Standard");
+            RoundsInAir.Row inbound = new RoundsInAir.Row(1, "Team 2", "OpFor", "Thumper Artillery Vehicle",
+                  "1 turn(s)", "0607", "Standard", true);
             GpuReportLog.Snapshot log = new GpuReportLog.Snapshot(4, GamePhase.END_REPORT, round.log().entries(),
                   Map.of(), round.log().combat(), round.log().psr(), round.log().moves(), List.of(inbound));
             play(panel.state.history, new Round(log, round.events()));
@@ -308,6 +345,14 @@ class GpuLogPanelSmokeTest {
             assertEquals(List.of("1", "1", "Thumper Artillery Vehicle", "0607 · Standard",
                   "1 turn(s) · OpFor"), list.subList(artillery + 1, list.size()),
                   "its count, then the round's card: its turns in the disc, the unit, the hex and warhead, the turn");
+            Container<Label> disc = panel.card(panel.cardActors().size() - 1).findActor("log-card-disc");
+            assertEquals(UiTheme.CORAL, disc.getActor().getStyle().fontColor, "an enemy's round has the enemy's disc");
+            click(hud, panel.find("log-filter-1"));
+            panel.show(hud, status, log);
+            assertFalse(panel.list().contains(UiTheme.upper(Messages.getString("GpuBoard.hud.log.artilleryInFlight"))),
+                  "My force leaves an enemy's round out");
+            click(hud, panel.find("log-filter-0"));
+            panel.show(hud, status, log);
 
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_FILTER)));
             panel.show(hud, status, log);

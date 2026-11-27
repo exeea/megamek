@@ -35,7 +35,6 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -46,7 +45,7 @@ import megamek.common.units.Entity;
 
 /**
  * Manages bridge-under-construction indicator sprites on the board view (TO:AUE Bridge-Building Engineers). Creates and
- * removes {@link BridgeBuildSprite} instances on the target hexes of all platoons that are currently raising a bridge;
+ * removes {@link TacticalMark.BridgeBuild} instances on the target hexes of all platoons that are currently raising a bridge;
  * the build state is read from the synced ConvInfantry entities.
  */
 public class BridgeBuildSpriteHandler extends BoardViewSpriteHandler {

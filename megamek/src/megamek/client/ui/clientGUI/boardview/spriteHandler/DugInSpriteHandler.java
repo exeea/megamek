@@ -36,7 +36,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.DugInSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
@@ -46,8 +45,8 @@ import megamek.common.units.Infantry;
 
 /**
  * Publishes the dug-in marks on the board view (TO:AR p.106 Digging In) on the hexes of infantry platoons that are
- * digging in or dug in; the state is read from the synced entities. The Legacy 2D board draws them as
- * {@link DugInSprite} trench overlays, the 3D board as trenches. The multi-turn fortified-hex build (sandbags) is handled
+ * digging in or dug in ({@link TacticalMark.DugIn}); the state is read from the synced entities. The 3D board draws
+ * them as trenches. The multi-turn fortified-hex build (sandbags) is handled
  * separately by {@link FortifyBuildSpriteHandler}.
  */
 public class DugInSpriteHandler extends BoardViewSpriteHandler {

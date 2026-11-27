@@ -171,7 +171,7 @@ class BoardRoadRoundaboutTest {
     }
 
     @Test
-    void sharedRoundaboutCopiesKeepTheSamePinnedConcreteApproach() {
+    void sharedRoundaboutCopiesKeepTheSameConcreteApproach() {
         for (int orientation = 0; orientation < 6; orientation++) {
             Coords at = BoardScenes.CENTER;
             var members = List.of(at, at.translated(orientation), at.translated((orientation + 1) % 6));
@@ -190,9 +190,9 @@ class BoardRoadRoundaboutTest {
                   board.containsKey(c) ? board.get(c).getTerrain(Terrains.ROAD).getExits() : 0, 0,
                   paving.contains(c) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND));
             var own = BoardRoad.of(scene, scene.tile(member));
-            assertTrue(BoardConcrete.of(scene).corners(receiver).stream()
-                  .allMatch(shift -> shift.x() == 0 && shift.y() == 0),
-                  "The connected road pins its concrete receiver, so this mouth needs no extension");
+            // No fitted corner of the receiver stands in the course of the road beside its pavement, so this mouth
+            // needs no extension.
+            BoardRoadConcreteTest.fittedCornersKeepOutOfWaysBeside(scene, receiver);
             float[] gate = RailRoute.border(direction);
             float length = (float) Math.hypot(gate[0], gate[1]);
             for (Coords other : members) {

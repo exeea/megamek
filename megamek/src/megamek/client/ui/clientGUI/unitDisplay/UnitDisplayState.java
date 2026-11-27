@@ -174,13 +174,6 @@ public final class UnitDisplayState {
         changed();
     }
 
-    public void selectBayWeapon(@Nullable WeaponMounted weapon) {
-        if (weapon == null || selectedWeapon == null || !selectedWeapon.getBayWeapons().contains(weapon)) { return; }
-        bayWeapon = weapon;
-        refreshAmmo();
-        changed();
-    }
-
     public WeaponDisplayData.AmmoChoices ammoChoices() {
         return selectedWeapon == null ? new WeaponDisplayData.AmmoChoices(WeaponDisplayData.AmmoChoices.Feed.NONE,
               List.of()) : WeaponDisplayData.ammoChoices(weaponEntity, selectedWeapon,
@@ -229,11 +222,9 @@ public final class UnitDisplayState {
     public void setRange(String value) { range = Objects.toString(value, ""); changed(); }
     public String getRange() { return range; }
     public String getToHit() { return toHit; }
-    public String getTargetExtra() { return targetExtra; }
     public String getTargetText() {
         return target == null ? Messages.getString("MekDisplay.NoTarget") : UnitToolTip.getTargetTipDetail(target, client());
     }
-    public String getTargetName() { return target == null ? Messages.getString("MekDisplay.NoTarget") : target.getDisplayName(); }
     public String getFiringSolution() {
         return Messages.getString("MekDisplay.Range") + " " + range + "<br>" + toHit + "<br>" + targetExtra;
     }

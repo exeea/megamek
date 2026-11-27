@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.GL20;
@@ -44,7 +45,11 @@ import megamek.logging.MMLogger;
  */
 final class GpuFamilyPrograms {
     private static final MMLogger LOGGER = MMLogger.create(GpuFamilyPrograms.class);
-    /** {@code -Dmegamek.gpu.familyPrograms=false} draws every terrain surface with its generic program. */
+    /**
+     * Family programs draw by default on integrated GPUs only ({@link GpuGlsl#integrated()}); on discrete ones their
+     * links cost more load time and play hitches than they save (docs/gpu-shaders.md).
+     * {@code -Dmegamek.gpu.familyPrograms=true|false} decides instead.
+     */
     static final String PROPERTY = "megamek.gpu.familyPrograms";
     /**
      * Family programs a terrain builds for each lighting configuration, and twice that in all; libGDX frees them with
@@ -67,6 +72,12 @@ final class GpuFamilyPrograms {
     static final int FRESH = 4;
     /** The share in force: the shader warm-up's process (GpuShaderWarmup), whose links no frame waits for, lifts it. */
     static int fresh = FRESH;
+    /**
+     * Family programs that failed to build in this process. A failure is a fault of the shader text, not a state a
+     * board may be in: the generic program hides it from the picture, and the count of links after loading can't see
+     * it (the failed link started behind the loading stage and isn't tried again), so the guards read this.
+     */
+    private static final AtomicInteger FAILURES = new AtomicInteger();
 
     /**
      * Marks a material drawn by its family program. It is part of the material's mask, so the comparisons that already
@@ -169,7 +180,7 @@ final class GpuFamilyPrograms {
      * Renderers that borrow another terrain's assets (previews, prints) pass {@code wanted} false: generic only.
      */
     GpuFamilyPrograms(boolean wanted, long sculptType, Function<Material, Object> variantOf) {
-        enabled = wanted && Boolean.parseBoolean(System.getProperty(PROPERTY, "true"));
+        enabled = wanted && Boolean.parseBoolean(System.getProperty(PROPERTY, Boolean.toString(GpuGlsl.integrated())));
         this.sculptType = sculptType;
         this.variantOf = variantOf;
     }
@@ -324,7 +335,8 @@ final class GpuFamilyPrograms {
         } catch (RuntimeException failure) {
             // Its draws keep the generic program, and a broken variant is not tried again in this configuration.
             variant.failed = current;
-            LOGGER.warn(failure, "Terrain family program {} failed; its draws keep the generic program",
+            FAILURES.incrementAndGet();
+            LOGGER.error(failure, "Terrain family program {} failed; its draws keep the generic program",
                   Arrays.toString(variant.families));
         } finally {
             freshLinks += preparation.freshLinks() - started;
@@ -410,6 +422,8 @@ final class GpuFamilyPrograms {
 
     /** Distinct variants installed chunks asked for, built or not. */
     int requested() { return variants.size(); }
+
+    static int failures() { return FAILURES.get(); }
 
     void dispose() {
         variants.values().forEach(Variant::release);
@@ -508,6 +522,15 @@ final class GpuFamilyPrograms {
               + ((aliases & 2) != 0 ? "#define COVER_C_IS_BASE\n" : "");
         return families.length == 1 ? sculpt : sculpt + "#define COVER_FAMILIES vec4(" + families[1] + ", "
               + families[2] + ", " + families[3] + ", " + families[4] + ")\n" + reuse;
+    }
+
+    /**
+     * A material's place among its generic program's draws (GpuOpaqueSorter): its family variant, the same whether
+     * its family program or the generic one draws it; empty for a material no family program draws.
+     */
+    static String order(Material material, long sculptType) {
+        float[] families = families(material, sculptType);
+        return families == null ? "" : Arrays.toString(families) + baseAliases(material) + (isFlat(material) ? "t" : "");
     }
 
     /** The program name's suffix, as the shader editor and the compile log show it. */

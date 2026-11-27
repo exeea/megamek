@@ -132,7 +132,7 @@ class GpuLiveBoardSpaceSmokeTest {
         live.capture("i1b-movement-3d-overlay-only.png");
         live.show(published);
         GpuHud.HudView view = live.hudView();
-        assertEquals(120, view.hexPixels(), .01f, "A hex's width on the screen, in HUD units");
+        assertEquals(120, live.hexPixels(), .01f, "A hex's width on the screen, in HUD units");
         for (int id : List.of(SAGITTAIRE, ATLAS, ARCHER)) {
             verifyModelHead(live, view, id);
         }
@@ -156,10 +156,12 @@ class GpuLiveBoardSpaceSmokeTest {
         assertTrue(corner.y > destination.y && corner.y < destination.y + 200, "The tip hangs above it");
         Actor pin = live.actor("pin-1");
         assertTrue(GpuBoardTestUi.shown(pin), "The waypoint's number");
-        Vector2 waypoint = live.hex(WAYPOINT);
+        float lift = GpuBoardOverlay.ROUTE_LIFT * BoardGeometry.WIDTH / 2;
+        Vector2 waypoint = live.stage(new Vector3(BoardGeometry.centerX(WAYPOINT), BoardGeometry.centerY(WAYPOINT),
+              BoardGeometry.surfaceZ(live.scene().tile(WAYPOINT)) + lift));
         Vector2 pinCentre = pin.localToStageCoordinates(new Vector2(pin.getWidth() / 2, pin.getHeight() / 2));
-        assertEquals(waypoint.x, pinCentre.x, 1.5f, "The number stands over its waypoint");
-        assertEquals(waypoint.y + 22, pinCentre.y, 1.5f, "22 units above its hex");
+        assertEquals(waypoint.x, pinCentre.x, 1.5f, "The number sits on the route at its waypoint");
+        assertEquals(waypoint.y, pinCentre.y, 1.5f, "No rise: the line runs through it");
         assertFalse(GpuBoardTestUi.shown(live.hud.stage.getRoot().findActor("pin-2")), "One waypoint, one number");
 
         // The board's Move and Clear chip, centred over the destination's head as deployment's pair stands over a
@@ -498,7 +500,7 @@ class GpuLiveBoardSpaceSmokeTest {
         assertEquals(top, head.y, 2, id + ": the head at the model's top");
         com.badlogic.gdx.math.Rectangle rect = view.unitRects().get(id);
         assertEquals(head.y, rect.y + rect.height, .5f, id + ": its rectangle reaches up to the head");
-        assertEquals(.55f * view.hexPixels(), rect.width, 1, id + ": and is .55 of a hex wide");
+        assertEquals(.55f * live.hexPixels(), rect.width, 1, id + ": and is .55 of a hex wide");
         assertEquals(head.x, rect.x + rect.width / 2, 1, id + ": around the model's middle");
     }
 
@@ -1216,6 +1218,15 @@ class GpuLiveBoardSpaceSmokeTest {
         }
 
         /** The facts the view handed the HUD in the last frame. */
+        /** A hex's width on the screen, corner to corner, in HUD units, as the view measures it (UnitScreenScale). */
+        float hexPixels() {
+            try {
+                return UnitScreenScale.hexPixels(camera().camera.zoom, (float) GpuTestSupport.field(view, "layoutScale"));
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+        }
+
         GpuHud.HudView hudView() throws Exception {
             return ((GpuHud.Inputs) GpuTestSupport.field(hud, "inputs")).view();
         }

@@ -61,6 +61,7 @@ import javax.swing.SwingUtilities;
 
 import jakarta.annotation.Nullable;
 import megamek.client.AbstractClient;
+import megamek.client.bot.BotClient;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.ArtilleryOrder;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.SpecialAmmo;
 import megamek.client.bot.princess.BehaviorChange;
@@ -190,41 +191,16 @@ public class BotCommandsPanel extends JPanel {
         }
     }
 
-    /**
-     * Switches the panel between its floating and docked layouts. The floating layout keeps the original two-row grid
-     * and size; the docked layout uses a single row sized for the thin strip above the board. Only the arrangement and
-     * size hints change - the same buttons and their actions are preserved in both modes.
-     *
-     * @param docked {@code true} to use the single-row docked layout, {@code false} to use the floating two-row layout
-     */
-    public void setDockedLayout(boolean docked) {
-        applyLayout(docked);
-        revalidate();
-        repaint();
-    }
-
-    /**
-     * Applies the layout manager and size hints for the requested mode.
-     *
-     * @param docked {@code true} for the single-row docked layout, {@code false} for the floating two-row layout
-     */
-    private void applyLayout(boolean docked) {
-        if (docked) {
-            // One row, columns grow to fit the buttons - a thin strip that steals little height from the board.
-            this.setLayout(new GridLayout(1, 0, 2, 2));
-            this.setMinimumSize(UIUtil.scaleForGUI(600, 40));
-            this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(40)));
-            this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(40)));
-        } else {
-            this.setLayout(new GridLayout(2, 4, 2, 2));
-            this.setMinimumSize(UIUtil.scaleForGUI(600, 80));
-            this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
-            this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
-        }
+    /** Applies the two-row grid and its size hints. */
+    private void applyLayout() {
+        this.setLayout(new GridLayout(2, 4, 2, 2));
+        this.setMinimumSize(UIUtil.scaleForGUI(600, 80));
+        this.setPreferredSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
+        this.setMaximumSize(new Dimension(-1, UIUtil.scaleForGUI(80)));
     }
 
     private void initialize() {
-        applyLayout(false);
+        applyLayout();
         UIUtil.applyTopBarBackground(this);
         ordersMenuBuilder = new BotOrdersMenuBuilder(client,
               (orderDescription, singleHex, onPicked) -> pickTargetHexes(orderDescription, singleHex, 0,
@@ -302,7 +278,8 @@ public class BotCommandsPanel extends JPanel {
      * while paused, so the player sets roles and routes, then presses Continue.
      *
      * <p>Only in the game window, and only with Start bots-only games paused on in the settings: MekHQ's auto-resolve
-     * watches through the Commander window, where nobody would press Continue.</p>
+     * watches through the Commander window, where nobody would press Continue. Never in a bot's own window (Start >
+     * Connect as a bot): that bot plays on its own, and its window does not hold the game for a person.</p>
      *
      * <p>The pause comes once the bots have deployed, so their units are on the board to give orders to (HammerGS,
      * 2026-10-04): at the first round's initiative report, before any unit moves. Pausing as the game left the lobby
@@ -330,6 +307,10 @@ public class BotCommandsPanel extends JPanel {
             // MekHQ's auto-resolve and the quick game runner watch through the Commander window: nobody is there to
             // press Continue
             LOGGER.info("[BotOrders] game starts unpaused: started without the game window, by MekHQ or a runner");
+            return;
+        }
+        if (client instanceof BotClient) {
+            LOGGER.info("[BotOrders] game starts unpaused: this window belongs to a bot, which plays on its own");
             return;
         }
         if (!GUIP.getBotCommandsPauseAtStart()) {

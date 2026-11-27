@@ -40,7 +40,6 @@ import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.common.event.*;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
@@ -53,36 +52,20 @@ import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.event.player.GamePlayerConnectedEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
 
-/**
- * This is a base class for SpriteHandlers that create and remove sprites in an attached BoardView. Note that
- * SpriteHandlers should not assume that the BoardView still has and displays all the sprites they added to it. The
- * BoardView may clear sprites without giving notification to the SpriteHandlers. Thus, when sprites are to be renewed,
- * SpriteHandlers should just remove all their sprites from the BoardView (regardless of whether the BoardView still
- * uses them) and create new ones.
- */
+/** Publishes tactical marks to the client board states and clears them when the phase changes. */
 public abstract class BoardViewSpriteHandler implements GameListener {
 
     protected static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
     protected final AbstractClientGUI clientGUI;
-    protected final Collection<Sprite> currentSprites = new ArrayList<>();
     protected final Collection<TacticalMark> currentMarks = new ArrayList<>();
 
     public BoardViewSpriteHandler(AbstractClientGUI clientGUI) {
         this.clientGUI = clientGUI;
     }
 
-    /**
-     * Removes any current sprites of this handler from all BoardViews and clears this handler's internal sprite list.
-     * <p>
-     * When overriding this, call super.clear() or remember to perform clean up in the overriding method.
-     */
     public void clear() {
-        clientGUI.boardStates().forEach(state -> {
-            state.removeSprites(currentSprites);
-            state.removeMarks(currentMarks);
-        });
-        currentSprites.clear();
+        clientGUI.boardStates().forEach(state -> state.removeMarks(currentMarks));
         currentMarks.clear();
     }
 

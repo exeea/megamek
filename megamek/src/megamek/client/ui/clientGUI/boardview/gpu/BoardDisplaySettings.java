@@ -21,7 +21,6 @@ record BoardDisplaySettings(BoardSwitches switches, float resolution, boolean an
         terrain.setSwitches(switches);
         terrain.setShadowScene(Math.max(pixelsWide, pixelsHigh) * resolution, switches.on(BoardSwitch.HIGH_SHADOWS));
         terrain.setNormalMaps(normalMaps);
-        terrain.setTerrainParallax(switches.on(BoardSwitch.TERRAIN_PARALLAX));
         terrain.setTessellation(switches.on(BoardSwitch.TESSELLATION));
         occlusion.configure(terrain.environment(), switches.on(BoardSwitch.AMBIENT_OCCLUSION));
         atmosphere.setAntiAliasing(antiAliasing);

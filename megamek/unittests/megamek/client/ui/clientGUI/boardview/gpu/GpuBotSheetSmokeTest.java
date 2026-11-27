@@ -281,7 +281,7 @@ class GpuBotSheetSmokeTest {
               RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY).withBots(bots);
         GpuBoardSource.Frame frame = new GpuBoardSource.Frame(board(), List.of(), null, List.of(), "",
               null, 0, "", null, GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, panels);
-        GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE);
         return new GpuHud.Inputs(frame, view, null, GpuBoardSource.UiPreferences.capture(),
               GpuHud.Metrics.of(hud.width(), hud.height()), List.of());
     }

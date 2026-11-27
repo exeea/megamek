@@ -33,82 +33,12 @@
 package megamek.client.ui.clientGUI.boardview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-import megamek.common.units.AeroSpaceFighter;
-import megamek.common.units.BipedMek;
-import megamek.common.units.Dropship;
-import megamek.common.units.Entity;
-import megamek.common.units.EntityMovementMode;
-import megamek.common.units.Tank;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("LOSHeightCalculation Tests")
 class LOSHeightCalculationTest {
-
-    @Test
-    @DisplayName("Standard Mek should have TW height of 2")
-    void standardMekHeight() {
-        BipedMek mek = mock(BipedMek.class);
-        when(mek.relHeight()).thenReturn(1);
-        when(mek.isHullDown()).thenReturn(false);
-
-        assertEquals(2, LOSHeightCalculation.twHeightFromEntity(mek));
-    }
-
-    @Test
-    @DisplayName("Hull-down Mek should have TW height of 1")
-    void hullDownMekHeight() {
-        BipedMek mek = mock(BipedMek.class);
-        when(mek.relHeight()).thenReturn(1);
-        when(mek.isHullDown()).thenReturn(true);
-
-        assertEquals(1, LOSHeightCalculation.twHeightFromEntity(mek));
-    }
-
-    @Test
-    @DisplayName("Vehicle should have TW height of 1")
-    void vehicleHeight() {
-        Tank tank = mock(Tank.class);
-        when(tank.relHeight()).thenReturn(0);
-        when(tank.isHullDown()).thenReturn(false);
-        when(tank.getMovementMode()).thenReturn(EntityMovementMode.TRACKED);
-
-        assertEquals(1, LOSHeightCalculation.twHeightFromEntity(tank));
-    }
-
-    @Test
-    @DisplayName("Superheavy Mek should have TW height of 3")
-    void superheavyMekHeight() {
-        BipedMek mek = mock(BipedMek.class);
-        when(mek.relHeight()).thenReturn(2);
-        when(mek.isHullDown()).thenReturn(false);
-
-        assertEquals(3, LOSHeightCalculation.twHeightFromEntity(mek));
-    }
-
-    @Test
-    @DisplayName("Hull-down superheavy Mek should have TW height of 2")
-    void hullDownSuperheavyMekHeight() {
-        BipedMek mek = mock(BipedMek.class);
-        when(mek.relHeight()).thenReturn(2);
-        when(mek.isHullDown()).thenReturn(true);
-
-        assertEquals(2, LOSHeightCalculation.twHeightFromEntity(mek));
-    }
-
-    @Test
-    @DisplayName("Entity at elevated position should have correct TW height")
-    void elevatedEntityHeight() {
-        // A VTOL at elevation 5 with relHeight() = 5
-        Entity entity = mock(Entity.class);
-        when(entity.relHeight()).thenReturn(5);
-        when(entity.isHullDown()).thenReturn(false);
-
-        assertEquals(6, LOSHeightCalculation.twHeightFromEntity(entity));
-    }
 
     @Test
     @DisplayName("toAbsoluteHeight converts TW height + hex level correctly")
@@ -136,42 +66,6 @@ class LOSHeightCalculationTest {
     void toAbsoluteHeightSuperheavyOnHill() {
         // Superheavy (TW=3) on level 5 hex: abs = (3-1) + 5 = 7
         assertEquals(7, LOSHeightCalculation.toAbsoluteHeight(3, 5));
-    }
-
-    @Test
-    @DisplayName("Airborne aero should use altitude, not elevation-derived height")
-    void airborneAeroUsesAltitude() {
-        AeroSpaceFighter aero = mock(AeroSpaceFighter.class);
-        when(aero.getAltitude()).thenReturn(10);
-        when(aero.relHeight()).thenReturn(999);
-        when(aero.getMovementMode()).thenReturn(EntityMovementMode.AERODYNE);
-
-        assertEquals(10, LOSHeightCalculation.twHeightFromEntity(aero));
-    }
-
-    @Test
-    @DisplayName("Landed aero should use normal height calculation")
-    void landedAeroUsesHeight() {
-        AeroSpaceFighter aero = mock(AeroSpaceFighter.class);
-        when(aero.getAltitude()).thenReturn(0);
-        when(aero.relHeight()).thenReturn(0);
-        when(aero.getMovementMode()).thenReturn(EntityMovementMode.AERODYNE);
-
-        assertEquals(1, LOSHeightCalculation.twHeightFromEntity(aero));
-    }
-
-    @Test
-    @DisplayName("Grounded dropship should use physical height, not altitude")
-    void groundedDropshipUsesHeight() {
-        // A landed spheroid dropship is 10 levels tall (relHeight=9, TW height=10).
-        // It should show as Height: 10, NOT Altitude: 10.
-        Dropship dropship = mock(Dropship.class);
-        when(dropship.getAltitude()).thenReturn(0);
-        when(dropship.relHeight()).thenReturn(9);
-        when(dropship.isAirborne()).thenReturn(true);
-        when(dropship.getMovementMode()).thenReturn(EntityMovementMode.SPHEROID);
-
-        assertEquals(10, LOSHeightCalculation.twHeightFromEntity(dropship));
     }
 
     @Test

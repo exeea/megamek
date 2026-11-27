@@ -34,8 +34,13 @@
 package megamek.server.sbf;
 
 import megamek.common.Player;
+import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
+import megamek.common.options.SBFRuleOptions;
+import megamek.common.strategicBattleSystems.SBFPublicReportEntry;
+import megamek.common.strategicBattleSystems.SBFReportHeader;
 import megamek.common.strategicBattleSystems.SBFReportEntry;
+import megamek.server.victory.VictoryResult;
 
 public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameManagerHelper {
 
@@ -47,10 +52,26 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                 break;
             case EXCHANGE:
             case STARTING_SCENARIO:
+                if (game().getOptions().booleanOption(SBFRuleOptions.INIT_BATTLEFIELD_INT)) {
+                    var survey = SBFInitiativeModifiers.initialSurvey(game());
+                    game().scenarioProgress().saveInitialIntelligence(survey);
+                    survey.forEach((side, info) -> gameManager.addReport(new SBFPublicReportEntry(1067)
+                          .add(game().getPlayer(side).getName()).add(info.rating())));
+                }
+                SBFHiddenCommand.validateSetup(gameManager);
+                SBFCommandAbilities.validateSetup(gameManager);
+                gameManager.send(SBFScenarioResolution.markerPacket(game()));
                 gameManager.addPendingReportsToGame();
-                // IO BF p.103: Arty auto is a thing in SBF
-                gameManager.changePhase(GamePhase.INITIATIVE); // FIXME <- only for testing to get past arty auto and
-                // minefields
+                if (game().getCurrentRound() < 0) {
+                    gameManager.incrementAndSendGameRound();
+                }
+                game().setupDeployment();
+                if (game().shouldDeployThisRound()) {
+                    gameManager.rollInitiative();
+                    gameManager.changePhase(GamePhase.DEPLOYMENT);
+                } else {
+                    gameManager.changePhase(GamePhase.INITIATIVE);
+                }
                 break;
             case SET_ARTILLERY_AUTO_HIT_HEXES:
                 gameManager.addPendingReportsToGame();
@@ -62,7 +83,12 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                     gameManager.changePhase(GamePhase.INITIATIVE);
                 }
                 break;
-            case DEPLOY_MINEFIELDS, END:
+            case END:
+                if (game().engagementOrders().remainingEnds().isEmpty() && !game().takingAdjustmentOrders()) {
+                    finishRound();
+                }
+                break;
+            case DEPLOY_MINEFIELDS, END_REPORT:
                 gameManager.changePhase(GamePhase.INITIATIVE);
                 break;
             case DEPLOYMENT:
@@ -70,8 +96,7 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                 if (gameManager.getGame().getCurrentRound() == 0) {
                     gameManager.changePhase(GamePhase.INITIATIVE);
                 } else {
-                    // FIXME there appears to be no separate artillery targeting phase in SBF
-                    gameManager.changePhase(GamePhase.TARGETING);
+                    startMovementSequence();
                 }
                 break;
             case INITIATIVE:
@@ -79,26 +104,34 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                 gameManager.changePhase(GamePhase.INITIATIVE_REPORT);
                 break;
             case INITIATIVE_REPORT:
+                if (game().getCurrentRound() == 1 && !SBFCommandDesignation.ready(gameManager)) {
+                    break;
+                }
                 gameManager.getGame().setupDeployment();
                 if (gameManager.getGame().shouldDeployThisRound()) {
                     // TODO: could be handled in SBFGame.isCurrentPhasePlayable
                     gameManager.changePhase(GamePhase.DEPLOYMENT);
-                } else if (gameManager.usesDoubleBlind()) {
-                    // TODO: Problem: phase "execution" always works with turns. Phases without turns are skipped
-                    //  and must do their thing in prep or end. Means they must be skipped here explicitly
-                    gameManager.changePhase(GamePhase.SBF_DETECTION);
                 } else {
-                    gameManager.changePhase(GamePhase.TARGETING);
+                    startMovementSequence();
                 }
                 break;
             case SBF_DETECTION:
                 gameManager.changePhase(GamePhase.SBF_DETECTION_REPORT);
+                break;
             case SBF_DETECTION_REPORT:
-                gameManager.changePhase(GamePhase.DEPLOYMENT);
+                gameManager.changePhase(GamePhase.TARGETING);
+                break;
             case PREMOVEMENT:
                 gameManager.changePhase(GamePhase.MOVEMENT);
                 break;
             case MOVEMENT:
+                if (gameManager.resolveDropLandings()) {
+                    break;
+                }
+                SBFMovementHazards.extremeDepthAtMovementEnd(gameManager, () -> megamek.common.compute.Compute.d6(2));
+                if (gameManager.usesDoubleBlind()) {
+                    gameManager.detectionHelper.endMovement();
+                }
                 goToDependingOnReport(GamePhase.MOVEMENT_REPORT, GamePhase.OFFBOARD);
                 break;
             case MOVEMENT_REPORT:
@@ -108,28 +141,27 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
                 gameManager.changePhase(GamePhase.FIRING);
                 break;
             case FIRING:
-                addReport(new SBFReportEntry(3000));
-                gameManager.actionsProcessor.handleActions();
+                if (game().getActionHandlers().isEmpty()) {
+                    addReport(new SBFReportHeader(3000));
+                }
+                if (!gameManager.actionsProcessor.handleActions()) {
+                    break;
+                }
+                if (game().usesDoubleBlind()) {
+                    gameManager.detectionHelper.finishCombatRecon(() -> Compute.d6(2));
+                }
                 goToDependingOnReport(GamePhase.FIRING_REPORT, GamePhase.END);
                 break;
             case FIRING_REPORT:
-                gameManager.changePhase(GamePhase.END);
+                if (!SBFCombatDamage.hasPendingChoices(game())) {
+                    gameManager.changePhase(GamePhase.END);
+                }
                 break;
             case TARGETING:
                 goToDependingOnReport(GamePhase.TARGETING_REPORT, GamePhase.PREMOVEMENT);
-                gameManager.changePhase(GamePhase.PREMOVEMENT);
                 break;
             case OFFBOARD:
-                if (gameManager.getPendingReports().size() > 1) {
-                    gameManager.getGame().addReports(gameManager.getPendingReports());
-                    gameManager.changePhase(GamePhase.OFFBOARD_REPORT);
-                } else {
-                    // just the header, so we'll add the <nothing> label
-                    gameManager.addReport(new SBFReportEntry(1205));
-                    gameManager.getGame().addReports(gameManager.getPendingReports());
-                    gameManager.sendReport();
-                    gameManager.changePhase(GamePhase.PRE_FIRING);
-                }
+                goToDependingOnReport(GamePhase.OFFBOARD_REPORT, GamePhase.PRE_FIRING);
                 break;
             case OFFBOARD_REPORT:
                 // sendSpecialHexDisplayPackets();
@@ -141,6 +173,37 @@ public record SBFPhaseEndManager(SBFGameManager gameManager) implements SBFGameM
             default:
                 break;
         }
+    }
+
+    private void finishRound() {
+        if (SBFFormationCommand.finishReunions(game())) {
+            gameManager.entityAllUpdate();
+        }
+        // IO:BF, Capturing Objectives, p. 174: observe the hex after all End Phase regrouping orders.
+        SBFScenarioResolution.updateObjectives(gameManager);
+        VictoryResult result = SBFVictory.atRoundEnd(game());
+        if (result.isVictory()) {
+            SBFScenarioResolution.reportFinal(gameManager, result, () -> Compute.d6(2));
+            if (result.isDraw()) {
+                addReport(new SBFPublicReportEntry(3500));
+            } else {
+                String name = result.getWinningTeam() == Player.TEAM_NONE
+                      ? game().getPlayer(result.getWinningPlayer()).getName() : Player.TEAM_NAMES[result.getWinningTeam()];
+                addReport(new SBFPublicReportEntry(3501).add(name));
+            }
+            gameManager.addPendingReportsToGame();
+            gameManager.changePhase(GamePhase.VICTORY);
+        } else if (!gameManager.getPendingReports().isEmpty()) {
+            gameManager.addPendingReportsToGame();
+            gameManager.changePhase(GamePhase.END_REPORT);
+        } else {
+            gameManager.changePhase(GamePhase.INITIATIVE);
+        }
+    }
+
+    /** IO:BF, “Detection and Reconnaissance Phase”, p. 195: resolve once after initiative and before movement. */
+    private void startMovementSequence() {
+        gameManager.changePhase(gameManager.usesDoubleBlind() ? GamePhase.SBF_DETECTION : GamePhase.TARGETING);
     }
 
     private void goToDependingOnReport(GamePhase reportPhase, GamePhase afterReportPhase) {

@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -17,6 +18,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.NinePatch;
@@ -38,7 +40,9 @@ import com.badlogic.gdx.scenes.scene2d.utils.BaseDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.GdxRuntimeException;
 import megamek.client.ui.design.ColorMath;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.design.DesignTokens.Mode;
@@ -267,13 +271,8 @@ public final class UiTheme implements Disposable {
      * black small diamond U+25C8. Texts the views show from MegaMek use both.
      */
     private static final Map<Character, Character> LOOKALIKES = Map.of('⋯', '…', '⟐', '◈');
-    // Texels of transparent white around each hud glyph's ink that its quad takes in, so the quad is at least 7 texels
-    // high and wide: 1.75 units, which always covers a pixel centre, even for a hyphen drawn at 10 units from an
-    // 11.5-unit face. They are the packer's margin, not libGDX's glyph padding, which is transparent black and would
-    // darken the filtered ink edges.
-    private static final int GLYPH_PAD = 2;
-    // Texels between two hud glyphs' quads: mip level 1 (2x2-texel averages), filtered bilinearly, reaches up to 3
-    // texels past a quad, so with the next glyph's own GLYPH_PAD it never meets that glyph's ink.
+    // Texels between two hud glyphs on their pages (one channel, no mips, drawn texel for texel): bilinear samples at a
+    // glyph's edge never reach its neighbour's ink.
     private static final int GLYPH_PADDING = 2;
     // Board labels shrink along both axes and at oblique angles. Their quads include eight transparent texels;
     // the wider atlas gap also leaves room for trilinear/anisotropic samples at the deepest permitted mip (3).
@@ -285,11 +284,32 @@ public final class UiTheme implements Disposable {
     private boolean refreshing;
     private final File fonts;
     private final List<FreeTypeFontGenerator> generators = new ArrayList<>();
-    // The hud-* fonts share glyph pages instead of allocating a 1024x1024 page each.
-    private final PixmapPacker hudGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
-          GLYPH_PADDING + 2 * GLYPH_PAD, false, new PixmapPacker.GuillotineStrategy());
-    private final PixmapPacker worldGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
-          WORLD_GLYPH_PADDING, false, new PixmapPacker.GuillotineStrategy());
+    /** How long a new display scale holds before the HUD's glyphs are rasterised for it: a window drag settles. */
+    private static final long SETTLE_NANOS = 300_000_000L;
+    // The hud-* fonts share glyph pages instead of allocating a 1024x1024 page each. Their glyphs are rasterised at the
+    // size they are drawn on the screen, on pages of one channel without mips, again when a scene's display scale
+    // changes (wantScale, settle).
+    private PixmapPacker hudGlyphs = hudPacker();
+    /** Each HUD font as it was asked for, which a new display scale rasterises again in place ({@link #raster}). */
+    private record HudRaster(FreeTypeFontGenerator generator, float size, float tracking, float border, BitmapFont root,
+          Map<Character, BitmapFont.Glyph> layouts) { }
+    /** Held weakly: a size no element holds any more drops out, its glyphs with the next raster. */
+    private final Map<BitmapFont, HudRaster> rasters = new java.util.WeakHashMap<>();
+    /** The HUD fonts at the sizes elements asked for ({@link #sized}), by root font and size. */
+    private final Map<SizeKey, java.lang.ref.WeakReference<BitmapFont>> sizes = new HashMap<>();
+    /** A root font (identity: BitmapFont keeps Object's equals) at a size. */
+    private record SizeKey(BitmapFont root, float size) { }
+    /** Screen pixels a stage unit the HUD's glyphs are rasterised for, and the one a scene last reported. */
+    private float pixelScale = 1, wantedScale = 1;
+    private long wantedSince;
+    private boolean scaled;
+    /** Whether a raster has been swapped in: the first, at load, runs at once, later ones within the frame budget. */
+    private boolean rastered;
+    /** The raster for a new display scale in progress ({@link #settle}), or null. */
+    private RasterJob job;
+    /** What a raster job may take of a frame. */
+    private static final long RASTER_BUDGET_NANOS = 2_000_000L;
+    private final PixmapPacker worldGlyphs = new CoveragePacker(WORLD_GLYPH_PADDING);
     // The first face of the FALLBACK_FONTS chain; every font of this theme draws the characters it lacks from it.
     private final Generator fallback;
 
@@ -334,7 +354,6 @@ public final class UiTheme implements Disposable {
         // A count badge's digits: caption's size in label's medium face
         skin.add(TOKEN_BADGE, new Label.LabelStyle(font(TOKEN_BADGE, ROBOTO, MEDIUM, 10.5f, 0, 0, hudGlyphs),
               TEXT));
-        hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), false));
 
         hudDrawables();
         TextButton.TextButtonStyle hud = quietButton("hud-button", 8, 12, 36);
@@ -2287,63 +2306,505 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * Rasterised at 4x and drawn at a quarter, so fractional CSS sizes such as 10.5 work; tracking is in em. Characters
-     * the face lacks come from the FALLBACK_FONTS chain. The hud fonts (those on the shared pages) lost thin strokes,
-     * so "AS7-D" read "AS7 D": a glyph quad thinner than a pixel, such as a 4-texel hyphen drawn at 10 units, covers no
-     * pixel centre at some sub-pixel positions, and linear filtering minified 4:1 reads only two of every four texel
-     * rows. Their glyphs are therefore mipmapped, which marks them for Generator: their quads take in GLYPH_PAD
-     * texels of the packer's transparent margin, and their pages are sampled from mip level 0 or 1 (see
-     * bindGlyphPage), whichever is nearer.
+     * Laid out at 4x and drawn at a quarter, so fractional CSS sizes such as 10.5 work; tracking is in em. Characters
+     * the face lacks come from the FALLBACK_FONTS chain. The hud fonts (those on the shared pages) draw from glyphs
+     * rasterised at their display size (HudRaster); the others are rasterised at 4x, the board text's (the world
+     * pages) mipmapped.
      */
     private BitmapFont font(String name, String path, int instance, float size, float tracking, float border,
           PixmapPacker packer) {
         boolean world = packer == worldGlyphs;
-        FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback, world);
+        FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback);
         generators.add(generator);
-        FreeTypeFontGenerator.FreeTypeFontParameter settings = new FreeTypeFontGenerator.FreeTypeFontParameter();
-        settings.size = Math.round(size * 4);
-        settings.borderWidth = Math.round(border * 4);
-        settings.borderColor = Color.WHITE;
-        settings.borderStraight = false;
-        // FreeType widens every glyph's advance by the border; take it back so the text keeps its width.
-        settings.spaceX = Math.round(tracking * size * 4) - (int) settings.borderWidth;
-        settings.packer = packer;
-        settings.incremental = true;
-        settings.minFilter = Texture.TextureFilter.Linear;
-        settings.magFilter = Texture.TextureFilter.Linear;
-        boolean mipmapped = packer != null;
-        if (mipmapped) {
-            settings.genMipMaps = true;
-            settings.minFilter = world ? Texture.TextureFilter.MipMapLinearLinear
-                  : Texture.TextureFilter.MipMapLinearNearest;
+        if (packer == hudGlyphs) {
+            return add(name, hudFont(generator, size, tracking, border, null), BitmapFont.class);
         }
-        BitmapFont font = generator.generateFont(settings);
-        if (mipmapped) {
-            // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
-            font.getData().padLeft = world ? WORLD_GLYPH_PAD : GLYPH_PAD;
-            font.getData().padRight = font.getData().padLeft;
-        }
+        BitmapFont font = generator.generateFont(settings(size, tracking, border, packer));
         if (world) {
-            worldGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), true));
+            // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
+            font.getData().padLeft = WORLD_GLYPH_PAD;
+            font.getData().padRight = font.getData().padLeft;
+            worldGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture()));
         }
         font.getData().setScale(0.25f);
         font.setUseIntegerPositions(false);
         return add(name, font, BitmapFont.class);
     }
 
+    /**
+     * A HUD font of {@code size} stage units: laid out at 4x, in quarter units, and drawn from its display raster
+     * (HudFontCache); {@code root} is the font it is a size of, null for a root.
+     */
+    private BitmapFont hudFont(FreeTypeFontGenerator generator, float size, float tracking, float border,
+          BitmapFont root) {
+        HudParameter hud = hudSettings(size, tracking, border, hudGlyphs, pixelScale);
+        hud.layouts = new HashMap<>();
+        BitmapFont font = generator.generateFont(hud, new HudFontData(this, hud.rasterScale(size)));
+        font.getData().setScale(.25f);
+        font.setUseIntegerPositions(false);
+        rasters.put(font, new HudRaster(generator, size, tracking, border, root == null ? font : root, hud.layouts));
+        return font;
+    }
+
+    /**
+     * A display-rastered HUD font's settings at {@code scale} screen pixels a stage unit: laid out at 4x (size,
+     * spacing and kerning, in quarter units), drawn from glyphs rendered at the display size
+     * ({@link HudParameter#display}), one channel, no mips; no characters prepared beyond the missing glyph (a raster
+     * job, or a first draw, makes the ones drawn).
+     */
+    private static HudParameter hudSettings(float size, float tracking, float border, PixmapPacker packer,
+          float scale) {
+        HudParameter settings = new HudParameter();
+        raster(settings, size, tracking, border, 4, packer);
+        raster(settings.display, size, tracking, border, scale, packer);
+        settings.characters = "\u0000";
+        settings.display.characters = "\u0000";
+        return settings;
+    }
+
+    /**
+     * FreeType's settings of a font that is no HUD raster: at 4x; mipmapped on the board text's pages ({@code world},
+     * its packer), else on its own page.
+     */
+    private static FreeTypeFontGenerator.FreeTypeFontParameter settings(float size, float tracking, float border,
+          PixmapPacker world) {
+        FreeTypeFontGenerator.FreeTypeFontParameter settings = new FreeTypeFontGenerator.FreeTypeFontParameter();
+        raster(settings, size, tracking, border, 4, world);
+        if (world != null) {
+            settings.genMipMaps = true;
+            settings.minFilter = Texture.TextureFilter.MipMapLinearLinear;
+        }
+        return settings;
+    }
+
+    /** {@code settings} for a font of {@code size} stage units rendered at {@code raster} pixels a unit. */
+    private static void raster(FreeTypeFontGenerator.FreeTypeFontParameter settings, float size, float tracking,
+          float border, float raster, PixmapPacker packer) {
+        settings.size = Math.max(1, Math.round(size * raster));
+        settings.borderWidth = Math.round(border * raster);
+        settings.borderColor = Color.WHITE;
+        settings.borderStraight = false;
+        // FreeType widens every glyph's advance by the border; take it back so the text keeps its width.
+        settings.spaceX = Math.round(tracking * size * raster) - (int) settings.borderWidth;
+        settings.packer = packer;
+        settings.incremental = true;
+        settings.minFilter = Texture.TextureFilter.Linear;
+        settings.magFilter = Texture.TextureFilter.Linear;
+    }
+
+    private PixmapPacker hudPacker() {
+        PixmapPacker packer = new CoveragePacker(GLYPH_PADDING);
+        packer.setTransparentColor(new Color(1, 1, 1, 0));
+        return packer;
+    }
+
+    /**
+     * A scene's display scale, screen pixels a stage unit, from its resize: the HUD's glyphs follow it once it has held
+     * for {@link #SETTLE_NANOS} ({@link #settle}), at once the first time.
+     */
+    public void wantScale(float scale) {
+        if (Math.abs(scale - wantedScale) < 1e-3f && scaled) { return; }
+        wantedScale = scale;
+        wantedSince = scaled ? System.nanoTime() : System.nanoTime() - SETTLE_NANOS;
+        scaled = true;
+    }
+
+    /**
+     * Before a scene draws its frame: once a new display scale has held, works on its raster within the frame's budget
+     * (the first, at load, at once), and returns true in the frame its glyphs take over: the scene lays its stage out
+     * again. Until then the glyphs of the last raster draw scaled.
+     */
+    public boolean settle() {
+        boolean due = Math.abs(wantedScale - pixelScale) >= 1e-3f && System.nanoTime() - wantedSince >= SETTLE_NANOS;
+        if (job != null && (job.scale != wantedScale && !job.swapped || due && job.swapped)) {
+            job.discard();
+            job = null;
+        }
+        if (job == null && due) { job = new RasterJob(wantedScale); }
+        if (job == null) { return false; }
+        boolean swapped = job.step(rastered ? RASTER_BUDGET_NANOS : Long.MAX_VALUE);
+        if (job.done()) { job = null; }
+        return swapped;
+    }
+
+    /**
+     * One display scale's raster: each HUD font's glyphs built aside into a new packer, only those it has drawn, a
+     * glyph at a time; then the swap, in one frame. A character drawn later is made at its first draw.
+     */
+    private final class RasterJob {
+        final float scale;
+        final PixmapPacker packer = hudPacker();
+        final List<BitmapFont> fonts = new ArrayList<>();
+        final List<HudFontData> built = new ArrayList<>();
+        final Set<BitmapFont> known = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        /** The font and character being built. */
+        int font;
+        int glyph;
+        String chars = "";
+        boolean swapped;
+
+        RasterJob(float scale) {
+            this.scale = scale;
+            more();
+        }
+
+        /** Fonts made since the job began (a new size): they are built too, before the swap. */
+        private void more() {
+            for (BitmapFont each : new ArrayList<>(rasters.keySet())) {
+                if (known.add(each)) { fonts.add(each); }
+            }
+        }
+
+        boolean done() { return swapped; }
+
+        /** Works until the budget is spent; true in the frame of the swap. */
+        boolean step(long budget) {
+            long start = System.nanoTime();
+            while (System.nanoTime() - start < budget) {
+                if (font >= fonts.size()) {
+                    more();
+                    if (font >= fonts.size()) {
+                        swap();
+                        return true;
+                    }
+                }
+                build();
+            }
+            return false;
+        }
+
+        /** One step of the build: a font's new data, then one of the glyphs it has drawn. */
+        private void build() {
+            BitmapFont each = fonts.get(font);
+            HudRaster raster = rasters.get(each);
+            if (built.size() == font) {
+                HudFontData data = new HudFontData(UiTheme.this, 1);
+                if (raster != null) {
+                    HudParameter hud = hudSettings(raster.size(), raster.tracking(), raster.border(), packer, scale);
+                    hud.layouts = raster.layouts();
+                    data = new HudFontData(UiTheme.this, hud.rasterScale(raster.size()));
+                    // The regions FreeType appends a new page to; the swap gives the font its own list.
+                    data.regions = new Array<>();
+                    raster.generator().generateData(hud, data);
+                }
+                built.add(data);
+                chars = raster == null ? "" : ((HudFontData) each.getData()).drawn();
+                glyph = 0;
+                return;
+            }
+            if (glyph < chars.length()) {
+                built.get(font).getGlyph(chars.charAt(glyph++));
+                return;
+            }
+            font++;
+        }
+
+        /** Every font takes its new data, in one frame; the new pages go up and the old ones are freed. */
+        private void swap() {
+            Array<TextureRegion> pages = new Array<>();
+            packer.updateTextureRegions(pages, Texture.TextureFilter.Linear, Texture.TextureFilter.Linear, false);
+            for (int i = 0; i < fonts.size(); i++) {
+                BitmapFont each = fonts.get(i);
+                if (rasters.get(each) == null) { continue; }
+                HudFontData data = built.get(i);
+                Array<TextureRegion> regions = each.getRegions();
+                regions.clear();
+                regions.addAll(pages);
+                // The font draws from its own list; a page added later appends its region to it.
+                data.regions = regions;
+                for (BitmapFont.Glyph[] glyphs : ((BitmapFont.BitmapFontData) data).glyphs) {
+                    if (glyphs == null) { continue; }
+                    for (BitmapFont.Glyph glyph : glyphs) {
+                        if (glyph != null) { data.setGlyphRegion(glyph, regions.get(glyph.page)); }
+                    }
+                }
+                if (data.missingGlyph != null) {
+                    data.setGlyphRegion(data.missingGlyph, regions.get(data.missingGlyph.page));
+                }
+                data.setScale(.25f);
+                ((HudFontData) each.getData()).adopt(data);
+            }
+            disposePages(hudGlyphs);
+            hudGlyphs = packer;
+            pixelScale = scale;
+            rastered = true;
+            swapped = true;
+        }
+
+        /** A raster for a scale that no longer holds: its pages go. */
+        void discard() {
+            if (!swapped) { disposePages(packer); }
+        }
+    }
+
+    /**
+     * A display-rastered HUD font's data: it records the characters laid out with it, which a raster job makes again
+     * at a new scale, and takes a raster job's data over in place ({@link #adopt}).
+     */
+    private static final class HudFontData extends FreeTypeFontGenerator.FreeTypeBitmapFontData {
+        private final java.util.BitSet drawn = new java.util.BitSet();
+        /** The theme that rasterised the font, which makes its sized copies ({@link #sizedFor}). */
+        final UiTheme owner;
+        /** Screen pixels a stage unit of the raster its glyphs were drawn for. */
+        float rasterScale;
+
+        HudFontData(UiTheme owner, float rasterScale) {
+            this.owner = owner;
+            this.rasterScale = rasterScale;
+        }
+
+        /** A display glyph's UVs come from its texel rectangle, not from its box in quarter units. */
+        @Override
+        public void setGlyphRegion(BitmapFont.Glyph glyph, TextureRegion region) {
+            if (!(glyph instanceof HudGlyph hud)) {
+                super.setGlyphRegion(glyph, region);
+                return;
+            }
+            Texture texture = region.getTexture();
+            float u = 1f / texture.getWidth(), v = 1f / texture.getHeight();
+            glyph.u = region.getU() + hud.srcX * u;
+            glyph.u2 = region.getU() + (hud.srcX + hud.texelWidth) * u;
+            glyph.v2 = region.getV() + hud.srcY * v;
+            glyph.v = region.getV() + (hud.srcY + hud.texelHeight) * v;
+        }
+
+        @Override
+        public void getGlyphs(com.badlogic.gdx.graphics.g2d.GlyphLayout.GlyphRun run, CharSequence str, int start,
+              int end, BitmapFont.Glyph lastGlyph) {
+            for (int i = start; i < end; i++) { drawn.set(str.charAt(i)); }
+            super.getGlyphs(run, str, start, end, lastGlyph);
+        }
+
+        /** The characters drawn with this font so far. */
+        String drawn() {
+            StringBuilder chars = new StringBuilder();
+            drawn.stream().forEach(c -> chars.append((char) c));
+            return chars.toString();
+        }
+
+        /**
+         * Every field of {@code other} (libGDX's, not the record of drawn characters) into this data: its glyphs,
+         * metrics, pages and generator, so the font holding this data keeps its object.
+         * Reflection: FreeTypeBitmapFontData keeps its generator, parameter, stroker, packer and glyph list private.
+         */
+        void adopt(HudFontData other) {
+            try {
+                for (Class<?> type : List.of(FreeTypeFontGenerator.FreeTypeBitmapFontData.class,
+                      BitmapFont.BitmapFontData.class)) {
+                    for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                        int modifiers = field.getModifiers();
+                        if (java.lang.reflect.Modifier.isStatic(modifiers)) { continue; }
+                        field.setAccessible(true);
+                        Object value = field.get(other);
+                        if (!java.lang.reflect.Modifier.isFinal(modifiers)) {
+                            field.set(this, value);
+                        } else if (value instanceof BitmapFont.Glyph[][] pages) {
+                            System.arraycopy(pages, 0, (BitmapFont.Glyph[][]) field.get(this), 0, pages.length);
+                        }
+                    }
+                }
+            } catch (IllegalAccessException failure) {
+                throw new GdxRuntimeException(failure);
+            }
+            rasterScale = other.rasterScale;
+        }
+    }
+
+    /**
+     * A display-rastered HUD font's FreeType settings: these (the 4x size and spacing) lay it out; {@link #display}
+     * draws it.
+     */
+    private static final class HudParameter extends FreeTypeFontGenerator.FreeTypeFontParameter {
+        final FreeTypeFontGenerator.FreeTypeFontParameter display = new FreeTypeFontGenerator.FreeTypeFontParameter();
+        /** The font's layout glyphs by character, made once (the same at every display scale); null: none kept. */
+        Map<Character, BitmapFont.Glyph> layouts;
+
+        /** Screen pixels a stage unit of a font of {@code size} stage units drawn from this raster. */
+        float rasterScale(float size) { return display.size / size; }
+    }
+
+    /**
+     * A display glyph: its layout box (4x, in quarter units); its bitmap's texel rectangle, and where that bitmap lies
+     * against the box (quarter units), for drawing.
+     */
+    private static final class HudGlyph extends BitmapFont.Glyph {
+        int texelWidth;
+        int texelHeight;
+        float dx;
+        float dy;
+    }
+
+    /** Takes a glyph rendered for its metrics only and keeps a pixel of it (HudParameter's layout glyphs). */
+    private static final class MeasurePacker extends PixmapPacker {
+        private final Pixmap pixel = new Pixmap(1, 1, Pixmap.Format.Alpha);
+
+        MeasurePacker() { super(256, 256, Pixmap.Format.Alpha, 0, false); }
+
+        @Override
+        public synchronized PixmapPackerRectangle pack(String name, Pixmap image) { return super.pack(name, pixel); }
+
+        @Override
+        public synchronized void updateTextureRegions(Array<TextureRegion> regions, Texture.TextureFilter minFilter,
+              Texture.TextureFilter magFilter, boolean useMipMaps) { }
+
+        @Override
+        public synchronized void dispose() {
+            super.dispose();
+            pixel.dispose();
+        }
+    }
+
+    /** A display-rastered HUD font: its cache draws its glyphs texel for texel ({@link HudFontCache}). */
+    private static final class HudBitmapFont extends BitmapFont {
+        HudBitmapFont(BitmapFont.BitmapFontData data, Array<TextureRegion> regions, boolean integer) {
+            super(data, regions, integer);
+        }
+
+        @Override
+        public com.badlogic.gdx.graphics.g2d.BitmapFontCache newFontCache() { return new HudFontCache(this); }
+    }
+
+    /**
+     * Draws a display-rastered font's glyphs where the layout (the 4x advances, fractional) puts them, each origin
+     * snapped to a screen pixel and its bitmap drawn at its raster's scale: texel for texel once the raster is the
+     * screen's, scaled during a drag. A rotated or mirrored transform draws the glyphs as laid out.
+     */
+    private static final class HudFontCache extends com.badlogic.gdx.graphics.g2d.BitmapFontCache {
+        private static final Matrix4 COMBINED = new Matrix4();
+        /** Reflection: BitmapFontCache keeps its page arrays private and says nowhere how many it has. */
+        private static final java.lang.reflect.Field PAGES;
+
+        static {
+            try {
+                PAGES = com.badlogic.gdx.graphics.g2d.BitmapFontCache.class.getDeclaredField("pageVertices");
+                PAGES.setAccessible(true);
+            } catch (NoSuchFieldException failure) {
+                throw new ExceptionInInitializerError(failure);
+            }
+        }
+
+        private float[] snapped = new float[0];
+
+        HudFontCache(BitmapFont font) { super(font, font.usesIntegerPositions()); }
+
+        /** The layout's glyphs, each quad moved from its layout box onto its display bitmap (HudGlyph#dx, #dy). */
+        @Override
+        public void addText(com.badlogic.gdx.graphics.g2d.GlyphLayout layout, float x, float y) {
+            int[] at = new int[getFont().getRegions().size];
+            int pages = pages();
+            for (int page = 0; page < Math.min(at.length, pages); page++) { at[page] = getVertexCount(page); }
+            super.addText(layout, x, y);
+            float scaleX = getFont().getData().scaleX, scaleY = getFont().getData().scaleY;
+            for (int r = 0; r < layout.runs.size; r++) {
+                com.badlogic.gdx.graphics.g2d.GlyphLayout.GlyphRun run = layout.runs.get(r);
+                for (int g = 0; g < run.glyphs.size; g++) {
+                    BitmapFont.Glyph glyph = run.glyphs.get(g);
+                    if (glyph.page >= at.length) { continue; }
+                    int i = at[glyph.page];
+                    at[glyph.page] += 20;
+                    if (!(glyph instanceof HudGlyph hud) || hud.dx == 0 && hud.dy == 0) { continue; }
+                    float[] vertices = getVertices(glyph.page);
+                    for (int k = 0; k < 20; k += 5) {
+                        vertices[i + k] += hud.dx * scaleX;
+                        vertices[i + k + 1] += hud.dy * scaleY;
+                    }
+                }
+            }
+        }
+
+        /** The cache's pages (BitmapFontCache#pageVertices is private). */
+        private int pages() {
+            try {
+                return ((float[][]) PAGES.get(this)).length;
+            } catch (IllegalAccessException failure) {
+                throw new GdxRuntimeException(failure);
+            }
+        }
+
+        @Override
+        public void draw(Batch batch) {
+            BitmapFont font = getFont();
+            float raster = ((HudFontData) font.getData()).rasterScale;
+            Matrix4 m = COMBINED.set(batch.getProjectionMatrix()).mul(batch.getTransformMatrix());
+            float halfWidth = Gdx.graphics.getBackBufferWidth() / 2f;
+            float halfHeight = Gdx.graphics.getBackBufferHeight() / 2f;
+            float ax = m.val[Matrix4.M00] * halfWidth, bx = (m.val[Matrix4.M03] + 1) * halfWidth;
+            float ay = m.val[Matrix4.M11] * halfHeight, by = (m.val[Matrix4.M13] + 1) * halfHeight;
+            if (ax <= 0 || ay <= 0 || m.val[Matrix4.M01] != 0 || m.val[Matrix4.M10] != 0) {
+                super.draw(batch);
+                return;
+            }
+            Array<TextureRegion> regions = font.getRegions();
+            int pages = Math.min(regions.size, pages());
+            for (int page = 0; page < pages; page++) {
+                int count = getVertexCount(page);
+                if (count == 0) { continue; }
+                float[] from = getVertices(page);
+                Texture texture = regions.get(page).getTexture();
+                if (snapped.length < count) { snapped = new float[count]; }
+                System.arraycopy(from, 0, snapped, 0, count);
+                // Four vertices of five floats (x, y, color, u, v) a glyph: bottom left, top left, top right,
+                // bottom right.
+                for (int i = 0; i < count; i += 20) {
+                    float width = Math.round((from[i + 13] - from[i + 3]) * texture.getWidth()) / raster;
+                    float height = Math.round((from[i + 4] - from[i + 9]) * texture.getHeight()) / raster;
+                    float x = (Math.round(from[i] * ax + bx) - bx) / ax;
+                    float y = (Math.round(from[i + 1] * ay + by) - by) / ay;
+                    snapped[i] = x;
+                    snapped[i + 1] = y;
+                    snapped[i + 5] = x;
+                    snapped[i + 6] = y + height;
+                    snapped[i + 10] = x + width;
+                    snapped[i + 11] = y + height;
+                    snapped[i + 15] = x + width;
+                    snapped[i + 16] = y;
+                }
+                batch.draw(texture, snapped, 0, count);
+            }
+        }
+    }
+
+    /**
+     * {@code font} of this theme at {@code size} stage units, rasterised at that size: made the first time an element
+     * asks, cached by font and size; null for a font that is no HUD raster (the caller scales the font instead).
+     */
+    public BitmapFont sized(BitmapFont font, float size) {
+        HudRaster asked = rasters.get(font);
+        if (asked == null) { return null; }
+        // Sizes hang off the root font, whichever of its sizes asks.
+        BitmapFont root = asked.root();
+        HudRaster base = rasters.get(root);
+        if (Math.abs(size - base.size()) < 1e-3f) { return root; }
+        SizeKey key = new SizeKey(root, size);
+        java.lang.ref.WeakReference<BitmapFont> held = sizes.get(key);
+        BitmapFont made = held == null ? null : held.get();
+        if (made == null) {
+            made = hudFont(base.generator(), size, base.tracking(), base.border(), root);
+            sizes.put(key, new java.lang.ref.WeakReference<>(made));
+        }
+        return made;
+    }
+
+    /** {@code font} at {@code size} from the theme that rasterised it ({@link #sized}); null where none did. */
+    public static BitmapFont sizedFor(BitmapFont font, float size) {
+        return font.getData() instanceof HudFontData data ? data.owner.sized(font, size) : null;
+    }
+
     @Override
     public void dispose() {
         skin.dispose();
         // The shared glyph pages belong to the theme, not to the fonts packed into them.
-        for (PixmapPacker packer : List.of(hudGlyphs, worldGlyphs)) {
-            for (PixmapPacker.Page page : packer.getPages()) {
-                if (page.getTexture() != null) {
-                    page.getTexture().dispose();
-                }
-            }
-            packer.dispose();
-        }
+        disposePages(hudGlyphs);
+        disposePages(worldGlyphs);
         generators.forEach(FreeTypeFontGenerator::dispose);
+    }
+
+    /** A packer and its pages' textures. */
+    private static void disposePages(PixmapPacker packer) {
+        for (PixmapPacker.Page page : packer.getPages()) {
+            if (page.getTexture() != null) { page.getTexture().dispose(); }
+        }
+        packer.dispose();
     }
 
     /**
@@ -2356,30 +2817,47 @@ public final class UiTheme implements Disposable {
     private static final class Generator extends FreeTypeFontGenerator {
         private final float size;
         private final Generator fallback;
-        private final boolean world;
 
         /** size is the face's share of the size of the fonts it serves as a fallback. */
         Generator(FileHandle file, int instance, float size, Generator fallback) {
-            this(file, instance, size, fallback, false);
-        }
-
-        Generator(FileHandle file, int instance, float size, Generator fallback, boolean world) {
             // FreeType takes the named instance from bits 16-30 of the face index.
             super(file, instance << 16);
             this.size = size;
             this.fallback = fallback;
-            this.world = world;
+        }
+
+        /** FreeTypeFontGenerator#setPixelSizes is package-private: a display glyph renders at a second size. */
+        private static final java.lang.reflect.Method PIXEL_SIZES;
+        /** The layout glyphs' packer (HudParameter): renewed when its page is full. */
+        private static MeasurePacker measure;
+
+        static {
+            try {
+                PIXEL_SIZES = FreeTypeFontGenerator.class.getDeclaredMethod("setPixelSizes", int.class, int.class);
+                PIXEL_SIZES.setAccessible(true);
+            } catch (NoSuchMethodException failure) {
+                throw new ExceptionInInitializerError(failure);
+            }
+        }
+
+        @Override
+        protected BitmapFont newBitmapFont(BitmapFont.BitmapFontData data, Array<TextureRegion> pageRegions,
+              boolean integer) {
+            return data instanceof HudFontData ? new HudBitmapFont(data, pageRegions, integer)
+                  : super.newBitmapFont(data, pageRegions, integer);
         }
 
         @Override
         protected BitmapFont.Glyph createGlyph(char c, FreeTypeBitmapFontData data, FreeTypeFontParameter parameter,
               FreeType.Stroker stroker, float baseLine, PixmapPacker packer) {
+            if (parameter instanceof HudParameter hud) { return hudGlyph(c, data, hud, stroker, baseLine, packer); }
             BitmapFont.Glyph glyph = createUnpaddedGlyph(c, data, parameter, stroker, baseLine, packer);
             if (glyph == null || !parameter.genMipMaps) {
                 return glyph;
             }
-            // The requesting font owns the margins and filtering, including for a borrowed fallback glyph.
-            int pad = world ? WORLD_GLYPH_PAD : GLYPH_PAD;
+            // The requesting font (board text: only its glyphs are mipmapped) owns the margins and filtering, including
+            // for a borrowed fallback glyph.
+            int pad = WORLD_GLYPH_PAD;
             if (glyph.width > 0 && glyph.height > 0) {
                 glyph.srcX -= pad;
                 glyph.srcY -= pad;
@@ -2393,10 +2871,116 @@ public final class UiTheme implements Disposable {
             glyph.xoffset -= pad;
             Texture page = packer.getPages().get(glyph.page).getTexture();
             if (page != null) {
-                bindGlyphPage(page, world);
+                bindGlyphPage(page);
                 if (packer.getPackToTexture()) { Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D); }
             }
             return glyph;
+        }
+
+        /**
+         * A display-rastered glyph: laid out at 4x (rendered at that size for its advance, kept nowhere), drawn from
+         * its rendering at the display size into {@code packer}; its box in quarter units. A glyph with ink keeps at
+         * least one covered pixel.
+         */
+        private BitmapFont.Glyph hudGlyph(char c, FreeTypeBitmapFontData data, HudParameter hud,
+              FreeType.Stroker stroker, float baseLine, PixmapPacker packer) {
+            // A character's layout is the same at every display scale: rendered once a font.
+            BitmapFont.Glyph layout = hud.layouts == null ? null : hud.layouts.get(c);
+            if (layout == null) {
+                if (measure == null) { measure = new MeasurePacker(); }
+                layout = createUnpaddedGlyph(c, data, hud, stroker, baseLine, measure);
+                if (measure.getPages().size > 1) {
+                    measure.dispose();
+                    measure = null;
+                }
+                if (layout == null) { return null; }
+                if (hud.layouts != null) { hud.layouts.put(c, layout); }
+            }
+            BitmapFont.Glyph drawn;
+            pixelSizes(hud.display.size);
+            try {
+                drawn = createUnpaddedGlyph(c, data, hud.display, null, 0, packer);
+            } finally {
+                pixelSizes(hud.size);
+            }
+            // Quarter units a display pixel.
+            float toLayout = hud.size / (float) hud.display.size;
+            HudGlyph glyph = new HudGlyph();
+            glyph.id = layout.id;
+            glyph.xadvance = layout.xadvance;
+            // The layout box: a string keeps its 4x width (GlyphLayout measures a line's ends with these boxes).
+            glyph.xoffset = layout.xoffset;
+            glyph.yoffset = layout.yoffset;
+            glyph.width = layout.width;
+            glyph.height = layout.height;
+            if (drawn != null && drawn.width > 0 && drawn.height > 0 && strengthen(packer, drawn)) {
+                glyph.page = drawn.page;
+                glyph.srcX = drawn.srcX;
+                glyph.srcY = drawn.srcY;
+                glyph.texelWidth = drawn.width;
+                glyph.texelHeight = drawn.height;
+                // drawn's offsets are from the pen and the baseline (rendered with no baseline shift).
+                glyph.dx = drawn.xoffset * toLayout - layout.xoffset;
+                glyph.dy = drawn.yoffset * toLayout - (int) baseLine - layout.yoffset;
+            } else if (layout.width > 0 && layout.height > 0) {
+                // Its ink covers no pixel at this size: one covered pixel at the ink's centre.
+                Pixmap pixel = new Pixmap(1, 1, Pixmap.Format.Alpha);
+                pixel.setColor(1, 1, 1, 1);
+                pixel.fill();
+                PixmapPacker.PixmapPackerRectangle at;
+                synchronized (packer) { at = packer.pack(pixel); }
+                pixel.dispose();
+                glyph.page = packer.getPages().indexOf(at.page, true);
+                glyph.srcX = at.bounds.x;
+                glyph.srcY = at.bounds.y;
+                glyph.texelWidth = 1;
+                glyph.texelHeight = 1;
+                glyph.dx = (layout.width - toLayout) / 2;
+                glyph.dy = (layout.height - toLayout) / 2;
+                if (data.regions != null && data.regions.size <= glyph.page) {
+                    packer.updateTextureRegions(data.regions, Texture.TextureFilter.Linear,
+                          Texture.TextureFilter.Linear, false);
+                }
+            } else {
+                // No ink (a space): nothing drawn, only its advance.
+                glyph.page = drawn == null ? Math.max(0, packer.getPages().size - 1) : drawn.page;
+            }
+            return glyph;
+        }
+
+        /** The face at {@code size} pixels (FreeTypeFontGenerator#setPixelSizes). */
+        private void pixelSizes(int size) {
+            try {
+                PIXEL_SIZES.invoke(this, 0, size);
+            } catch (ReflectiveOperationException failure) {
+                throw new GdxRuntimeException(failure);
+            }
+        }
+
+        /**
+         * Whether a display glyph covers any pixel on its page; a faint one (its strongest texel under half) is
+         * strengthened so that texel is full.
+         */
+        private static boolean strengthen(PixmapPacker packer, BitmapFont.Glyph drawn) {
+            Pixmap page = packer.getPages().get(drawn.page).getPixmap();
+            if (page.getFormat() != Pixmap.Format.Alpha) { return true; }
+            java.nio.ByteBuffer pixels = page.getPixels();
+            int width = page.getWidth(), strongest = 0;
+            for (int y = drawn.srcY; y < drawn.srcY + drawn.height; y++) {
+                for (int x = drawn.srcX; x < drawn.srcX + drawn.width; x++) {
+                    strongest = Math.max(strongest, pixels.get(y * width + x) & 0xff);
+                }
+            }
+            if (strongest == 0) { return false; }
+            if (strongest < 128) {
+                for (int y = drawn.srcY; y < drawn.srcY + drawn.height; y++) {
+                    for (int x = drawn.srcX; x < drawn.srcX + drawn.width; x++) {
+                        int at = y * width + x;
+                        pixels.put(at, (byte) Math.min(255, (pixels.get(at) & 0xff) * 255 / strongest));
+                    }
+                }
+            }
+            return true;
         }
 
         private BitmapFont.Glyph createUnpaddedGlyph(char c, FreeTypeBitmapFontData data, FreeTypeFontParameter parameter,
@@ -2423,13 +3007,96 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * HUD pages stop at mip 1 to retain thin strokes at 1 pixel per stage unit. World pages use trilinear/anisotropic
-     * sampling through mip 3; deeper levels would average unrelated glyphs together across even their wider margins.
+     * Glyph pages of one channel: the glyphs are white, so a page keeps only their coverage, as Alpha pixmaps on the CPU
+     * and GL_R8 textures on the GPU, a quarter of RGBA's size. A swizzle reads them as (1, 1, 1, coverage), what the RGBA
+     * pages gave, so every shader that samples them stays as it is. libGDX would upload an Alpha pixmap as GL_ALPHA, which
+     * a core profile refuses: each page gets its texture here, before libGDX makes one, and every later upload of the page
+     * (an incremental glyph) goes through the same data.
      */
-    private static void bindGlyphPage(Texture page, boolean world) {
+    private static final class CoveragePacker extends PixmapPacker {
+        /** Page#texture is package-private in libGDX; a page made by this packer is given its texture through it. */
+        private static final java.lang.reflect.Field TEXTURE;
+
+        static {
+            try {
+                TEXTURE = Page.class.getDeclaredField("texture");
+                TEXTURE.setAccessible(true);
+            } catch (NoSuchFieldException failure) {
+                throw new ExceptionInInitializerError(failure);
+            }
+        }
+
+        CoveragePacker(int padding) {
+            super(1024, 1024, Pixmap.Format.Alpha, padding, false, new GuillotineStrategy());
+        }
+
+        /**
+         * Never straight to the texture: libGDX would send a glyph packed after its page went up as GL_ALPHA, which a
+         * core profile refuses, so the glyph would stay blank. Its page is marked dirty instead and goes up whole, with
+         * its mipmaps, at the font's next layout ({@link #updateTextureRegions}).
+         */
+        @Override
+        public void setPackToTexture(boolean packToTexture) { }
+
+        @Override
+        public synchronized void updateTextureRegions(Array<TextureRegion> regions, Texture.TextureFilter minFilter,
+              Texture.TextureFilter magFilter, boolean useMipMaps) {
+            for (Page page : getPages()) {
+                if (page.getTexture() != null) { continue; }
+                Pixmap pixels = page.getPixmap();
+                Texture texture = new Texture(new Coverage(pixels, useMipMaps)) {
+                    @Override
+                    public void dispose() {
+                        super.dispose();
+                        pixels.dispose();
+                    }
+                };
+                texture.setFilter(minFilter, magFilter);
+                try {
+                    TEXTURE.set(page, texture);
+                } catch (IllegalAccessException failure) {
+                    throw new GdxRuntimeException(failure);
+                }
+            }
+            super.updateTextureRegions(regions, minFilter, magFilter, useMipMaps);
+        }
+    }
+
+    /** A page's coverage uploaded as GL_R8 (RGB read as one, alpha as the coverage), with its mipmaps when asked. */
+    private record Coverage(Pixmap pixels, boolean useMipMaps) implements TextureData {
+        private static final int SWIZZLE_R = 0x8E42, SWIZZLE_G = 0x8E43, SWIZZLE_B = 0x8E44, SWIZZLE_A = 0x8E45;
+
+        @Override
+        public void consumeCustomData(int target) {
+            Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
+            Gdx.gl.glTexImage2D(target, 0, GL30.GL_R8, pixels.getWidth(), pixels.getHeight(), 0, GL30.GL_RED,
+                  GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
+            Gdx.gl.glTexParameteri(target, SWIZZLE_R, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_G, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_B, GL20.GL_ONE);
+            Gdx.gl.glTexParameteri(target, SWIZZLE_A, GL30.GL_RED);
+            if (useMipMaps) { Gdx.gl.glGenerateMipmap(target); }
+        }
+
+        @Override public TextureDataType getType() { return TextureDataType.Custom; }
+        @Override public boolean isPrepared() { return true; }
+        @Override public void prepare() { }
+        @Override public Pixmap consumePixmap() { throw new GdxRuntimeException("A coverage page uploads itself"); }
+        @Override public boolean disposePixmap() { return false; }
+        @Override public int getWidth() { return pixels.getWidth(); }
+        @Override public int getHeight() { return pixels.getHeight(); }
+        @Override public Pixmap.Format getFormat() { return Pixmap.Format.Alpha; }
+        @Override public boolean isManaged() { return true; }
+    }
+
+    /**
+     * The board text's pages use trilinear/anisotropic sampling through mip 3; deeper levels would average unrelated
+     * glyphs together across even their wider margins.
+     */
+    private static void bindGlyphPage(Texture page) {
         page.bind();
-        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, world ? 3 : 1);
-        if (world) { page.setAnisotropicFilter(8); }
+        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 3);
+        page.setAnisotropicFilter(8);
     }
 
     /** Physical pixels per stage unit, from the orthographic projection the stage draws with. */

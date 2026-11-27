@@ -37,8 +37,7 @@ import megamek.common.options.OptionsConstants;
 
 /**
  * The three line-of-sight rule sets the engine implements. The Ruler tool reads the active rule from game options;
- * the diagram always draws the LOS line straight from eye level to eye level, but the per-hex blocker detection
- * follows the rule the engine is actually applying.
+ * its per-hex blocker detection follows the rule the engine is actually applying.
  *
  * <ul>
  *   <li>{@link #STANDARD} — BMM default. A hex's terrain intervenes if its top is at or above the

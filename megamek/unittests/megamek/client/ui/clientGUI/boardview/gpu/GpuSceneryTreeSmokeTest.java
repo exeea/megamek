@@ -61,8 +61,12 @@ class GpuSceneryTreeSmokeTest {
                     for (int index = 0; index < scenes.size(); index++) {
                         var scene = scenes.get(index);
                         // The converted composition's objects, as the board stores them.
-                        var roots = scene.tile(coords).features().stream().filter(f -> f.decoration() != null).toList();
-                        assertTrue(!roots.isEmpty(), samples.get(index).name());
+                        var stored = scene.tile(coords).features().stream().filter(f -> f.decoration() != null).toList();
+                        assertTrue(!stored.isEmpty(), samples.get(index).name());
+                        // The remade park and pool models (2026-11-14) carry their plants inside one shell prop: a
+                        // composition with such a model installs its scenery objects, one of trees alone its trees.
+                        boolean remade = stored.stream().anyMatch(f -> f.asset().startsWith("scenery/"));
+                        var roots = remade ? stored.stream().filter(f -> f.asset().startsWith("scenery/")).toList() : stored;
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         var installed = new ArrayList<ModelInstance>();
@@ -72,9 +76,10 @@ class GpuSceneryTreeSmokeTest {
                             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
                                 var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
                                 var treeAsset = GpuTestSupport.field(prop, "treeAsset");
+                                // A tree by its stand species; a model by its first node (<file>-lod<n>..., a shell's too).
                                 if (coords.equals(GpuTestSupport.field(prop, "coords")) && roots.stream().anyMatch(f ->
-                                      f.asset().equals(treeAsset) || instance.nodes.first().id.equals(
-                                            f.asset().substring(f.asset().lastIndexOf('/') + 1)))) {
+                                      f.asset().equals(treeAsset) || instance.nodes.first().id.startsWith(
+                                            f.asset().substring(f.asset().lastIndexOf('/') + 1) + "-lod"))) {
                                     installed.add(instance);
                                     treeAssets.add(treeAsset);
                                 }

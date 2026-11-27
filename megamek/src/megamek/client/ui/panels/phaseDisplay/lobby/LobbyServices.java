@@ -21,7 +21,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow;
-import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.common.Player;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
@@ -155,10 +154,6 @@ public final class LobbyServices {
             return;
         }
         LobbyBoardPreviews.closePreviews(clientGUI);
-        if (done) {
-            // Ask up front (once) whether to record the combat-summary GIF, so recording never interrupts play
-            MinimapPanel.promptForGifRecordingConsent(game(), clientGUI.getFrame());
-        }
         if (done && GUIP.getSaveLobbyOnStart() && !lobbySavePerformed) {
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"));
             String path = "./" + MMConstants.SAVEGAME_DIR;

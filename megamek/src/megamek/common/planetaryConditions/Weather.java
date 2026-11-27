@@ -321,7 +321,7 @@ public enum Weather {
     }
 
     public boolean isAnyOf(Weather weather, Weather... moreWeathers) {
-        return this == weather || Arrays.stream(moreWeathers).anyMatch(w -> w == weather);
+        return this == weather || Arrays.stream(moreWeathers).anyMatch(this::equals);
     }
 
     public static Weather getWeather(int i) {

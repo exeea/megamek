@@ -1262,6 +1262,7 @@ public class TWGameManager extends AbstractGameManager {
     public void handlePacket(int connectionId, Packet packet) {
         super.handlePacket(connectionId, packet);
         final Player player = game.getPlayer(connectionId);
+        boolean malformed = false;
         try {
             switch (packet.command()) {
                 case PRINCESS_SETTINGS:
@@ -1597,7 +1598,9 @@ public class TWGameManager extends AbstractGameManager {
             }
         } catch (InvalidPacketDataException e) {
             LOGGER.error("Invalid packet data:", e);
+            malformed = true;
         }
+        new TWRequestResync(this).requestHandled(connectionId, packet, malformed);
     }
 
     /**
@@ -3960,12 +3963,8 @@ public class TWGameManager extends AbstractGameManager {
                   en.getUnitNumber() == unit.getUnitNumber());
         }
 
-        if (!getGame().getPhase().isLounge() && !unit.isDone() && (remainingProtoMeks == 0)) {
-            // Remove the *last* friendly turn (removing the *first* penalizes
-            // the opponent too much, and re-calculating moves is too hard).
-            game.removeTurnFor(unit);
-            send(packetHelper.createTurnListPacket());
-        }
+        // The turn is removed only after a successful load: a refused load leaves the unit its turn
+        boolean removeTurn = !getGame().getPhase().isLounge() && !unit.isDone() && (remainingProtoMeks == 0);
 
         // Fighter Squadrons may become too big for the bay they're parked in
         if ((loader instanceof FighterSquadron) && (loader.getTransportId() != Entity.NONE)) {
@@ -4008,6 +4007,12 @@ public class TWGameManager extends AbstractGameManager {
             LOGGER.info(e.getMessage());
             sendServerChat(e.getMessage());
             return;
+        }
+        if (removeTurn) {
+            // Remove the *last* friendly turn (removing the *first* penalizes
+            // the opponent too much, and re-calculating moves is too hard).
+            game.removeTurnFor(unit);
+            send(packetHelper.createTurnListPacket());
         }
         // The loaded unit is being carried by the loader.
         unit.setTransportId(loader.getId());
@@ -4834,6 +4839,7 @@ public class TWGameManager extends AbstractGameManager {
 
         if (entity == null) {
             LOGGER.error("Received packet with invalid entity");
+            new TWRequestResync(this).turnRefused(connectionId, null, false);
             return;
         }
 
@@ -4846,6 +4852,7 @@ public class TWGameManager extends AbstractGameManager {
             // is this the right phase?
             if (!getGame().getPhase().isMovement()) {
                 LOGGER.error("Server got movement packet in wrong phase");
+                new TWRequestResync(this).turnRefused(connectionId, entity, true);
                 return;
             }
 
@@ -4861,8 +4868,7 @@ public class TWGameManager extends AbstractGameManager {
                       connectionId,
                       entity.getShortName());
                 // Without this the sender believes its turn is over while the server still waits on it
-                send(connectionId, packetHelper.createTurnListPacket());
-                send(connectionId, packetHelper.createTurnIndexPacket(connectionId));
+                new TWRequestResync(this).turnRefused(connectionId, entity, false);
                 return;
             }
 
@@ -10591,12 +10597,14 @@ public class TWGameManager extends AbstractGameManager {
 
         if (entity == null) {
             LOGGER.error("Received invalid entity from prephase packet");
+            new TWRequestResync(this).turnRefused(connectionId, null, false);
             return;
         }
 
         // is this the right phase?
         if (!getGame().getPhase().isPreFiring() && !getGame().getPhase().isPremovement()) {
             LOGGER.error("Server got Prephase packet in wrong phase {}", game.getPhase());
+            new TWRequestResync(this).turnRefused(connectionId, entity, true);
             return;
         }
 
@@ -10610,8 +10618,7 @@ public class TWGameManager extends AbstractGameManager {
                   connectionId,
                   entity.getShortName(),
                   ((turn == null) ? "null" : "invalid"));
-            send(connectionId, packetHelper.createTurnListPacket());
-            send(connectionId, packetHelper.createTurnIndexPacket((turn == null) ? Player.PLAYER_NONE : turn.playerId()));
+            new TWRequestResync(this).turnRefused(connectionId, entity, false);
             return;
         }
 
@@ -10641,6 +10648,7 @@ public class TWGameManager extends AbstractGameManager {
               !getGame().getPhase().isPreEndDeclarations() &&
               !getGame().getPhase().isInfantryVsInfantryCombat()) {
             LOGGER.error("Server got attack packet in wrong phase");
+            new TWRequestResync(this).turnRefused(connectionId, entity, true);
             return;
         }
 
@@ -10654,8 +10662,7 @@ public class TWGameManager extends AbstractGameManager {
                   connectionId,
                   ((entity == null) ? "null" : entity.getShortName()),
                   ((turn == null) ? "null" : "invalid"));
-            send(connectionId, packetHelper.createTurnListPacket());
-            send(connectionId, packetHelper.createTurnIndexPacket((turn == null) ? Player.PLAYER_NONE : turn.playerId()));
+            new TWRequestResync(this).turnRefused(connectionId, entity, false);
             return;
         }
 
@@ -27759,7 +27766,7 @@ public class TWGameManager extends AbstractGameManager {
         int entityId = c.getIntValue(0);
         int sensorId = c.getIntValue(1);
         Entity e = game.getEntity(entityId);
-        if (e != null) {
+        if ((e != null) && (e.getOwnerId() == connectionId) && (sensorId >= 0) && (sensorId < e.getSensors().size())) {
             e.setNextSensor(e.getSensors().elementAt(sensorId));
         }
     }
@@ -28063,8 +28070,8 @@ public class TWGameManager extends AbstractGameManager {
             return;
         }
         Player player = game.getPlayer(connectionId);
-        if ((player != null) && (shooter.getOwner() != player)) {
-            LOGGER.error("Player {} does not own the entity {}", player.getName(), shooter.getDisplayName());
+        if ((player == null) || (shooter.getOwner() != player)) {
+            LOGGER.error("Connection {} does not own the entity {}", connectionId, shooter.getDisplayName());
             return;
         }
 

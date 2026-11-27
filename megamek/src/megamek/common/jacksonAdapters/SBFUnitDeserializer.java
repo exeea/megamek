@@ -42,6 +42,7 @@ import static megamek.common.jacksonAdapters.SBFUnitSerializer.TMM;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
@@ -136,10 +137,40 @@ public class SBFUnitDeserializer extends StdDeserializer<SBFUnit> {
                 if (node.has(SPECIALS)) {
                     String specials = node.get(SPECIALS).textValue();
                     specials = specials.replace(" ", ""); // remove empty spaces
-                    ASElementDeserializer.readSpecials(unit.getSpecialAbilities(), specials);
+                    // SBF rates HarJel as BHJ2-# or BHJ3-# (IO:BF p. 264). The AS parser expects unsigned values.
+                    specials = specials.replaceAll("(?i)(BHJ[23])-(\\d+)", "$1$2");
+                    for (String special : specials.split(",")) {
+                        // Older sheets also wrote SBF-only command roles into specials. The AS parser excludes them.
+                        if (special.equalsIgnoreCase("com") || special.equalsIgnoreCase("scom")) {
+                            parseStatus(unit, special.toLowerCase(Locale.ROOT));
+                        } else if (special.matches("(?i)(SAW|ENG)[0-9]+")) {
+                            var ability = BattleForceSUA.valueOf(special.substring(0, 3).toUpperCase(Locale.ROOT));
+                            unit.getSpecialAbilities().replaceSUA(ability, Integer.parseInt(special.substring(3)));
+                        } else {
+                            ASElementDeserializer.readSpecials(unit.getSpecialAbilities(), special);
+                        }
+                    }
                 }
             }
             assignStatus(unit, node);
+            for (JsonNode ability : node.path(SBFUnitSerializer.INITIATIVE_ABILITIES)) {
+                unit.getInitiativeAbilities().add(SBFUnit.InitiativeAbility.valueOf(ability.asText().toUpperCase(Locale.ROOT)));
+            }
+            if (node.has(SBFUnitSerializer.ENVIRONMENT_SPECIALIZATION)) {
+                unit.setEnvironmentSpecialization(jp.getCodec().treeToValue(node.get(SBFUnitSerializer.ENVIRONMENT_SPECIALIZATION),
+                      SBFUnit.EnvironmentSpecialization.class));
+            }
+            if (node.has(SBFUnitSerializer.ENEMY_SPECIALIZATION)) {
+                unit.setEnemySpecialization(jp.getCodec().treeToValue(node.get(SBFUnitSerializer.ENEMY_SPECIALIZATION),
+                      SBFUnit.EnemySpecialization.class));
+            }
+            if (node.has(SBFUnitSerializer.TACTICAL_SPECIALIZATION)) {
+                unit.setTacticalSpecialization(jp.getCodec().treeToValue(node.get(SBFUnitSerializer.TACTICAL_SPECIALIZATION),
+                      SBFUnit.TacticalSpecialization.class));
+            }
+            if (node.has(SBFUnitSerializer.COMMAND_TIER)) {
+                unit.setCommandTier(node.get(SBFUnitSerializer.COMMAND_TIER).asInt(-1));
+            }
         } catch (NullPointerException exception) {
             throw new IllegalArgumentException("Missing element in SBFUnit definition!");
         }
@@ -161,6 +192,9 @@ public class SBFUnitDeserializer extends StdDeserializer<SBFUnit> {
         switch (statusString) {
             case LEAD:
                 unit.getSpecialAbilities().setSUA(BattleForceSUA.LEAD);
+                break;
+            case "scom":
+                unit.getSpecialAbilities().setSUA(BattleForceSUA.SCOM);
                 break;
             case COM:
                 unit.getSpecialAbilities().setSUA(BattleForceSUA.COM);

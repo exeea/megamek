@@ -60,6 +60,7 @@ class GpuEditorBrushSmokeTest {
                 Set<Coords> oldPaint;
                 Object distantChunk;
                 float[] cameraProjection;
+                boolean moved;
                 private Object field(Object object, String name) throws Exception {
                     var field = object.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(object);
                 }
@@ -113,7 +114,6 @@ class GpuEditorBrushSmokeTest {
                                 oldPaint = painted(terrain);
                                 assertTrue(oldPaint.size() > 6);
                                 assertTrue(oldPaint.stream().map(at -> new Coords(at.getX() / 8, at.getY() / 8)).distinct().count() >= 4);
-                                distantChunk = ((List<?>) field(terrain, "chunks")).getLast();
                                 assertFalse(GpuBoardTestUi.texts(root.findActor("editor-toolbar")).contains("PLACE"));
                                 assertNull(root.findActor("editor-library-space"));
                                 GpuBoardTestUi.category("vegetation");
@@ -162,11 +162,18 @@ class GpuEditorBrushSmokeTest {
                             }
                             case 8 -> {
                                 if (!previewsReady(root.findActor("editor-library"))) { return; }
-                                assertNotNull(((Group) root.findActor("editor-inspector")).findActor("editor-Scale"), "Decals expose scale too");
-                                assertEquals(1.5, source.editorState().activeBrush().object().scale());
-                                GpuBoardTestUi.capture(new File(output, "editor-brush-spanning-decal.png"));
-                                boardCamera.pan(-20, 30); boardCamera.zoom(.8f);
-                                cameraProjection = boardCamera.camera.combined.val.clone();
+                                if (!moved) {
+                                    assertNotNull(((Group) root.findActor("editor-inspector"))
+                                          .findActor("editor-Scale"), "Decals expose scale too");
+                                    assertEquals(1.5, source.editorState().activeBrush().object().scale());
+                                    GpuBoardTestUi.capture(new File(output, "editor-brush-spanning-decal.png"));
+                                    boardCamera.pan(-20, 30); boardCamera.zoom(.8f);
+                                    cameraProjection = boardCamera.camera.combined.val.clone();
+                                    // The move may give chunks another detail (the height field's camera targets),
+                                    // which replaces them: the far chunk is taken once that settles, before the edit.
+                                    moved = true; after = frames() + 8; return;
+                                }
+                                distantChunk = ((List<?>) field(terrain, "chunks")).getLast();
                                 command(Action.OBJECT_VALUE, "x", "7");
                             }
                             case 9 -> {

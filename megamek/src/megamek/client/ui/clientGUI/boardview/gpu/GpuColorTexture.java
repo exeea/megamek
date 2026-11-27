@@ -21,7 +21,8 @@ final class GpuColorTexture {
 
     static boolean isColor(Texture texture) {
         return texture.getTextureData() instanceof ImageData data && data.color
-              || texture.getTextureData() instanceof LinearData;
+              || texture.getTextureData() instanceof LinearData
+              || texture.getTextureData() instanceof GpuTextureCompression.Data data && data.color;
     }
 
     static Texture create(FileHandle file, boolean mipmaps) {
@@ -67,7 +68,7 @@ final class GpuColorTexture {
      * column at 1-wide), its colours weighted by alpha in linear light.
      */
     static Cutout cutoutLevels(Pixmap image) {
-        return levels(image, false);
+        return levels(image, false, false);
     }
 
     /**
@@ -77,11 +78,16 @@ final class GpuColorTexture {
      * colours it by the share it does near.
      */
     static Cutout paintLevels(Pixmap image) {
-        return levels(image, true);
+        return levels(image, true, false);
     }
 
-    private static Cutout levels(Pixmap image, boolean paint) {
-        if (image.getFormat() == Pixmap.Format.RGB888 || opaque(image)) { return new Cutout(image, null); }
+    /** {@link #cutoutLevels} or {@link #paintLevels}, with levels for an opaque image too (GpuTextureCompression). */
+    static Cutout allLevels(Pixmap image, boolean paint) {
+        return levels(image, paint, true);
+    }
+
+    private static Cutout levels(Pixmap image, boolean paint, boolean always) {
+        if (!always && (image.getFormat() == Pixmap.Format.RGB888 || opaque(image))) { return new Cutout(image, null); }
         if (image.getFormat() != Pixmap.Format.RGBA8888) {
             Pixmap expanded = new Pixmap(image.getWidth(), image.getHeight(), Pixmap.Format.RGBA8888);
             expanded.setBlending(Pixmap.Blending.None);

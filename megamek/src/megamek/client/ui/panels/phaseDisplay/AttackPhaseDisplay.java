@@ -556,7 +556,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
      * @param event the hex mouse event being handled
      *
      * @return {@code true} if this is a left click with no ALT key. ALT belongs to the ruler
-     *       (RulerDialog.hexMoused) and the other mouse buttons have no targeting meaning on the board.
+     *       and the other mouse buttons have no targeting meaning on the board.
      */
     private static boolean isPlainLeftClick(BoardViewEvent event) {
         return (event.getButton() == MouseEvent.BUTTON1)

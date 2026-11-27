@@ -85,11 +85,7 @@ public class HexDrawUtilities {
     public static final Point2D.Double HEX_CTR = new Point2D.Double(HEX_WID / 2, HEX_HGT / 2);
     public static final Point2D.Double HEX_UL = new Point2D.Double(HEX_WID * 0.25, 0);
     public static final Point2D.Double HEX_UR = new Point2D.Double(HEX_WID * 0.75, 0);
-    public static final Point2D.Double HEX_ML = new Point2D.Double(0, HEX_HGT / 2);
     public static final Point2D.Double HEX_MR = new Point2D.Double(HEX_WID, HEX_HGT / 2);
-    public static final Point2D.Double HEX_LL = new Point2D.Double(HEX_WID * 0.25, HEX_HGT);
-    public static final Point2D.Double HEX_LR = new Point2D.Double(HEX_WID * 0.75, HEX_HGT);
-
     public static final double PerfectHexToHexY = ((double) HexTileset.HEX_H) / HEX_HGT;
 
     public static final AffineTransform PerfectHexToHex = AffineTransform.getScaleInstance(1, PerfectHexToHexY);
@@ -109,9 +105,6 @@ public class HexDrawUtilities {
 
     // the slope of the side hex faces, multiplying by y gives x distance
     private static final double slopeXOverY = 1 / slopeYOverX;
-
-    // the weaker slope from the upper left corner to the right mid-corner
-    private static final double slopeWYOverX = slopeYOverX / 3;
 
     // Internal functions that will return perfect hex shapes
 
@@ -189,31 +182,6 @@ public class HexDrawUtilities {
         return RX;
     }
 
-    // a border for the facings 0, 1, 2; crossing the hex
-    private static Shape getHCLU012() {
-        Path2D.Double border = new Path2D.Double();
-        border.moveTo(HEX_UL.x, HEX_UL.y);
-        border.lineTo(HEX_LR.x, (HEX_LR.x - HEX_UL.x) * slopeWYOverX);
-        border.lineTo(HEX_LR.x, HEX_LR.y);
-        return border;
-    }
-
-    // the border will match with
-    // normal hex borders of the same thickness
-    private static Shape getHCAU012(double thickness) {
-        double ft = Math.sqrt(getDeltaL(CUT_BORDER, thickness) * getDeltaL(CUT_BORDER, thickness) +
-              thickness * thickness);
-        double my = (HEX_LR.x - ft - HEX_UL.x - getDeltaL(CUT_BORDER, thickness))
-              * slopeWYOverX + HEX_UL.y + thickness;
-        Path2D.Double area = new Path2D.Double();
-        area.append(getHCLU012(), false);
-        area.lineTo(HEX_LR.x - ft, HEX_LR.y);
-        area.lineTo(HEX_LR.x - ft, my);
-        area.lineTo(HEX_UL.x + getDeltaL(CUT_BORDER, thickness), HEX_UL.y + thickness);
-        area.closePath();
-        return area;
-    }
-
     // a border for the facings 0, 1; crossing the hex
     private static Shape getHCLU01() {
         Path2D.Double border = new Path2D.Double();
@@ -233,63 +201,6 @@ public class HexDrawUtilities {
         return area;
     }
 
-    // a border for the facings 0, 1, 2, 3; crossing the hex
-    private static Shape getHCLU0123() {
-        Path2D.Double border = new Path2D.Double();
-        // the 5/8 is chosen arbitrarily
-        double mh = (HEX_WID * 5 / 8 - HEX_UL.x) * slopeWYOverX;
-        border.moveTo(HEX_UL.x, HEX_UL.y);
-        border.lineTo(HEX_WID * 5 / 8, mh);
-        border.lineTo(HEX_WID * 5 / 8, HEX_LL.y - mh);
-        border.lineTo(HEX_LL.x, HEX_LL.y);
-        return border;
-    }
-
-    // the border will match with
-    // normal hex borders of the same thickness
-    private static Shape getHCAU0123(double thickness) {
-        double ft = Math.sqrt(getDeltaL(CUT_BORDER, thickness) * getDeltaL(CUT_BORDER, thickness) +
-              thickness * thickness);
-        double my = (HEX_WID * 5 / 8 - ft - HEX_UL.x - getDeltaL(CUT_BORDER, thickness))
-              * slopeWYOverX + HEX_UL.y + thickness;
-        Path2D.Double area = new Path2D.Double();
-        area.append(getHCLU0123(), false);
-        area.lineTo(HEX_LL.x + getDeltaL(CUT_BORDER, thickness), HEX_LL.y - thickness);
-        area.lineTo(HEX_WID * 5 / 8 - ft, HEX_LL.y - my);
-        area.lineTo(HEX_WID * 5 / 8 - ft, HEX_UL.y + my);
-        area.lineTo(HEX_UL.x + getDeltaL(CUT_BORDER, thickness), HEX_UL.y + thickness);
-        area.closePath();
-        return area;
-    }
-
-    // a border for the facings 0, 1, 2, 3, 4; crossing the hex
-    private static Shape getHCLU01234() {
-        Path2D.Double border = new Path2D.Double();
-        border.moveTo(HEX_UL.x, HEX_UL.y);
-        border.lineTo(HEX_LL.x, HEX_LL.y);
-        border.lineTo(HEX_LR.x, HEX_LR.y);
-        border.lineTo(HEX_UR.x, HEX_UR.y);
-        return getHRU(5).createTransformedShape(border);
-    }
-
-    // the border will match with
-    // normal hex borders of the same thickness
-    private static Shape getHCAU01234(double thickness) {
-        double ft = Math.sqrt(getDeltaL(CUT_BORDER, thickness) * getDeltaL(CUT_BORDER, thickness) +
-              thickness * thickness);
-        Path2D.Double area = new Path2D.Double();
-        area.moveTo(HEX_UL.x, HEX_UL.y);
-        area.lineTo(HEX_LL.x, HEX_LL.y);
-        area.lineTo(HEX_LR.x, HEX_LR.y);
-        area.lineTo(HEX_UR.x, HEX_UR.y);
-        area.lineTo(HEX_UR.x - ft, HEX_UR.y);
-        area.lineTo(HEX_LR.x - ft, HEX_LR.y - ft);
-        area.lineTo(HEX_LL.x + ft, HEX_LL.y - ft);
-        area.lineTo(HEX_UL.x + ft, HEX_UL.y);
-        area.closePath();
-        return getHRU(5).createTransformedShape(area);
-    }
-
     private HexDrawUtilities() {
     }
 
@@ -298,12 +209,6 @@ public class HexDrawUtilities {
     public static Shape getHexBorderLine(int hexFace, int cutType, double inset) {
         return PerfectHexToHex.createTransformedShape(
               getHBLU(hexFace, cutType, inset));
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public static AffineTransform getHexRotation(int facing) {
-        return AffineTransform.getRotateInstance(Math.toRadians(facing * 60), HexTileset.HEX_W / 2.0f,
-              HexTileset.HEX_H / 2.0f);
     }
 
     public static Shape getHexBorderLine(int hexFace) {
@@ -380,21 +285,6 @@ public class HexDrawUtilities {
                     getHexFullBorderLine(0)));
     }
 
-    public static Point2D.Double getHexBorderAreaMid(int hexFace, double thickness, double inset) {
-        double xN = 0;
-        double yN = -HEX_CTR.y + thickness / 2;
-        // rotate the point when necessary
-        if (hexFace % 6 != 0) {
-            double angle = Math.toRadians(hexFace * 60);
-            xN = -(-HEX_CTR.y + thickness / 2) * Math.sin(angle);
-            yN = (-HEX_CTR.y + thickness / 2) * Math.cos(angle);
-        }
-        xN += HEX_CTR.x;
-        yN += HEX_CTR.y;
-        yN *= PerfectHexToHexY;
-        return new Point2D.Double(xN, yN);
-    }
-
     public static Shape getHexCrossArea01(int hexFace, double thickness) {
         return PerfectHexToHex.createTransformedShape(
               getHRU(hexFace).createTransformedShape(getHCAU01(thickness)));
@@ -405,33 +295,4 @@ public class HexDrawUtilities {
               getHRU(hexFace).createTransformedShape(getHCLU01()));
     }
 
-    public static Shape getHexCrossArea012(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCAU012(thickness)));
-    }
-
-    public static Shape getHexCrossLine012(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCLU012()));
-    }
-
-    public static Shape getHexCrossArea0123(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCAU0123(thickness)));
-    }
-
-    public static Shape getHexCrossLine0123(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCLU0123()));
-    }
-
-    public static Shape getHexCrossArea01234(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCAU01234(thickness)));
-    }
-
-    public static Shape getHexCrossLine01234(int hexFace, double thickness) {
-        return PerfectHexToHex.createTransformedShape(
-              getHRU(hexFace).createTransformedShape(getHCLU01234()));
-    }
 }

@@ -220,7 +220,8 @@ class GpuAimDialogSmokeTest {
 
     /** A weapon's row on the King Crab, which may aim there or not, with the reason it has no shot ("" for one). */
     private static GpuFireOrders.WeaponRow row(int eqNum, String aimedAt, boolean aimable, String reason) {
-        return new GpuFireOrders.WeaponRow(eqNum, "Weapon " + eqNum, "RT", "", "20", 7, "", List.of(), -1, -1, TARGET,
+        return new GpuFireOrders.WeaponRow(eqNum, "Weapon " + eqNum, "RT", "", "20", 7, "", List.of(), -1, List.of(),
+              -1, TARGET,
               reason.isEmpty() ? 8 : TargetRoll.IMPOSSIBLE, reason.isEmpty() ? 41.7 : 0, reason, true, false,
               aimable, aimedAt);
     }

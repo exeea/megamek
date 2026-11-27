@@ -279,7 +279,8 @@ class GpuContextMenuSmokeTest {
             verify(menu.moves).planTo(HEX, 0, false);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             click(hud, menu.item("Center camera here"));
-            verify(menu.source).command(any());
+            // The source centres the camera on that hex (it posts the move to the EDT itself, c323ecc6c8).
+            verify(menu.source).centerOnHex(HEX);
 
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.JUMP)));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
@@ -639,7 +640,7 @@ class GpuContextMenuSmokeTest {
               row(REAR_LASER, "Medium Laser", "CT(R)", "5", 3, "", List.of(), -1, -1, KING_CRAB, "rear arc only"))
               .stream().map(row -> row.eqNum() != aimable ? row : new GpuFireOrders.WeaponRow(row.eqNum(), row.name(),
                     row.location(), row.kind(), row.damage(), row.heat(), row.mode(), row.ammo(), row.loadedAmmo(),
-                    row.shots(), row.target(), row.value(), row.odds(), row.reason(), row.usable(),
+                    row.loadedBins(), row.shots(), row.target(), row.value(), row.odds(), row.reason(), row.usable(),
                     row.locationDestroyed(), true, aimedAt)).toList();
         List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TargetKey.unit(BATTLEMASTER), 'B',
               "BattleMaster", false, 1, false, null), new GpuFireOrders.Target(TargetKey.unit(TIMBER_WOLF), 'A',
@@ -659,8 +660,9 @@ class GpuContextMenuSmokeTest {
 
     private static GpuFireOrders.WeaponRow row(int eqNum, String name, String location, String damage, int heat,
           String mode, List<GpuUnitRecord.AmmoChoice> ammo, int loaded, int shots, int target, String reason) {
-        return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, mode, ammo, loaded, shots,
-              TargetKey.unit(target), 7, .58, reason, true, false, false, "");
+        return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, mode, ammo, loaded,
+              loaded < 0 ? List.of() : List.of(loaded), shots, TargetKey.unit(target), 7, .58, reason, true, false,
+              false, "");
     }
 
     private static GpuFireOrders.Attack attack(int eqNum, int target, String weapon) {

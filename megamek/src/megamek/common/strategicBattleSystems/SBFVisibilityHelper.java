@@ -36,16 +36,19 @@ package megamek.common.strategicBattleSystems;
 import static megamek.common.strategicBattleSystems.SBFVisibilityStatus.INVISIBLE;
 import static megamek.common.strategicBattleSystems.SBFVisibilityStatus.VISIBLE;
 
+import java.io.Serializable;
 import java.util.Collection;
+import java.util.List;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import megamek.common.Player;
-import megamek.common.Team;
+import megamek.common.board.BoardLocation;
 import megamek.common.game.InGameObject;
 import megamek.common.interfaces.ServerOnly;
 import megamek.common.options.SBFRuleOptions;
@@ -72,6 +75,90 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     private final Map<Integer, Map<Integer, SBFVisibilityStatus>> visibilityMap = new HashMap<>();
 
     private final SBFGame game;
+    private Set<Integer> uncountedMovers;
+    private Set<Integer> countedMovementGroups;
+
+    private Map<Integer, BoardLocation> exposedUrbanPositions;
+
+    public void exposeUrbanPosition(int formation, BoardLocation location) {
+        if (exposedUrbanPositions == null) {
+            exposedUrbanPositions = new HashMap<>();
+        }
+        exposedUrbanPositions.put(formation, location);
+    }
+
+    public boolean exposedAt(int formation, BoardLocation location) {
+        return exposedUrbanPositions != null && location.equals(exposedUrbanPositions.get(formation));
+    }
+
+    public void leftHex(int formation, BoardLocation location) {
+        if (exposedUrbanPositions != null) {
+            exposedUrbanPositions.remove(formation, location);
+        }
+    }
+
+    private int aerialOrdersRound;
+    private record AerialSortie(List<BoardLocation> path, Set<Integer> targets) implements Serializable { }
+    private Map<Integer, AerialSortie> aerialScanOrders;
+
+    /** Only a Squadron which entered Central this turn can order scans of particular Blips (IO:BF p. 196). */
+    public void enteredCentral(int squadron, List<BoardLocation> path) {
+        if (!usesDoubleBlind()) {
+            return;
+        }
+        if (aerialScanOrders == null || aerialOrdersRound != game.getCurrentRound()) {
+            aerialScanOrders = new HashMap<>();
+            aerialOrdersRound = game.getCurrentRound();
+        }
+        aerialScanOrders.computeIfAbsent(squadron, ignored -> new AerialSortie(List.copyOf(path), new LinkedHashSet<>()));
+    }
+
+    public boolean orderAerialScan(int squadron, int target, int limit) {
+        AerialSortie sortie = aerialOrdersRound == game.getCurrentRound() && aerialScanOrders != null
+              ? aerialScanOrders.get(squadron) : null;
+        return sortie != null && sortie.targets().size() < limit && sortie.targets().add(target);
+    }
+
+    public List<BoardLocation> aerialReconPath(int squadron) {
+        var sortie = aerialScanOrders != null && aerialOrdersRound == game.getCurrentRound() ? aerialScanOrders.get(squadron) : null;
+        return sortie == null ? List.of() : sortie.path();
+    }
+
+    public Set<Integer> takeAerialScans(int squadron) {
+        if (aerialScanOrders == null || aerialOrdersRound != game.getCurrentRound()) {
+            return Set.of();
+        }
+        var orders = aerialScanOrders.remove(squadron);
+        return orders == null ? Set.of() : orders.targets();
+    }
+
+    /** Freeze the p. 164 movement ratio before any Formation can gain or lose a contact in transit. */
+    public void beginMovement() {
+        uncountedMovers = null;
+        countedMovementGroups = null;
+        if (usesDoubleBlind()) {
+            countedMovementGroups = new HashSet<>();
+            uncountedMovers = new HashSet<>();
+            for (SBFFormation formation : game.getActiveFormations()) {
+                if (formation.occupiesGroundHex() && game.getPlayersList().stream().filter(p -> !p.isObserver())
+                      .filter(p -> game.areHostile(formation, p))
+                      .noneMatch(p -> getVisibility(p.getId(), formation.getId()).isLocated())) {
+                    uncountedMovers.add(formation.getId());
+                } else if (SBFFormationTurn.isEligible(formation, megamek.common.enums.GamePhase.MOVEMENT, game.getCurrentRound())) {
+                    countedMovementGroups.add(formation.movementGroup());
+                }
+            }
+        }
+    }
+
+    public boolean isUncountedMovementGroup(SBFFormation formation) {
+        return countedMovementGroups == null ? isUncountedMover(formation.getId())
+              : !countedMovementGroups.contains(formation.movementGroup());
+    }
+
+    public boolean isUncountedMover(int formation) {
+        return uncountedMovers != null && uncountedMovers.contains(formation);
+    }
 
     public SBFVisibilityHelper(SBFGame game) {
         this.game = game;
@@ -107,10 +194,18 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
      */
     @ServerOnly
     public SBFVisibilityStatus getVisibility(int viewingPlayer, int formationID) {
+        var target = game.getFormation(formationID);
+        if (target.isEmpty()) {
+            target = game.getGraveyard().stream().filter(SBFFormation.class::isInstance).map(SBFFormation.class::cast)
+                  .filter(f -> f.getId() == formationID).findFirst();
+        }
+        if (target.isPresent() && target.get().concealsRoster() && !playersSharingVision(viewingPlayer).contains(game.getPlayer(target.get().getOwnerId()))) {
+            return INVISIBLE;
+        }
         if (!usesDoubleBlind()) {
             return VISIBLE;
         } else {
-            return getBestVisibilityFor(getPlayersToCheck(viewingPlayer), formationID);
+            return getBestVisibilityFor(playersSharingVision(viewingPlayer), formationID);
         }
     }
 
@@ -177,7 +272,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     private SBFVisibilityStatus getBestVisibilityFor(Collection<Player> players, int formationID) {
         return players.stream()
               .map(Player::getId)
-              .map(id -> getVisibilityImpl(id, formationID))
+              .map(id -> getObservedVisibility(id, formationID))
               .max(Comparator.comparing(Enum::ordinal))
               .orElse(INVISIBLE);
     }
@@ -196,7 +291,7 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
      *
      * @return A list of players who share their vision
      */
-    private Set<Player> getPlayersToCheck(int viewingPlayer) {
+    public Set<Player> playersSharingVision(int viewingPlayer) {
         Set<Player> playersToCheck = new HashSet<>();
         Player player = game.getPlayer(viewingPlayer);
         if (player == null) {
@@ -204,18 +299,14 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
         } else {
             playersToCheck.add(player);
             if (usesTeamVision()) {
-                Team team = game.getTeamForPlayer(player);
-                if (team == null) {
-                    logger.error("Player {} is not on a team.", viewingPlayer);
-                } else {
-                    playersToCheck.addAll(team.players());
-                }
+                game.getPlayersList().stream().filter(other -> !player.isEnemyOf(other)).forEach(playersToCheck::add);
             }
         }
         return playersToCheck;
     }
 
-    private SBFVisibilityStatus getVisibilityImpl(int viewingPlayer, int formationID) {
+    /** The observer's own record before team vision is shared. */
+    public SBFVisibilityStatus getObservedVisibility(int viewingPlayer, int formationID) {
         if (isOwner(viewingPlayer, formationID)) {
             return VISIBLE;
         } else {
@@ -229,7 +320,8 @@ public final class SBFVisibilityHelper implements SBFRuleOptionsUser {
     }
 
     private boolean isOwner(int viewingPlayer, int formationID) {
-        Optional<InGameObject> unit = game.getInGameObject(formationID);
+        Optional<InGameObject> unit = game.getInGameObject(formationID)
+              .or(() -> game.getGraveyard().stream().filter(wreck -> wreck.getId() == formationID).findFirst());
         return unit.isPresent() && (unit.get().getOwnerId() == viewingPlayer) && (viewingPlayer != Player.PLAYER_NONE);
     }
 
