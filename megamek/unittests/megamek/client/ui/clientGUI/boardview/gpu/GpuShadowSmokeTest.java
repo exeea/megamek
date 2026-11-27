@@ -17,12 +17,8 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
-import com.badlogic.gdx.graphics.g3d.environment.ShadowMap;
-import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
-import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -245,8 +241,6 @@ class GpuShadowSmokeTest {
             }
         }
         BoardScene scene = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
-        FrameBuffer clearDepth = constantDepth(1);
-        Texture unshadowed = clearDepth.getColorBufferTexture();
         GpuTerrain terrain = new GpuTerrain();
         BoardCamera camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -303,7 +297,7 @@ class GpuShadowSmokeTest {
                             }
                         }
                         Pixmap actual = draw(outputFrame, terrain, camera);
-                        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera, unshadowed);
+                        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera);
                         try {
                             int errors = 0;
                             for (Vector3 point : samples) {
@@ -334,19 +328,30 @@ class GpuShadowSmokeTest {
             terrain.renderShadows(camera.camera, List.of());
             draw(outputFrame, terrain, camera).dispose();
             capture("shadow-cliff-clean.png");
-            checkCastShadow(outputFrame, terrain, camera, raised, sides, lighting, unshadowed);
+            checkCastShadow(outputFrame, terrain, camera, raised, sides, lighting);
             assertDepthTexture(terrain.environment().shadowMap.getDepthMap().texture);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             terrain.dispose();
-            clearDepth.dispose();
         }
     }
 
     private static void checkCastShadow(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Coords raised,
-          List<BoardSurface.Side> sides, BoardAtmosphere.Lighting lighting, Texture unshadowed) {
+          List<BoardSurface.Side> sides, BoardAtmosphere.Lighting lighting) {
         camera.setIsometric(false);
         camera.center(BoardGeometry.center(raised, 0));
+        // The raised hex's walls slope in from its sides about as steeply as the default sun stands, so no shadow falls
+        // past their feet: a morning sun, whose shadow reaches most of a hex beyond them.
+        float reach = 0;
+        for (float hour : new float[] { 9, 8, 7.5f, 7 }) {
+            lighting = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+            reach = BoardGeometry.LEVEL * LEVELS * (float) Math.hypot(lighting.direction().x, lighting.direction().y)
+                  / -lighting.direction().z;
+            if (reach >= BoardGeometry.width() * .6f) { break; }
+        }
+        assertTrue(reach >= BoardGeometry.width() * .6f && reach <= BoardGeometry.width() * 1.6f,
+              "A morning sun's shadow of the raised hex reaches past its walls and stays in view: " + reach);
         terrain.setAtmosphere(lighting);
         terrain.renderShadows(camera.camera, List.of());
         Vector3 direction = new Vector3(lighting.direction().x, lighting.direction().y, 0).nor();
@@ -357,14 +362,22 @@ class GpuShadowSmokeTest {
         float length = BoardGeometry.LEVEL * LEVELS * (float) Math.hypot(lighting.direction().x, lighting.direction().y)
               / -lighting.direction().z;
         Pixmap actual = draw(outputFrame, terrain, camera);
-        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera, unshadowed);
+        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera);
         try {
             File directory = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
             com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.absolute(new File(directory,
                   "shadow-cast-actual.png").getAbsolutePath()), actual);
             com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.absolute(new File(directory,
                   "shadow-cast-reference.png").getAbsolutePath()), reference);
-            for (float distance : new float[] { 2, length / 2, length + 8 }) {
+            // The walls slope out from the top's sides, their faces turned from this sun and dark with or without a
+            // shadow: the ground the shadow falls on begins where the unshadowed frame is as bright as the open ground
+            // past the shadow's end.
+            int open = sample(reference, camera, foot.cpy().mulAdd(direction, length + 8)) >>> 24;
+            float wall = 1;
+            while (wall < length
+                  && open - (sample(reference, camera, foot.cpy().mulAdd(direction, wall)) >>> 24) > 25) { wall++; }
+            assertTrue(wall + 6 < length, "The morning shadow reaches past the walls' foot: " + wall + " of " + length);
+            for (float distance : new float[] { wall + 2, (wall + length) / 2, length + 8 }) {
                 Vector3 point = foot.cpy().mulAdd(direction, distance);
                 int lit = sample(reference, camera, point) >>> 24;
                 int shaded = sample(actual, camera, point) >>> 24;
@@ -376,8 +389,9 @@ class GpuShadowSmokeTest {
                 if (distance >= length && Math.abs(lit - shaded) > 2) {
                     var buffer = ((DirectionalShadowLight) shadow).getFrameBuffer();
                     int x = Math.round(projected.x * buffer.getWidth() - .5f);
-                    int y = Math.round(projected.y * buffer.getHeight() - .5f);
-                    assertTrue(x > 0 && x < buffer.getWidth() - 1 && y > 0 && y < buffer.getHeight() - 1);
+                    // The near map: the lower square of the texture.
+                    int y = Math.round(projected.y * buffer.getWidth() - .5f);
+                    assertTrue(x > 0 && x < buffer.getWidth() - 1 && y > 0 && y < buffer.getWidth() - 1);
                     buffer.begin();
                     try {
                         var values = com.badlogic.gdx.utils.BufferUtils.newFloatBuffer(9);
@@ -435,22 +449,33 @@ class GpuShadowSmokeTest {
               GL20.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL11.GL_TEXTURE_INTERNAL_FORMAT));
     }
 
-    private static Pixmap drawUnshadowed(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Texture unshadowed) {
-        var shadow = terrain.environment().shadowMap;
-        // Keep the same shader variant and light uniforms, but supply a map with no occluders.
-        terrain.environment().shadowMap = new ShadowMap() {
-            private final TextureDescriptor<Texture> depth = new TextureDescriptor<>(unshadowed);
-
-            @Override
-            public Matrix4 getProjViewTrans() { return shadow.getProjViewTrans(); }
-
-            @Override
-            public TextureDescriptor<Texture> getDepthMap() { return depth; }
-        };
+    /**
+     * The frame with the same programs and light but no occluder: the terrain's own map cleared for it, at every level
+     * a lookup reads, and drawn again after. (An empty map swapped into the environment does not reach the frame.)
+     */
+    private static Pixmap drawUnshadowed(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        var buffer = ((DirectionalShadowLight) terrain.environment().shadowMap).getFrameBuffer();
+        var texture = buffer.getColorBufferTexture();
+        buffer.begin();
+        try {
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glClearDepthf(1);
+            for (int level = 0; level < GpuShadowLight.LEVELS; level++) {
+                Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_TEXTURE_2D,
+                      texture.getTextureObjectHandle(), level);
+                Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            }
+        } finally {
+            Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_TEXTURE_2D,
+                  texture.getTextureObjectHandle(), 0);
+            buffer.end();
+        }
         try {
             return draw(outputFrame, terrain, camera);
         } finally {
-            terrain.environment().shadowMap = shadow;
+            terrain.refreshShadows();
+            terrain.renderShadows(camera.camera, List.of());
         }
     }
 

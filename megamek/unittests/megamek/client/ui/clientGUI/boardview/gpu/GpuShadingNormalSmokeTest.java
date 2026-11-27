@@ -167,8 +167,10 @@ class GpuShadingNormalSmokeTest {
                     if (bank) {
                         var center = BoardGeometry.center(new megamek.common.board.Coords(3, 4), 3);
                         var outward = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 3).sub(center).nor();
-                        var focus = center.cpy().mulAdd(outward, BoardGeometry.width() * .38f);
-                        focus.z -= BoardGeometry.level();
+                        // The lip: the meadow's blades lean out and hang over it (terrain-grass.glsl); the earth face
+                        // below it grows none.
+                        var focus = center.cpy().lerp(
+                              BoardGeometry.center(new megamek.common.board.Coords(4, 4), 3), .42f);
                         camera.camera.position.set(focus).mulAdd(outward.rotate(Vector3.Z, -50), 650).add(0, 0, 350);
                         camera.camera.up.set(Vector3.Z); camera.camera.lookAt(focus); camera.camera.update();
                     }
@@ -755,7 +757,10 @@ class GpuShadingNormalSmokeTest {
         }
     }
 
-    /** Actual generated tufts and shipped instanced foliage; no replacement of their normals or pigment. */
+    /**
+     * Shipped instanced foliage; no replacement of its normals or pigment. Grass is not among the specimens: its blades
+     * are lit as their ground is (terrain-grass.glsl), their shading normal by design not their ribbon's.
+     */
     private static void proxyAngles(GpuShaderManager manager, boolean baseline) throws Exception {
         var destination = java.nio.file.Path.of(System.getProperty("megamek.gpu.screenshots"), "grazing-proxies");
         assertTrue(java.nio.file.Files.notExists(destination), "Preserve previous proxy evidence");
@@ -763,9 +768,7 @@ class GpuShadingNormalSmokeTest {
         String foliageDisk = GpuShaderSource.readDisk("terrain-foliage.frag");
         boolean virtualFrames = proxyFrames(foliageDisk);
         String foliage = proxySource(foliageDisk, false, virtualFrames);
-        String vegetation = proxySource(GpuShaderSource.readDisk("terrain-vegetation.frag"), true, virtualFrames);
-        applySources(manager, Map.of("terrain-foliage.frag", foliage, "terrain-vegetation.frag", vegetation),
-              "proxy-diagnostics");
+        applySources(manager, Map.of("terrain-foliage.frag", foliage), "proxy-diagnostics");
         var preview = new GpuTerrain();
         var assets = new GpuAssets();
         var field = GpuTerrain.class.getDeclaredField("batch"); field.setAccessible(true);
@@ -776,21 +779,6 @@ class GpuShadingNormalSmokeTest {
             try { return (com.badlogic.gdx.graphics.g3d.Model) prepare.invoke(null, assets.lodModel(name, level)); }
             catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
         }, false);
-        // Borrow the production grass template and upload path, including its seeded bend/normal construction.
-        // Fixed roots avoid board arrival-time growth; this tests actual blade shading, not planting/density.
-        Class<?> bladeClass = Class.forName(GpuGroundCover.class.getName() + "$Batch");
-        var constructor = bladeClass.getDeclaredConstructor(float[][].class); constructor.setAccessible(true);
-        var templates = GpuGroundCover.class.getDeclaredField("GRASS"); templates.setAccessible(true);
-        Object blades = constructor.newInstance((Object) ((float[][][]) templates.get(null))[1]);
-        var add = bladeClass.getDeclaredMethod("add", com.badlogic.gdx.utils.FloatArray.class); add.setAccessible(true);
-        var roots = new com.badlogic.gdx.utils.FloatArray();
-        int rank = 0;
-        for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) roots.addAll(x * 1.5f, y * 1.5f, 0, rank++);
-        add.invoke(blades, roots);
-        var upload = bladeClass.getDeclaredMethod("upload", com.badlogic.gdx.utils.IntArray.class); upload.setAccessible(true);
-        var targets = new com.badlogic.gdx.utils.IntArray(); targets.add(4096);
-        ModelInstance tuft = (ModelInstance) upload.invoke(blades, targets);
-        assertTrue(tuft != null, "The actual production blade batch must contain geometry");
         var rows = new java.util.ArrayList<Object>();
         int repairedSupport = 0, virtualCrossings = 0;
         try (var output = new GpuSceneTestOutput(128, 128)) {
@@ -800,18 +788,15 @@ class GpuShadingNormalSmokeTest {
                 var environment = new Environment();
                 for (var attribute : preview.environment()) { environment.set(attribute); }
                 assertTrue(environment.shadowMap == null, "Isolated specimens must not sample an unrendered shadow map");
-                String[] kinds = virtualFrames ? new String[] { "tuft", "pine-lod2", "pine-lod3",
-                      "tree-snow-lod2", "bark", "snow" } : new String[] { "tuft", "pine-lod2", "pine-lod3" };
+                String[] kinds = virtualFrames ? new String[] { "pine-lod2", "pine-lod3",
+                      "tree-snow-lod2", "bark", "snow" } : new String[] { "pine-lod2", "pine-lod3" };
                 for (String kind : kinds) {
                     boolean extra = kind.equals("tree-snow-lod2") || kind.equals("bark") || kind.equals("snow");
                     if (extra && hour != 13) { continue; }
                     for (boolean mirrored : new boolean[] { false, true }) {
-                        // Ground-cover roots are world-space; the production grass vertex path ignores instance transforms.
-                        if (kind.equals("tuft") && mirrored) { continue; }
                         var placement = new com.badlogic.gdx.math.Matrix4();
                         // Production tree instances support one horizontal and a separate vertical scale, plus mirror.
                         if (mirrored) { placement.setToScaling(1.1f, -1.1f, 1.35f); }
-                        boolean grass = kind.equals("tuft");
                         boolean solidRole = kind.equals("bark") || kind.equals("snow");
                         String species = kind.equals("tree-snow-lod2") ? "vegetation/tree-snow"
                               : kind.equals("snow") ? "vegetation/tree-dead-snow" : "vegetation/pine";
@@ -843,14 +828,12 @@ class GpuShadingNormalSmokeTest {
                             assertTrue(GpuTreeInstances.placeable(placement), "Positive tree placement");
                             stand.add(species, placement, 0);
                         }
-                        tuft.transform.set(placement);
-                        var bounds = grass ? new com.badlogic.gdx.math.collision.BoundingBox(
-                              new Vector3(-4, -4, -1), new Vector3(4, 4, 7))
-                              : assets.lodModel(species, 0).calculateBoundingBox(new com.badlogic.gdx.math.collision.BoundingBox());
+                        var bounds = assets.lodModel(species, 0)
+                              .calculateBoundingBox(new com.badlogic.gdx.math.collision.BoundingBox());
                         bounds.mul(placement);
                         Vector3 center = bounds.getCenter(new Vector3());
                         float diameter = bounds.getDimensions(new Vector3()).len();
-                        float footprint = grass || solidRole ? 64 : 26.4f;
+                        float footprint = solidRole ? 64 : 26.4f;
                         for (float tilt : new float[] { 30, 60, 85 }) {
                             if (extra && tilt != 60) { continue; }
                             float dpi = Gdx.graphics.getBackBufferHeight() / (float) Gdx.graphics.getHeight();
@@ -864,19 +847,16 @@ class GpuShadingNormalSmokeTest {
                             camera.near = .01f; camera.far = diameter * 12; camera.update();
                             Runnable draw = () -> {
                                 batch.begin(camera);
-                                GpuIndirectInstances.Instances list = null;
-                                if (grass) { batch.render(tuft, environment); }
-                                else {
-                                    // Through the terrain's GPU-driven path, as its colour pass draws them.
-                                    var indirect = GpuTestSupport.indirect(preview);
-                                    list = objectParts ? indirect.list(null, mirroredParts, 0, mirroredParts, null, null)
-                                          : instances.list(indirect, null, stand, level, false);
-                                    for (var part : GpuTestSupport.draws(indirect, objectParts
-                                          ? GpuIndirectInstances.Pass.COLOUR : GpuIndirectInstances.Pass.TREE_COLOUR,
-                                          list, camera, environment)) {
-                                        observedRoles.add(part.material.id);
-                                        batch.render(part);
-                                    }
+                                // Through the terrain's GPU-driven path, as its colour pass draws them.
+                                var indirect = GpuTestSupport.indirect(preview);
+                                GpuIndirectInstances.Instances list = objectParts
+                                      ? indirect.list(null, mirroredParts, 0, mirroredParts, null, null)
+                                      : instances.list(indirect, null, stand, level, false);
+                                for (var part : GpuTestSupport.draws(indirect, objectParts
+                                      ? GpuIndirectInstances.Pass.COLOUR : GpuIndirectInstances.Pass.TREE_COLOUR,
+                                      list, camera, environment)) {
+                                    observedRoles.add(part.material.id);
+                                    batch.render(part);
                                 }
                                 batch.end();
                                 GpuIndirectInstances.release(list);
@@ -917,8 +897,13 @@ class GpuShadingNormalSmokeTest {
                                         if (roles.rgba()[p * 4 + 1] < -.003) { carrierCrossings++; }
                                     }
                                     if (roles.rgba()[p * 4 + 2] == 0) { carrierBacks++; }
-                                    if (solidRole || grass) { assertEquals(0, role, 0, "Real geometry must retain its frame: " + id); }
-                                    if (level == 3 && !grass) { assertEquals(1, role, 0, "Actual instanced impostor must use its virtual frame"); }
+                                    if (solidRole) {
+                                        assertEquals(0, role, 0, "Real geometry must retain its frame: " + id);
+                                    }
+                                    if (level == 3) {
+                                        assertEquals(1, role, 0,
+                                              "Actual instanced impostor must use its virtual frame");
+                                    }
                                 }
                                 for (int c = 0; c < 3; c++) {
                                     float value = full.rgba()[p * 4 + c];
@@ -947,7 +932,7 @@ class GpuShadingNormalSmokeTest {
                                 }
                             }
                             assertTrue(covered > 0, "Actual proxy covers pixels: " + id);
-                            if (virtualFrames && !grass) {
+                            if (virtualFrames) {
                                 String expectedRole = solidRole ? kind : level == 3 ? "impostor"
                                       : species.equals("vegetation/tree-snow") ? "canopy-snow-cutout" : "canopy-cutout";
                                 assertTrue(observedRoles.contains(expectedRole), "Actual copied instance role: " + expectedRole);
@@ -958,7 +943,7 @@ class GpuShadingNormalSmokeTest {
                             var row = new java.util.LinkedHashMap<String, Object>();
                             row.put("id", id); row.put("image", id + ".png"); row.put("sha256", fileHash(destination.resolve(id + ".png")));
                             row.put("kind", kind); row.put("hour", hour); row.put("tilt", tilt); row.put("mirroredScaled", mirrored);
-                            row.put("instanceRoute", grass ? "ground-cover" : objectParts ? "object-parts" : "tree-stand");
+                            row.put("instanceRoute", objectParts ? "object-parts" : "tree-stand");
                             row.put("materialIds", observedRoles); row.put("virtualFrame", virtualFrames);
                             row.put("proxyPixels", proxyPixels); row.put("carrierNegativeSupportPixels", carrierCrossings);
                             row.put("carrierBackPixels", carrierBacks);
@@ -974,7 +959,7 @@ class GpuShadingNormalSmokeTest {
                 }
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            assertEquals(virtualFrames ? 36 : 30, rows.size());
+            assertEquals(virtualFrames ? 30 : 24, rows.size());
             if (!baseline) { assertTrue(repairedSupport > 0, "Real materials must exercise frame repair"); }
             if (virtualFrames) {
                 assertTrue(virtualCrossings > 0, "Actual valid virtual reflections must cross a carrier plane");
@@ -985,8 +970,9 @@ class GpuShadingNormalSmokeTest {
             report.put("renderer", Gdx.gl.glGetString(GL20.GL_RENDERER));
             report.put("rows", rows);
             report.put("virtualCrossings", virtualCrossings);
-            report.put("scope", "Actual seeded production grass blades and shipped pine LOD2/3 through the instanced foliage path. "
-                  + "Positive trees use Stand; mirrored/scaled models use supported object-part batches with corrected front winding. Grass uses its world-space roots. "
+            report.put("scope", "Shipped pine LOD2/3 through the instanced foliage path. "
+                  + "Positive trees use Stand; mirrored/scaled models use supported object-part batches with corrected "
+                  + "front winding. "
                   + "Three inclinations, noon and low sun. "
                   + "Shadowless isolated materials, clock fixed; no claim of exact cross-LOD silhouette or arbitrary view equivalence. "
                   + "Tuple output records original/repaired NsV, independent represented-frame mirror support, and NgV. "
@@ -995,7 +981,7 @@ class GpuShadingNormalSmokeTest {
             new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
                   .writeValue(destination.resolve("review.json").toFile(), report);
         } finally {
-            ((com.badlogic.gdx.utils.Disposable) blades).dispose(); preview.dispose(); assets.dispose();
+            preview.dispose(); assets.dispose();
             applySources(manager, Map.of(), "restore-proxies");
         }
     }

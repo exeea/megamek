@@ -654,6 +654,14 @@ class GpuTerrainRealismSmokeTest {
                         assertTrue(terrain.groundDamage().scorchShown());
                     }
                     preparationEnd(view.name() + "-initial-update-blocking", initialBuild, report);
+                }
+                if (variants.size() > 1) { replaceSources(manager, Map.of(), view.name() + "-prepare", report); }
+                compositor.prepare(terrain, camera, installed.board);
+                long overviewStart = preparationStart(view.name() + "-overview-settle");
+                settleView();
+                preparationEnd(view.name() + "-overview-settle", overviewStart, report);
+                if (newBoard) {
+                    // Picking waits for the terrain to be ready (GpuTerrain#ready), which the settle brings.
                     var coords = new Coords(installed.board.width() / 2, installed.board.height() / 2);
                     var center = BoardGeometry.center(coords, 0);
                     pick = new Ray(center.cpy().add(0, 0, 10000), new Vector3(0, 0, -1));
@@ -661,11 +669,6 @@ class GpuTerrainRealismSmokeTest {
                     assertNotNull(hit, installed.landscape.name);
                     picked = hit.coords();
                 }
-                if (variants.size() > 1) { replaceSources(manager, Map.of(), view.name() + "-prepare", report); }
-                compositor.prepare(terrain, camera, installed.board);
-                long overviewStart = preparationStart(view.name() + "-overview-settle");
-                settleView();
-                preparationEnd(view.name() + "-overview-settle", overviewStart, report);
                 terrain.animate(freezeAnimation && !newBoard ? 0 : .5f, List.of());
                 long overviewDraw = preparationStart(view.name() + "-overview-first-draw-submit");
                 compositor.render(terrain, camera, installed.board);

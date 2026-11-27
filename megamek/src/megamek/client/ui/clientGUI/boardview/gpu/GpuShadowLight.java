@@ -78,14 +78,17 @@ final class GpuShadowLight extends DirectionalShadowLight {
         return map instanceof GpuShadowLight light ? light.farInTexture : map.getProjViewTrans();
     }
 
-    /** The outer map's projection for lit programs (surface-lighting.glsl's shadowMatrix). */
+    /**
+     * The outer map's projection for lit programs (surface-lighting.glsl's shadowMatrix). A plain shadow map is one
+     * map for both: its own projection.
+     */
     static void registerFar(BaseShader shader) {
         shader.register("u_shadowFarProjViewTrans", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                if (renderable.environment != null
-                      && renderable.environment.shadowMap instanceof GpuShadowLight light) {
-                    target.set(id, light.far.combined);
+                ShadowMap map = renderable.environment == null ? null : renderable.environment.shadowMap;
+                if (map != null) {
+                    target.set(id, map instanceof GpuShadowLight light ? light.far.combined : map.getProjViewTrans());
                 }
             }
         });
