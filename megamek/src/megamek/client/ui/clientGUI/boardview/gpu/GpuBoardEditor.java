@@ -2316,6 +2316,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             if (value != null) { text(UiKit.text("BoardEditor.derivedBuildingHeight", Integer.toString(value.value()))); }
             return;
         }
+        var buildingClass = snapshot.property("bldg_class");
+        if (field.terrain().equals("bldg_elev") && buildingClass != null
+              && buildingClass.value() == megamek.common.units.IBuilding.GUN_EMPLACEMENT) {
+            text(UiKit.text("BoardEditor.gunEmplacementHeight"));
+            return;
+        }
         if (value == null) {
             if (field.optional()) {
                 int initial = field.choices().isEmpty() ? 1 : field.choices().getFirst().value();

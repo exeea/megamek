@@ -4366,6 +4366,12 @@ public final class BoardEditorSession {
         if (type == Terrains.BUILDING && (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
               || value == BuildingType.WALL.getTypeValue())) { return; }
         if (type == Terrains.BLDG_ELEV && hex.getBuildingReference() != null) { return; }
+        // A gun emplacement is one level high, as the rules build it (TestBuilding).
+        if (type == Terrains.BLDG_ELEV && value != 1
+              && hex.terrainLevel(Terrains.BLDG_CLASS) == megamek.common.units.IBuilding.GUN_EMPLACEMENT) {
+            setTerrain(hex, name, 1, colony);
+            return;
+        }
         if (type == Terrains.BLDG_WEIGHT) {
             require(value >= 0 && value <= 5, "Unknown weight " + value);
             // A building's type is its weight as the rules know it: only a civilian or Castle Brian one stores its own.
@@ -4388,6 +4394,10 @@ public final class BoardEditorSession {
             require(candidate.isValid(errors), String.join("\n", errors));
         }
         hex.addTerrain(next);
+        if (type == Terrains.BLDG_CLASS && value == megamek.common.units.IBuilding.GUN_EMPLACEMENT
+              && hex.terrainLevel(Terrains.BLDG_ELEV) > 1) {
+            hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 1));
+        }
         if (type == Terrains.BUILDING) { hex.removeTerrain(Terrains.BLDG_WEIGHT); }
         if (type == Terrains.WOODS || type == Terrains.JUNGLE) {
             hex.removeTerrain(type == Terrains.WOODS ? Terrains.JUNGLE : Terrains.WOODS);
