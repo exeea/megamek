@@ -89,7 +89,7 @@ final class BoardPlanting {
         if (original == null || !original.taken(at)) { return new BoardSurface(this.scene, tile); }
         ChunkField full = new ChunkField(original, GroundFamilies.ON ? this.scene : null, TerrainLod.FULL,
               BoardGeometry.floor(this.scene));
-        return GpuTerrain.fieldSurface(this.scene, tile, TerrainLod.FULL, full.block(at), original);
+        return GpuTerrain.fieldSurface(this.scene, tile, TerrainLod.FULL, full.alone(at), original);
     }
 
     /** This planting's field: the build's {@code field} while its {@code scene} is this ground; none without it. */

@@ -70,24 +70,59 @@ final class ChunkField {
     Block block(Coords h) { return board.taken(h) ? blocks.computeIfAbsent(h, key -> new Holder()).get(h) : null; }
 
     /**
-     * A hex's block, built once under its own lock. The map's lock is held only while the holder is added: a build
-     * inside computeIfAbsent kept the map's bin for its whole length, and threads asking for other hexes waited.
+     * A hex's block for its surface alone (a plant's support), of a field asked for nothing else: no neighbour is
+     * evaluated for it, and its edges keep every sample. Not kept.
+     */
+    Block alone(Coords h) { return board.taken(h) ? build(h, new Builder(this, h).prepare(), false) : null; }
+
+    /** The samples inside its edges that hex g's own triangles use (Builder#edges): its first stage, evaluated once. */
+    private long edges(Coords g) { return blocks.computeIfAbsent(g, key -> new Holder()).edges(g); }
+
+    /**
+     * A hex's block, built once under its own lock, in two stages: its samples and its own triangles' corners first,
+     * which its neighbours ask for (#edges), then its merged triangles, walls and the rest once its neighbours' first
+     * stage says which samples of each shared edge they use (Builder#keep). The first stage has a lock of its own, so
+     * two neighbours building at once never wait on each other's block. The map's lock is held only while the holder
+     * is added: a build inside computeIfAbsent kept the map's bin for its whole length, and threads asking for other
+     * hexes waited.
      */
     private final class Holder {
+        private final Object first = new Object();
+        /** The first stage, until the block is built from it. */
+        private Builder prepared;
+        private long edges;
+        private boolean known;
         private Block block;
         private boolean built;
 
+        long edges(Coords h) {
+            synchronized (first) {
+                if (!known) {
+                    prepared = new Builder(ChunkField.this, h).prepare();
+                    edges = prepared.edges();
+                    known = true;
+                }
+                return edges;
+            }
+        }
+
         synchronized Block get(Coords h) {
             if (!built) {
-                block = build(h);
+                Builder builder;
+                synchronized (first) {
+                    edges(h);
+                    builder = prepared;
+                    prepared = null;
+                }
+                block = build(h, builder, true);
                 built = true;
             }
             return block;
         }
     }
 
-    private Block build(Coords h) {
-        Block built = new Builder(this, h).run();
+    private Block build(Coords h, Builder prepared, boolean joined) {
+        Block built = prepared.finish(joined);
         Block stamped = FieldStamps.apply(board, built, coarser == null ? null : () -> coarser.block(h), this::shares);
         // A clip moves and adds samples: their covers are asked again.
         return stamped == built || scene == null ? stamped : stamped.covered(FieldCover.of(scene, stamped, segments(lod)));
@@ -219,8 +254,12 @@ final class ChunkField {
         Coords[] sharer;
         int[] levelTops = new int[48], ground = new int[48], faces = new int[48], walls = new int[48];
         int levelTopCount, groundCount, faceCount, wallCount;
-        /** Whether the board cuts one of this hex's sides (a neighbour outside it): its level ground is not merged. */
-        boolean cut;
+        /** The edges a merged triangle has a side on (bit k): the only ones whose next hex is asked (#keep). */
+        int mergedEdges;
+        /** The lattice samples a merged triangle's sides keep (#keep). */
+        boolean[] kept;
+        /** The board's cut along edge k stands on its corners alone (#keep, #walls). */
+        final boolean[] plain = new boolean[6];
         /** Whether a containment wall stands near: the samples step back behind it (FieldStamps#stepBack). */
         final boolean walled;
 
@@ -273,7 +312,8 @@ final class ChunkField {
             return owner;
         }
 
-        Block run() {
+        /** The first stage: the samples, and the hex's own triangles but its level ground's merged ones (#emit). */
+        Builder prepare() {
             float cx = b.centerX(h), cy = b.centerY(h);
             float[] cornerX = new float[6], cornerY = new float[6];
             float[][] boundary = new float[6 * FieldBoard.FULL][];
@@ -331,8 +371,53 @@ final class ChunkField {
             }
             for (int v = 0; v < lattice; v++) { shade(v); }
             if (cover != null) { cover.lattice(x, y, z, role, rock, foot, stepTop, lattice); }
-            for (int k = 0; k < 6; k++) { cut |= !b.inside(h.translated(BoardGeometry.edgeDirection(k))); }
             for (int k = 0; k < 6; k++) { emit(k, 0, 0, n, 0, n, n); }
+            return this;
+        }
+
+        /** The samples inside each edge that a first-stage triangle has as a corner: bit k * 8 + j for (n, j). */
+        long edges() {
+            long bits = 0;
+            for (int k = 0; k < 6; k++) {
+                for (int j = 1; j < n; j++) {
+                    if (used[vertex(k, n, j)]) { bits |= 1L << k * 8 + j; }
+                }
+            }
+            return bits;
+        }
+
+        /**
+         * The samples a merged triangle's sides keep (#side): those some triangle of the hex has as a corner, and on
+         * each edge those the next hex's triangles have (its first stage, ChunkField#edges; its edge runs the other
+         * way), so the two hexes' triangles meet at vertices all along it, and a wholly level hex beside level hexes
+         * is six triangles. An edge keeps every sample where the next hex's triangles are not the field's at this
+         * level: another level's wall, a hex the field does not take, or {@code joined} false. The board's cut keeps
+         * its corners alone along an edge that is level and that no triangle uses ({@link #plain}: #walls stands on
+         * them), else every sample, as its columns do.
+         */
+        private void keep(boolean joined) {
+            kept = used.clone();
+            long own = edges();
+            for (int k = 0; k < 6; k++) {
+                Coords g = h.translated(BoardGeometry.edgeDirection(k));
+                boolean all = true;
+                long theirs = 0;
+                if (!b.inside(g)) {
+                    plain[k] = (own >>> k * 8 & 0xff) == 0 && flat[vertex(k, n, 0)]
+                          && flat[vertex((k + 1) % 6, n, 0)];
+                    all = !plain[k];
+                } else if (joined && b.taken(g) && b.level(g) == this.own) {
+                    all = false;
+                    // Only a merged triangle's side asks: a hex with none on this edge keeps what it uses.
+                    if ((mergedEdges >> k & 1) != 0) { theirs = chunk.edges(g) >>> (k + 3) % 6 * 8 & 0xff; }
+                }
+                for (int j = 1; j < n; j++) { kept[vertex(k, n, j)] |= all || (theirs >>> n - j & 1) != 0; }
+            }
+        }
+
+        /** The second stage: the merged triangles on the samples their sides keep, the walls, parents and covers. */
+        Block finish(boolean joined) {
+            keep(joined);
             for (int m = 0; m < mergedCount; m += 8) {
                 outline(merged[m], merged[m + 1], merged[m + 2], merged[m + 3], merged[m + 4], merged[m + 5],
                       merged[m + 6], merged[m + 7] == 1);
@@ -1211,11 +1296,14 @@ final class ChunkField {
                 w.quayHex = g;
             }
             w.fall = !outside && b.falls(h, g);
+            // The board's cut along a level edge no triangle uses stands on its corners alone, as the ground's
+            // merged triangle above it does (#keep): one column a corner.
+            int pace = outside && plain[e] ? n * split : 1;
             int[][] columns = new int[n * split + 1][];
             // Where the relief moves a wall's rim off the row, a level strip joins it to the row's own sample: the
             // caprock's lip.
             int[] rims = new int[n * split + 1];
-            for (int c = 0; c <= n * split; c++) {
+            for (int c = 0; c <= n * split; c += pace) {
                 w.column(c, n * split, 1);
                 int j = Math.min(c / split, n - 1);
                 float f = c / (float) split - j;
@@ -1265,10 +1353,10 @@ final class ChunkField {
                     rock[columns[c][0]] = sampleRock;
                     rims[c] = columns[c][0];
                 }
-                if (c > 0 && (columns[c - 1].length > 1 || columns[c].length > 1)) {
-                    strip(columns[c - 1], columns[c]);
-                    int[] a = columns[c - 1], d = columns[c];
-                    lip(rims[c - 1], a[a.length - 1], rims[c], d[d.length - 1]);
+                if (c > 0 && (columns[c - pace].length > 1 || columns[c].length > 1)) {
+                    strip(columns[c - pace], columns[c]);
+                    int[] a = columns[c - pace], d = columns[c];
+                    lip(rims[c - pace], a[a.length - 1], rims[c], d[d.length - 1]);
                 }
             }
             wallEnds[e] = new int[2][];
@@ -1277,6 +1365,8 @@ final class ChunkField {
                 wallEnds[e][i] = java.util.Arrays.copyOf(column, column.length + 1);
                 wallEnds[e][i][column.length] = rims[i * n * split];
             }
+            // After the wall's ends are noted from its first and last column (wallEnds): the two that stand.
+            if (pace > 1) { columns = new int[][] { columns[0], columns[n * split] }; }
             // The side the strips' triangles face: along the row x up, or against it.
             boolean flip = ey * onx - ex * ony < 0;
             // A cast wall is a vertical plane: its samples keep their outward normal, also where it closes the edge
@@ -1285,6 +1375,8 @@ final class ChunkField {
             if (wall) { occlude(columns, c0x, c0y, onx, ony, landform, otherZ, len, w.wet); }
             // Full detail's walls morph toward medium's, medium's toward coarse's (every 2nd or 6th column there).
             // The board's cut keeps its two rows and one column a lattice step at every detail.
+            // The corners' columns stand at every detail: they are their own parents.
+            if (pace > 1) { return; }
             if (full || medium) {
                 wallParents(w, columns, rims, outside || cast || full ? 2 : 6, 2, stride,
                       outside || cast ? stride : full ? 2 : ROWS_A_LEVEL, flip, cast);
@@ -1381,9 +1473,7 @@ final class ChunkField {
         private void emit(int k, int i0, int j0, int i1, int j1, int i2, int j2) {
             int extent = Math.max(Math.abs(i1 - i0), Math.max(Math.abs(i2 - i0), Math.abs(i2 - i1)));
             boolean level = allFlat(k, i0, j0, i1, j1, i2, j2);
-            // A hex the board cuts merges nothing: the cut's wall has a column at every outer sample, and a merged
-            // triangle's edge there, or beside a split one, would meet them in T-junctions (single-pixel holes).
-            if (extent > 1 && (!level || cut)) {
+            if (extent > 1 && !level) {
                 int ia = (i0 + i1) / 2, ja = (j0 + j1) / 2, ib = (i1 + i2) / 2, jb = (j1 + j2) / 2;
                 int ic = (i2 + i0) / 2, jc = (j2 + j0) / 2;
                 emit(k, i0, j0, ia, ja, ic, jc);
@@ -1402,14 +1492,16 @@ final class ChunkField {
                 return;
             }
             if (mergedCount + 8 > merged.length) { merged = java.util.Arrays.copyOf(merged, merged.length * 2); }
+            // Two corners on the outer ring: a side on the hex's edge.
+            if ((i0 == n ? 1 : 0) + (i1 == n ? 1 : 0) + (i2 == n ? 1 : 0) >= 2) { mergedEdges |= 1 << k; }
             int[] m = { k, i0, j0, i1, j1, i2, j2, top ? 1 : 0 };
             System.arraycopy(m, 0, merged, mergedCount, 8);
             mergedCount += 8;
         }
 
         /**
-         * A merged triangle with the samples on its edges that another triangle of the hex has as a corner, and every
-         * sample on the hex's edge (the next hex's triangles are not known here): whatever meets an edge then meets
+         * A merged triangle with the samples on its edges that another triangle of the hex has as a corner, and on the
+         * hex's edge those the next hex's triangles have too (#keep): whatever meets an edge then meets
          * vertices, never an edge's inside (a T junction: single-pixel holes). A strip between AB and AC from A, then a
          * fan from the strip's last rung over BC's samples: none degenerate.
          */
@@ -1440,13 +1532,13 @@ final class ChunkField {
             }
         }
 
-        /** A side's samples from corner to corner: the corners, the used ones between, every one on the hex's edge. */
+        /** A side's samples from corner to corner: the corners and the kept ones between (#keep). */
         private int[] side(int k, int ia, int ja, int ib, int jb, int e) {
             int[] out = new int[e + 1];
             int count = 0;
             for (int t = 0; t <= e; t++) {
                 int v = vertex(k, ia + (ib - ia) * t / e, ja + (jb - ja) * t / e);
-                if (t == 0 || t == e || ia == n && ib == n || used[v]) { out[count++] = v; }
+                if (t == 0 || t == e || kept[v]) { out[count++] = v; }
             }
             return java.util.Arrays.copyOf(out, count);
         }

@@ -5051,7 +5051,7 @@ final class GpuTerrain implements Disposable {
     /** Full-detail support without a planting: the field's surface where {@code field} takes the hex, else today's. */
     private static BoardSurface fullSupport(BoardScene scene, BoardScene.Tile tile, FieldBoard field, float floor) {
         ChunkField.Block block = field == null || !field.taken(tile.coords()) ? null
-              : new ChunkField(field, GroundFamilies.ON ? scene : null, TerrainLod.FULL, floor).block(tile.coords());
+              : new ChunkField(field, GroundFamilies.ON ? scene : null, TerrainLod.FULL, floor).alone(tile.coords());
         return block == null ? new BoardSurface(scene, tile) : fieldSurface(scene, tile, TerrainLod.FULL, block, field);
     }
 
