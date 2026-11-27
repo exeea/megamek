@@ -79,8 +79,8 @@ class GpuTreeLodSmokeTest {
                         // A board of its own: one board's hex that lost its tree grows no other (BoardPlanting).
                         BoardScene scene = scene(name, TREES.indexOf(name));
                         terrain.update(scene);
-                        int[] triangles = new int[TreeLod.LEVELS];
-                        for (int level = 0; level < TreeLod.LEVELS; level++) {
+                        int[] triangles = new int[RigidGlb.LEVELS];
+                        for (int level = 0; level < RigidGlb.LEVELS; level++) {
                             Model model = assets.lodModel(name, level);
                             for (var part : model.meshParts) {
                                 triangles[level] += part.size / 3;

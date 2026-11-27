@@ -334,7 +334,11 @@ final class GpuTerrain implements Disposable {
                   // fill draws without an environment and always has it: a field's ground is in its pages, and on a board
                   // without biomes the stage finds no cover.
                   + (!renderable.material.has(Sculpt.TYPE) ? "" : pruning && !fill ? GpuBiomeSurface.prefix(renderable)
-                        : "#define biomeMaskFlag\n");
+                        : "#define biomeMaskFlag\n")
+                  // The canopy's tint, on a board with woods (GpuEnvironmentLighting.canopy): live draws only.
+                  + (renderable.material.has(Sculpt.TYPE) && !fill && renderable.environment != null
+                        && GpuEnvironmentLighting.of(renderable.environment) != null
+                        && GpuEnvironmentLighting.of(renderable.environment).canopy ? "#define canopyFlag\n" : "");
             String fragment = chosen.fragmentShader;
             if (renderable.material.has(GpuTilesetTerrain.Grading.TYPE)) {
                 fragment = GpuTilesetTerrain.fragment(fragment);
@@ -1658,7 +1662,9 @@ final class GpuTerrain implements Disposable {
         }
         lavaLighting = new GpuLavaLighting(assets);
         indirect = GpuIndirectInstances.create();
-        destruction = new GpuDestruction(lavaLighting, (name, level) -> foliage(assets.lodModel(name, level)), indirect);
+        // A felled tree keeps its impostor however small: it has no stand to dissolve from.
+        destruction = new GpuDestruction(lavaLighting,
+              (name, level) -> foliage(assets.lodModel(name, Math.min(level, TreeLod.IMPOSTOR))), indirect);
         falls = new TerrainFalls(this, destruction, assets);
         environmentLighting.lavaLighting = lavaLighting;
         biomes = new GpuBiomeSurface(lavaLighting);
@@ -2087,8 +2093,10 @@ final class GpuTerrain implements Disposable {
      * (its last beyond the file's) and none at the last ({@link TreeLod#SCATTER}), which it dissolves into.
      */
     private Model standModel(String name, int level) {
+        // Below its last threshold a plant draws nothing: a scatter plant after its far mesh, a tree after its
+        // impostor, where the ground takes its crown's colour (GpuCanopy).
+        if (level >= TreeLod.pixels(name).length) { return null; }
         if (TreeLod.pixels(name) != TreeLod.SCATTER) { return foliage(assets.lodModel(name, level)); }
-        if (level == TreeLod.LEVELS - 1) { return null; }
         List<Model> levels = assets.levels(name);
         return foliage(levels.get(Math.min(level, levels.size() - 1)), SCATTER_TINT);
     }
@@ -3138,6 +3146,7 @@ final class GpuTerrain implements Disposable {
             // Before anything prepares for it: whether its programs compile the biome stage.
             GpuBiomeSurface.mark(environment, biomeStage(scene));
             GpuEnvironmentLighting.required(environment).cellWalls = cellWallStage(scene);
+            GpuEnvironmentLighting.required(environment).canopy = canopyStage(scene);
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
         } else if (requested == null) {
@@ -3146,6 +3155,7 @@ final class GpuTerrain implements Disposable {
                 coverScene = scene;
                 GpuBiomeSurface.mark(environment, biomeStage(scene));
                 GpuEnvironmentLighting.required(environment).cellWalls = cellWallStage(scene);
+                GpuEnvironmentLighting.required(environment).canopy = canopyStage(scene);
                 installedSettings = settings;
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
@@ -4383,6 +4393,7 @@ final class GpuTerrain implements Disposable {
             int count = ((scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE) * ((scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE);
             for (int index = 0; index < count; index++) { chunks.add(rebuild.replacements.get(index)); }
             chunks.forEach(chunk -> groundCover.installed(chunk.bounds));
+            canopyStale = true;
         } else {
             rebuild.replacements.forEach((index, next) -> {
                 groundCover.installed(chunks.get(index).bounds);
@@ -4759,6 +4770,7 @@ final class GpuTerrain implements Disposable {
         scarSurfaceRevision++;
         flagScene++;
         Chunk old = chunks.set(index, next);
+        canopyStale = true;
         groundCover.installed(old.bounds);
         groundCover.installed(next.bounds);
         // A level kept while structures came down or were restored draws them as they are now.
@@ -7052,6 +7064,97 @@ final class GpuTerrain implements Disposable {
     GpuGroundMap groundMap() { return groundCover.map(); }
 
     /** Installed ground cover: a game's retained planting, or the editor's roots on the latest support. */
+    /** The trees' crowns from far above, by species (GpuCanopy). */
+    private final GpuCanopy canopy = new GpuCanopy();
+    /** Whether the installed trees changed since the canopy's table was last written (#canopyTable). */
+    private boolean canopyStale = true;
+    private List<BoardScene.Tile> canopyTiles;
+    private boolean canopyPresent;
+    /** The standing trees' mean diameter, in world units (#canopyHexes): the size the tint's fade goes by. */
+    private float canopyDiameter;
+    /** Whether the mean tree is under the size trees draw at (TreeLod's last threshold, with its hysteresis). */
+    private boolean canopySmall;
+    /**
+     * The canopy's tint comes in as the mean tree nears the size below which trees draw nothing (TreeLod's last
+     * threshold): from this many times that size, and whole at it, so a tree dissolves over ground already tinted.
+     */
+    private static final float CANOPY_START = 2;
+
+    /**
+     * Whether this board's sculpted ground compiles the canopy's tint (GpuEnvironmentLighting.canopy): a hex has woods
+     * or jungle, or the editor may plant them. Asked every frame of a list that changes only with the scene.
+     */
+    private boolean canopyStage(BoardScene scene) {
+        if (editable) { return true; }
+        if (canopyTiles != scene.tiles()) {
+            canopyTiles = scene.tiles();
+            canopyPresent = false;
+            for (BoardScene.Tile tile : canopyTiles) {
+                if (tile.cover() != null && tile.cover().woods() > 0) {
+                    canopyPresent = true;
+                    break;
+                }
+            }
+        }
+        return canopyPresent;
+    }
+
+    /** The canopy's table after the trees changed, and its fade at this view's scale, for the frame's ground. */
+    private void canopyTable(Camera camera) {
+        if (!GpuEnvironmentLighting.required(environment).canopy) { return; }
+        if (canopyStale) {
+            lavaLighting.setCanopy(canopyHexes());
+            canopyStale = false;
+        }
+        float gone = TreeLod.pixels("")[TreeLod.IMPOSTOR];
+        float pixels = canopyDiameter * BoardCamera.pixelsPerUnit(camera);
+        lavaLighting.setCanopyFade(1 - MathUtils.clamp((pixels - gone) / (gone * (CANOPY_START - 1)), 0, 1));
+        // The trees' shadows go and come with them: a map kept across the zoom would leave them on the tinted ground.
+        boolean small = pixels < gone * (canopySmall ? 1 + TreeLod.HYSTERESIS : 1 - TreeLod.HYSTERESIS);
+        if (small != canopySmall) {
+            canopySmall = small;
+            refreshShadows();
+        }
+    }
+
+    /**
+     * The board's canopy by hex, four floats each in board order (x + y * width): the crowns' mean colour, linear, and
+     * the share of the hex they cover (GpuCanopy.Hex#write); zeros where no tree stands. Scatter plants have no
+     * impostor and are left out.
+     */
+    float[] canopyHexes() {
+        if (coverScene == null) { return new float[0]; }
+        int width = coverScene.width();
+        float[] result = new float[width * coverScene.height() * 4];
+        // A regular hexagon: three quarters of its bounding rectangle.
+        float hexArea = BoardGeometry.width() * BoardGeometry.height() * .75f;
+        double diameters = 0;
+        int trees = 0;
+        for (Chunk chunk : chunks) {
+            for (var entry : chunk.tileMeshes.entrySet()) {
+                var hex = new GpuCanopy.Hex();
+                for (Prop prop : entry.getValue().props) {
+                    if (prop.treeAsset == null || prop.scatter || !prop.standing()) { continue; }
+                    // The species' far level: its impostor's quad, whose atlas holds the frames (#foliage).
+                    TextureAttribute diffuse = null;
+                    for (Material material : assets.lodModel(prop.treeAsset, TreeLod.IMPOSTOR).materials) {
+                        if (material.id.equals("impostor")) {
+                            diffuse = (TextureAttribute) material.get(TextureAttribute.Diffuse);
+                        }
+                    }
+                    if (diffuse == null) { continue; }
+                    Texture atlas = (Texture) diffuse.textureDescription.texture;
+                    hex.add(canopy.species(prop.treeAsset, atlas), prop.treeDiameter);
+                    diameters += prop.treeDiameter;
+                    trees++;
+                }
+                hex.write(hexArea, result, (entry.getKey().getX() + entry.getKey().getY() * width) * 4);
+            }
+        }
+        canopyDiameter = trees == 0 ? 0 : (float) (diameters / trees);
+        return result;
+    }
+
     BoardPlants planted(Coords coords) {
         if (coverScene == null || coverScene.tile(coords) == null) { return null; }
         return chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).tileMeshes.get(coords).plants;
@@ -10538,6 +10641,7 @@ final class GpuTerrain implements Disposable {
             groundCover.prepare(coverScene, camera, grass && switches.get(BoardSwitch.MEADOW_SHARE) > 0, switches,
                   this::gatherGroundMap);
         }
+        canopyTable(camera);
         shadingPass++;
         updateDetail(camera);
         packLevels();
@@ -11418,8 +11522,9 @@ final class GpuTerrain implements Disposable {
             indirect.begin(indirectPass);
             indirect.begin(treePass);
             // A tree's shadow goes as the tree does: by its size on screen, one tree at a time, not by the map's texel.
+            // Under the size it draws at (TreeLod's last threshold) it casts none: the ground takes its crown's colour.
             indirect.minimum(treePass, shadows && shadowPixelsPerUnit > 0
-                  ? .5f * SHADOW_TREE_PIXELS / shadowPixelsPerUnit : 0);
+                  ? .5f * TreeLod.pixels("")[TreeLod.IMPOSTOR] / shadowPixelsPerUnit : 0);
             // Trees cast at the coarser of the levels their size on screen and in the map's texels take (TreeLod's
             // thresholds, by a chunk's largest tree): never finer than the view draws them, nor than the map resolves.
             // A whole board's map resolves finer than its pixels, and its trees cast by texels alone took ten times the
@@ -11494,8 +11599,6 @@ final class GpuTerrain implements Disposable {
         renderShadows(null, units);
     }
 
-    /** Trees and plants cast no shadow under this many scene pixels across, about where their stands stop drawing. */
-    private static final float SHADOW_TREE_PIXELS = 2.5f;
     /** The view's scene pixels a world unit at its focus, for the shadow pass (renderDepth); NaN without a view. */
     private float shadowPixelsPerUnit = Float.NaN;
 

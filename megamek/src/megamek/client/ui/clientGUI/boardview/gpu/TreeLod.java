@@ -4,12 +4,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 /**
  * Screen-pixel budgets for the shared orthographic board, independent of orbit and camera distance: the one rule every
  * board model takes its mesh level by ({@link #level(float[], float, int)}), with two sets of thresholds. Trees in a
- * stand have four levels by their own diameter: the near mesh, two simpler meshes and, below the last threshold, the
- * impostor; scatter plants have three meshes and below the last threshold none ({@link #SCATTER}). Every other prop
+ * stand have five levels by their own diameter: the near mesh, two simpler meshes, the impostor and, below the last
+ * threshold, none: the ground takes their crowns' colour there (GpuCanopy). Scatter plants have three meshes and below
+ * the last threshold none ({@link #SCATTER}). Every other prop
  * (buildings, scenery, placed objects) and the effect volumes have three by their larger side ({@link #prop}).
  */
 final class TreeLod {
-    private static final float[] PIXELS = { 80, 48, 24 };
+    private static final float[] PIXELS = { 80, 48, 24, 4 };
+    /** A tree's impostor: its last level that draws. */
+    static final int IMPOSTOR = 3;
     static final float[] PROPS = { 80, 24 };
     /**
      * A scatter plant's levels by its own diameter (scatter_lods.py keeps each far level's coverage at its threshold):

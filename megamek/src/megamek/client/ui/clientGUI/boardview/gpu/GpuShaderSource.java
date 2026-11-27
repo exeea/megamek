@@ -197,6 +197,8 @@ final class GpuShaderSource {
         functions += read("terrain-patterns.glsl");
         functions += read("water-optics.glsl");
         functions += read("terrain-hexes.glsl");
+        // Its own define keeps it out of programs without it (canopyFlag).
+        functions += read("terrain-canopy.glsl");
         // Fields' ground takes its crops' colours.
         if (source.contains("// sculpt-material-functions")) {
             functions += GpuBiomeVegetation.cropSource();

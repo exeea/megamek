@@ -72,8 +72,8 @@ class GpuShrubSmokeTest {
                             }
                         }
                         var atlases = new HashMap<String, Texture>();
-                        int[] triangles = new int[TreeLod.LEVELS];
-                        for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
+                        int[] triangles = new int[RigidGlb.LEVELS];
+                        for (int lod = 0; lod < RigidGlb.LEVELS; lod++) {
                             var model = assets.lodModel(name, lod);
                             for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                             for (var material : model.materials) {

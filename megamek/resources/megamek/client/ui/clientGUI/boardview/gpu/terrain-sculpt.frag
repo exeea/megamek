@@ -715,6 +715,14 @@ void main() {
 #endif
     }
 #endif
+#ifdef canopyFlag
+    // The forest from far above: where its trees are too small to draw, their crowns' colour in the ground
+    // (terrain-canopy.glsl; features').
+    if (ground && !shore && u_canopy.w > 0.0) {
+        vec4 canopy = canopyTint(world.xy);
+        albedo = mix(albedo, canopy.rgb, canopy.a * u_canopy.w);
+    }
+#endif
 #ifndef materialFillFlag
     if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {
         // Gusts roll across a meadow: the grass leans with them and catches the light differently.

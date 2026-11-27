@@ -111,7 +111,7 @@ class GpuVegetationLightingSmokeTest {
                         stand.add(species, new Matrix4().setToTranslation(root), 0);
                         for (boolean top : new boolean[] { true, false }) {
                             var camera = camera(top, root.cpy().add(0, 0, 15), .14f);
-                            for (int level = 0; level < TreeLod.LEVELS; level++) {
+                            for (int level = 0; level < RigidGlb.LEVELS; level++) {
                                 String name = species + "-lod" + level + (top ? "-top" : "-iso");
                                 fixture.lights.setFungus(List.of());
                                 fixture.lights.update(plain);
