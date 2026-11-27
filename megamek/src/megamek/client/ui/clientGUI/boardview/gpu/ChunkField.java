@@ -988,7 +988,8 @@ final class ChunkField {
                 first = FieldBoard.cornerShare(along, corners[0] != null);
                 second = FieldBoard.cornerShare(1 - along, corners[1] != null);
                 if (!Float.isNaN(quay)) {
-                    surface = Math.clamp(b.shore.water(quayHex, px, py), bottom, quay - QUAY_BACK * b.metre);
+                    float back = quay - QUAY_BACK * b.metre;
+                    surface = Math.clamp(b.shore.water(quayHex, px, py), Math.min(bottom, back), back);
                 }
             }
 
