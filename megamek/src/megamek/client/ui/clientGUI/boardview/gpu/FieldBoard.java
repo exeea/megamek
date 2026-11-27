@@ -703,6 +703,11 @@ final class FieldBoard {
         return Float.POSITIVE_INFINITY;
     }
 
+    /** Whether the step's upper hex ({@link #packed}) is a plate (FieldPlates). */
+    private boolean plateTop(int packed) {
+        return packed >= 0 && (walls[packed / 4096][packed % 4096] & PLATE) != 0;
+    }
+
     /** Whether the hex {@link #packed} gave is a stream hex with such a step. */
     private boolean streamTop(int packed) {
         return packed >= 0 && (walls[packed / 4096][packed % 4096] >>> STREAM & 63) != 0;
@@ -1656,6 +1661,8 @@ final class FieldBoard {
         // Per level set, the nearest bank onto ground that keeps its outline (Segment#plated).
         float[] platedTo = new float[span];
         Arrays.fill(platedTo, Float.POSITIVE_INFINITY);
+        // Per level set, whether its nearest cliff is a plate's cast wall (FieldPlates): poured, it keeps no apron.
+        boolean[] plateFoot = new boolean[span];
         for (int i = 0; i < d.length; i++) {
             Segment s = segments.get(i);
             for (int j = s.low() - lowest; j < s.high() - lowest; j++) {
@@ -1666,8 +1673,16 @@ final class FieldBoard {
                     if (s.plated()) { platedTo[j] = Math.min(platedTo[j], d[i]); }
                     if (s.joined()) { joinedTo[j] = Math.min(joinedTo[j], d[i]); }
                 }
-                else if (d[i] < cliffTo[j] - TIE) { cliffTo[j] = d[i]; drops[j] = Math.max(3, s.high() - s.low()); }
-                else if (d[i] <= cliffTo[j] + TIE) { cliffTo[j] = Math.min(cliffTo[j], d[i]); drops[j] = Math.max(drops[j], s.high() - s.low()); }
+                else if (d[i] < cliffTo[j] - TIE) {
+                    cliffTo[j] = d[i];
+                    drops[j] = Math.max(3, s.high() - s.low());
+                    plateFoot[j] = plateTop(s.top());
+                }
+                else if (d[i] <= cliffTo[j] + TIE) {
+                    cliffTo[j] = Math.min(cliffTo[j], d[i]);
+                    drops[j] = Math.max(drops[j], s.high() - s.low());
+                    plateFoot[j] &= plateTop(s.top());
+                }
             }
         }
         float wall = 0, sill = 0, shelf = 0, run = shore.run(), eased = 0;
@@ -1703,7 +1718,10 @@ final class FieldBoard {
                 // Today's apron (BoardRelief#transition): twice the room wide, steepest under the face.
                 // Level within a centimetre of the wall's row: the square root there turns a last-digit difference of a
                 // shared corner's place into a centimetre of height between two hexes.
-                float talus = in ? 0 : streamStep ? bankSlope(s, x, y)
+                // A plate's poured wall stands on the lower ground as today's paved wall does: no apron, no step's
+                // face.
+                boolean poured = plateFoot[k - lowest - 1];
+                float talus = in || poured ? 0 : streamStep ? bankSlope(s, x, y)
                       : s >= 2 * room ? 0 : a * (1 - (float) Math.sqrt(Math.max(0, s - .01f * metre) / (2 * room)));
                 // Beside a stream hex's step, under a wall that stands nearer: the bank's slope by its own distance to
                 // that step runs on under the wall (the higher of it and the wall's apron), so no scarp parts the two.
@@ -1717,7 +1735,9 @@ final class FieldBoard {
                     talus *= keep;
                 }
                 share = weight * (in ? 1 : talus);
-                step = !in && (s < (streamStep ? bankFoot(x, y, metre, room) : 2 * room) || streamD < bankFoot(x, y, metre, room));
+                step = !in && !poured
+                      && (s < (streamStep ? bankFoot(x, y, metre, room) : 2 * room)
+                            || streamD < bankFoot(x, y, metre, room));
             }
             // Shore and beds: where its foot stands in water a cliff carries no talus and its wall runs down to the
             // bed; a pool above a cliff keeps a sill along the rim (FieldShore#bed).

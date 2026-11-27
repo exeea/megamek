@@ -646,6 +646,17 @@ final class FieldShore {
         return false;
     }
 
+    /**
+     * The level of water hex g where a plate at {@code plateLevel} stands over it, Integer.MIN_VALUE elsewhere: water
+     * the operator does not shape walls its own side from that level down where a plate stands at or above it (today's
+     * quay, BoardRelief#wetCliff), so under that level the plate's cast wall stands back behind it (ChunkField#walls).
+     */
+    int quayLevel(Coords g, int plateLevel) {
+        BoardScene.Tile t = g.getX() < 0 || g.getY() < 0 || g.getX() >= cols || g.getY() >= rows ? null : scene.tile(g);
+        return t != null && t.liquid().present() && family(g) < 0 && t.groundLevel() <= plateLevel ? t.groundLevel()
+              : Integer.MIN_VALUE;
+    }
+
     /** Shaped water hex a's edges to unshaped water at its surface (#seams). */
     private float[] seamEdges(Coords a) {
         float[] edges = new float[0];

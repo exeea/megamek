@@ -677,7 +677,11 @@ final class ChunkField {
             /** The step's height for its landforms, and the lower hex's level (the board's floor at its cut). */
             final float landform, base, onx, ony;
             final int family;
-            /** The finest detail's rows: the first at the foot, the last at the rim, the others at their heights. */
+            /**
+             * The finest detail's rows: the first at the foot, the last at the rim, the others at their heights; a
+             * quay's (#quay): the foot, the water's surface and just under the quay's level stood back, the quay's
+             * level and the rim on the row (the step between them faces down, under the plate's top or its wall).
+             */
             final int rows;
             final int[] samples;
             final float[] tops, feet;
@@ -709,6 +713,12 @@ final class ChunkField {
             boolean fall;
             /** A natural span lands on this hex across the edge (FieldBoard#landing): its crest stands straight. */
             final boolean landing;
+            /**
+             * A plate's wall over water today's code draws (walls()): the quay's level, NaN for none; that water's hex
+             * and its surface at the current column. Under the quay's level the wall stands back (#point).
+             */
+            float quay = Float.NaN, surface;
+            Coords quayHex;
 
             Wall(int e, boolean outside, boolean wall, float landform, float base, float onx, float ony, int[] samples,
                   float[] tops, float[] feet, int rows, float[] footX, float[] footY) {
@@ -845,15 +855,23 @@ final class ChunkField {
                 }
                 first = 1 - BoardRelief.smooth(along / (corners[0] == null ? .15f : .3f));
                 second = 1 - BoardRelief.smooth((1 - along) / (corners[1] == null ? .15f : .3f));
+                if (!Float.isNaN(quay)) {
+                    surface = Math.clamp(b.shore.water(quayHex, px, py), bottom, quay - QUAY_BACK * b.metre);
+                }
             }
 
             /** Row r's height on the current column (r among the finest detail's rows). */
             float height(int r) {
+                if (!Float.isNaN(quay)) {
+                    return r == 0 ? bottom : r == 1 ? surface : r == 2 ? quay - QUAY_BACK * b.metre
+                          : r == 3 ? quay : top;
+                }
                 return r == 0 ? bottom : r == rows - 1 ? top : Math.clamp(base + r * b.levelZ / ROWS_A_LEVEL, bottom, top);
             }
 
             /** Row r's point on the current column (r among the finest detail's rows): x, y, z into out. */
             void point(int r, float[] out) {
+                boolean back = !Float.isNaN(quay) && r <= 2;
                 float zr = height(r);
                 // A row over the rim is the rim's.
                 if (zr >= top) { r = rows - 1; }
@@ -895,6 +913,10 @@ final class ChunkField {
                 b.portalFace(h, sx, sy, zr, out);
                 addCorner(corners[0], r, zr, first, out);
                 addCorner(corners[1], r, zr, second, out);
+                if (back) {
+                    out[0] -= onx * QUAY_BACK * b.metre;
+                    out[1] -= ony * QUAY_BACK * b.metre;
+                }
             }
 
             /**
@@ -913,6 +935,12 @@ final class ChunkField {
 
         /** How far under its rim an anchor's crest stands straight where a natural span lands, metres (Wall#point). */
         private static final float LANDING_CREST = 2;
+
+        /**
+         * How far a plate's wall stands back under a quay's level, and how far under it the stand-back starts, metres:
+         * behind today's quay wall there, which stands on the plate's outline (walls()), never in its plane.
+         */
+        private static final float QUAY_BACK = .02f;
 
         /** How far a fall's face stands behind its crest, metres. */
         private static final float FALL_RECESS = .8f;
@@ -1056,8 +1084,15 @@ final class ChunkField {
             // A cliff's rows, like today's, let the shader project the rock; a bank's strip and the board's cut keep a frame.
             float frame = wall ? Float.NaN : (float) Math.atan2(ony, onx);
             boolean full = chunk.lod == TerrainLod.FULL, medium = chunk.lod == TerrainLod.MEDIUM;
-            // The board's cut has two rows; a step has its levels' rows, every one, every second or one a level.
-            int finest = outside || cast ? 2 : ROWS_A_LEVEL * Math.max(1, own - b.level(g)) + 1;
+            // A plate over water the shore leaves to today's code: that hex walls its own side from its level down on
+            // the plate's outline (today's quay, FieldShore#quayLevel). Under that level the plate's wall stands back
+            // behind it, so the two never share a plane and the plate's still closes the edge where today's does not
+            // reach; a row at the water's surface keeps the wall's wet part under the water.
+            int quay = cast && other == null ? b.shore.quayLevel(g, own) : Integer.MIN_VALUE;
+            // The board's cut has two rows (a quay five); a step has its levels' rows, every one, every second or one a
+            // level.
+            int finest = outside || cast ? quay != Integer.MIN_VALUE ? 5 : 2
+                  : ROWS_A_LEVEL * Math.max(1, own - b.level(g)) + 1;
             int stride = outside || cast || full ? 1 : medium ? 2 : ROWS_A_LEVEL;
             // Columns between the lattice samples too (today's walls are finer than the ground).
             int split = outside || cast ? 1 : full || medium ? 3 : 1;
@@ -1103,6 +1138,10 @@ final class ChunkField {
             Wall w = new Wall(e, outside || cast, wall, landform, otherZ, onx, ony, samples, tops, feet, finest, footX,
                   footY);
             w.wet = other != null && b.shore.family(g) >= 0;
+            if (quay != Integer.MIN_VALUE) {
+                w.quay = quay * b.levelZ;
+                w.quayHex = g;
+            }
             w.fall = !outside && b.falls(h, g);
             int[][] columns = new int[n * split + 1][];
             // Where the relief moves a wall's rim off the row, a level strip joins it to the row's own sample: the
@@ -1137,7 +1176,11 @@ final class ChunkField {
                     for (int i = 0; i < rows.length; i++) {
                         // Rows under the foot or over the rim stand on its sample.
                         float zr = i == 0 || i == rows.length - 1 ? Float.NaN : w.height(i * stride);
-                        if (zr <= bottom || zr >= top) { rows[i] = zr <= bottom ? rows[0] : -1; continue; }
+                        // A quay's rows each stand on their own (Wall#rows), the stood-back one at the rim too.
+                        if (Float.isNaN(w.quay) && (zr <= bottom || zr >= top)) {
+                            rows[i] = zr <= bottom ? rows[0] : -1;
+                            continue;
+                        }
                         w.point(i * stride, out);
                         zr = out[2];
                         int p = addSample(out[0], out[1], zr, onx, ony, (zr - otherZ) / m, (top - zr) / m, frame);
