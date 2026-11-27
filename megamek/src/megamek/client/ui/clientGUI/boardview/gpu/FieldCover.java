@@ -63,14 +63,15 @@ final class FieldCover {
 
     /**
      * The covers of the hex at {@code hex}; null where it has no border (its one cover is its family) and stands below no
-     * neighbour of another family (whose cliff could shed scree on it), and for lava and ice, which draw their own. A
-     * water hex's ground is evaluated as land's is: today's evaluator gives its banks the cover of the higher land they
-     * belong to (Sampler#sampleWater), its bed its bed's; where all of it comes out its own cover it stays plain.
+     * neighbour of another family (whose cliff could shed scree on it), and for ice, which draws its own. A water
+     * hex's ground, molten rock's too, is evaluated as land's is: today's evaluator gives its banks the cover of the
+     * higher land they belong to (Sampler#sampleWater), its bed its bed's; where all of it comes out its own cover it
+     * stays plain.
      */
     static FieldCover of(BoardScene scene, Coords hex) {
         BoardScene.Tile tile = scene.tile(hex);
         if (tile.liquid().present()) {
-            return tile.liquid().volcanic() || tile.frozen() ? null : new FieldCover(scene, tile, false);
+            return tile.frozen() ? null : new FieldCover(scene, tile, false);
         }
         boolean border = BoardSurfaceBlend.boundary(scene, tile);
         return border || belowOther(scene, tile) ? new FieldCover(scene, tile, border) : null;
