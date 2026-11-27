@@ -21,10 +21,11 @@ final class WaterLayer {
 
     /**
      * The plane of water hex h as triangles, x and y per corner, counter-clockwise: the hex as a fan round its centre
-     * to its moved outline, and of every land neighbour the margin along the shared edge. At a corner whose other two hexes are land, or
-     * land and water the field does not take, it also has the land's margin along the edge between those two, up to
-     * the edge's middle; where both of a corner's other hexes are land, each gives its half. Points along an edge two
-     * planes share are placed alike from either side ({@link #along}).
+     * to its moved outline, and of every land neighbour the margin along the shared edge. At a corner whose other two
+     * hexes are land it also has the land's margin along the edge between those two, up to the edge's middle (not along
+     * an edge to water the field does not take: that water's own surface lies there); where both of a corner's other
+     * hexes are land, each gives its half. Points along an edge two planes share are placed alike from either side
+     * ({@link #along}).
      */
     static float[] plane(FieldBoard board, Coords h) {
         int n = FieldBoard.FULL;
@@ -56,13 +57,22 @@ final class WaterLayer {
                 at = triangle(out, at, q[0], q[1], rx, ry, sx, sy);
             }
             // Corner e, shared with the hexes across the edge before and across this one.
-            if (land && !water(board, before)) { at = corner(out, at, board, next, before, mx, my); }
-            if (bank(board, h, before) && !water(board, next)) { at = corner(out, at, board, before, next, mx, my); }
+            if (land && !water(board, before) && !open(board, before)) {
+                at = corner(out, at, board, next, before, mx, my);
+            }
+            if (bank(board, h, before) && !water(board, next) && !open(board, next)) {
+                at = corner(out, at, board, before, next, mx, my);
+            }
         }
         return java.util.Arrays.copyOf(out, at);
     }
 
     static boolean water(FieldBoard board, Coords c) { return board.taken(c) && board.shore.family(c) >= 0; }
+
+    /** Whether c holds water the field does not take: today's code draws it with its own surface, up to its banks. */
+    private static boolean open(FieldBoard board, Coords c) {
+        return board.inside(c) && !board.shore.land(c) && !water(board, c);
+    }
 
     /**
      * How far the ground of land hex {@code land}, {@code z} high at (x, y), may lie below its height (the bed the shore
@@ -97,6 +107,7 @@ final class WaterLayer {
             float inner = BoardRelief.smooth((MARGIN - w) / ease);
             Coords next = land.translated(BoardGeometry.edgeDirection(e));
             if (water(board, next)) { return bank(board, next, land) ? inner : 0; }
+            if (open(board, next)) { return 0; }
             // A corner's piece: from the corner this point is nearer to, up to the edge's middle.
             Coords other = land.translated(BoardGeometry.edgeDirection(v >= u ? e + 5 : e + 1));
             return water(board, other) && bank(board, other, land) ? inner * BoardRelief.smooth(Math.abs(v - u) / ease) : 0;
