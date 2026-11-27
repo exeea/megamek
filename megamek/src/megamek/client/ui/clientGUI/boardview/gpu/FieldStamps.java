@@ -253,16 +253,19 @@ final class FieldStamps {
         out[4] = v;
     }
 
+    /** Over how many tile pixels before the shell's side the pull onto the roof's slope eases out (#pull). */
+    private static final float PULL_EASE = 6;
+
     /** How far (world units) (x, y, z) stands behind a mouth's scree slope, eased out at the shell's sides; else 0. */
     private static float pull(float[] f, float x, float y, float z) {
         float scale = f[6], dx = (x - f[0]) / scale, dy = (y - f[1]) / scale, lz = (z - f[2]) / scale;
         float lx = (dx * f[4] - dy * f[3]) / f[5], ly = dx * f[3] + dy * f[4];
-        if (lz < BoardTunnel.ROOF || ly > BoardTunnel.DEPTH || ly < BoardTunnel.HEADWALL_BACK) { return 0; }
-        float side = Math.max(0, Math.abs(lx) - CAP_HALF);
-        float slope = BoardTunnel.HEADWALL_BACK + (lz - BoardTunnel.HEADWALL) * REPOSE + side;
-        if (Math.abs(lx) > BoardTunnel.SHELL_HALF) { return 0; }
-        slope = Math.max(slope, BoardTunnel.HEADWALL_BACK);
-        return Math.max(0, ly - slope) * scale;
+        float side = BoardTunnel.SHELL_HALF - Math.abs(lx);
+        if (lz < BoardTunnel.ROOF || ly > BoardTunnel.DEPTH || ly < BoardTunnel.HEADWALL_BACK || side <= 0) {
+            return 0;
+        }
+        float slope = BoardTunnel.HEADWALL_BACK + Math.max(0, (lz - BoardTunnel.HEADWALL) * REPOSE);
+        return Math.max(0, ly - slope) * scale * BoardRelief.smooth(side / PULL_EASE);
     }
 
     /**
