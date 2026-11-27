@@ -563,8 +563,6 @@ final class FieldStamps {
         return planes;
     }
 
-    /** The scree's slope behind the headwall: its height over the opening at a depth (tile pixels), as #pull lays it. */
-    static float slope(float ly) { return BoardTunnel.HEADWALL + (ly - BoardTunnel.HEADWALL_BACK) / REPOSE; }
 
     /**
      * The headwall's cap's half width (mm-data road_tunnel.py); how steeply the scree falls where it ends over ground

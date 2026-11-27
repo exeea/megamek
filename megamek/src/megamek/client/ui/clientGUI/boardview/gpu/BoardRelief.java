@@ -4213,26 +4213,13 @@ final class BoardRelief {
     }
 
     /** The scree's rocks per tunnel: along the cap's back, under the cliff, stones, blocks at the toe (#screeRocks). */
-    private static final int CAP_ROCKS = 7, CLIFF_ROCKS = 10, SCREE_STONES = 16, TOE_BLOCKS = 3;
-
-    /**
-     * Whether a point of a mouth's frame (tile pixels) lies on the slope over its roof with {@code clear} pixels of it
-     * behind: the cliff's wall, pulled onto the slope (FieldStamps#mound), stood where the entered hex's top begins.
-     */
-    private boolean onSlope(float[] f, float lx, float ly, float clear) {
-        float scale = f[6];
-        for (float back = ly; back <= ly + clear; back += .5f) {
-            float dx = lx * f[5] * f[4] + back * f[3], dy = -lx * f[5] * f[3] + back * f[4];
-            if (!Float.isNaN(fieldGround.height(f[0] + dx * scale, f[1] + dy * scale))) { return false; }
-        }
-        return true;
-    }
+    private static final int CLIFF_ROCKS = 10, SCREE_STONES = 16, TOE_BLOCKS = 3;
 
     /**
      * Rocks on the scree a ground tunnel's mouth is set in (FieldStamps#scree), from each tunnel's own seed, each placed
-     * by the hex its base falls in: boulders along the headwall cap's back edge and under the cliff beside the portal,
-     * stones over the scree, a few large blocks at its toe; never on the unit anchor, and BoardTunnel#obstructs and
-     * #place keep them off the shell, wings, approach and roads.
+     * by the hex its base falls in: boulders under the cliff beside the portal, stones over the scree, a few large
+     * blocks at its toe; none on the roof over the head, as today; never on the unit anchor, and BoardTunnel#obstructs
+     * and #place keep them off the shell, wings, approach and roads.
      */
     private void screeRocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         if (!detail.formations() || fieldGround == null) { return; }
@@ -4244,25 +4231,19 @@ final class BoardRelief {
             BoardScene.Surface family = scene.tile(tunnel.road().translated(tunnel.direction())).surface();
             BoardTunnel.Wings wings = tunnel.wings();
             Random random = new Random(tunnel.road().hashCode() * 1_000_003L + tunnel.direction() * 7919L + 17);
-            for (int i = 0; i < CAP_ROCKS + CLIFF_ROCKS + SCREE_STONES + TOE_BLOCKS; i++) {
+            for (int i = 0; i < CLIFF_ROCKS + SCREE_STONES + TOE_BLOCKS; i++) {
                 // Every draw first: each hex walks the same rocks and places only its own.
                 float a = random.nextFloat(), b = random.nextFloat(), c = random.nextFloat(), side = random.nextBoolean() ? 1 : -1;
                 float across = .6f + .4f * random.nextFloat(), tall = .45f + .45f * random.nextFloat();
                 float turn = (float) (random.nextFloat() * Math.PI * 2);
                 int variant = random.nextInt(64);
                 float lx, ly, size;
-                boolean cap = i < CAP_ROCKS;
-                if (cap) {
-                    // Against the cap's back, a radius behind the headwall, on the slope over the roof.
-                    size = m * (1.2f + 1.6f * c);
-                    lx = (2 * a - 1) * (BoardTunnel.SHELL_HALF - 3);
-                    ly = BoardTunnel.HEADWALL_BACK + size * .6f / scale + .3f + 1.5f * b;
-                } else if (i < CAP_ROCKS + CLIFF_ROCKS) {
+                if (i < CLIFF_ROCKS) {
                     // Under the cliff, beside the headwall.
                     lx = side * (BoardTunnel.SHELL_HALF + 1.5f + 16 * a);
                     ly = -3 + 6 * b;
                     size = m * (1.4f + 2f * c * c);
-                } else if (i < CAP_ROCKS + CLIFF_ROCKS + SCREE_STONES) {
+                } else if (i < CLIFF_ROCKS + SCREE_STONES) {
                     // Over the scree outside the wings.
                     ly = -wings.length() * a;
                     lx = side * (wings.outer(-ly) + 1.5f + 20 * b);
@@ -4275,17 +4256,15 @@ final class BoardRelief {
                 }
                 float dx = lx * f[5] * f[4] + ly * f[3], dy = -lx * f[5] * f[3] + ly * f[4];
                 float x = f[0] + dx * scale, y = f[1] + dy * scale;
-                // The hex whose ground holds the rock places it: the slope over the roof is the entered hex's (its walls,
-                // pulled forward), the scree in front of the face whichever hex's ground it is.
+                // The hex whose ground holds the rock places it, on the scree in front of the face.
                 float ground = fieldGround.height(x, y), scree = FieldStamps.scree(f, x, y);
-                if (cap ? !tile.coords().equals(tunnel.road().translated(tunnel.direction())) : Float.isNaN(ground)) { continue; }
+                if (Float.isNaN(ground) || !(scree >= ground - m * .2f)) { continue; }
                 if (Math.hypot(x - anchor.x, y - anchor.y) - size < BoardGeometry.width() * .2f) { continue; }
-                float z = cap ? Math.min(f[2] + FieldStamps.slope(ly) * scale, f[7]) : ground;
-                if (!cap && !(scree >= ground - m * .2f) || cap && !onSlope(f, lx, ly, size * .5f / scale)) { continue; }
                 BoardShape rock = BoardRocks.rock(family, variant, detail);
                 float height = size * tall;
                 int placed = destination.size();
-                place(destination, rock, new Vector3(x, y, z - height * .3f), turn, size, size * across, height / rock.height(),
+                place(destination, rock, new Vector3(x, y, ground - height * .3f), turn, size, size * across,
+                      height / rock.height(),
                       Kind.ROCK, -1, false);
                 shed(destination, placed, family);
             }
