@@ -380,6 +380,12 @@ void main() {
     // descending decks keep the same fade. The material's own height breaks the margin without extra reads.
     float deckMud = ground && !shore && kind > .05 ? 1.0
           : mudShell ? 1.0 - smoothstep(.35, mix(1.3, 2.9, .35 * broad + .65 * fine), v_color.r * 8.0) : 0.0;
+#if defined(GROUND_FACE_SLOPE) && defined(fieldMorphFlag) && defined(lightingFlag)
+    // A field step face has no frame of its own (a cut wall's is its panel's): it takes its side planes from its own
+    // facing (terrain-materials.glsl), so the material's grain runs straight down it. The two fixed planes sheared it
+    // across a lattice face, which strikes 30 or 60 degrees off them.
+    terrainFaceFrames = (ground || (cliff && !panel)) && geometric.z < .6;
+#endif
     MaterialProjection rockProjection = materialProjection(world, face);
 #if defined(biomeMaskFlag) && !defined(materialCachedFlag) && !defined(materialFillFlag) && !defined(volcanicFlag)
     if ((ground || cliff || bedrock) && !family(4.0) && !(shore && above <= -1.1)) {

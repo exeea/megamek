@@ -93,24 +93,43 @@ struct MaterialProjection {
     mat2 topGradient, xGradient, yGradient;
     float side, lying;
     vec2 facing; // the side projections' signs along X and Y
+    // The sides' horizontal normals, x's then y's: (facing.x, 0) and (0, facing.y), or a step face's own two
+    // (terrainFaceFrames). A side's U axis is its normal turned a quarter left.
+    vec4 frames;
     float topTexels; // the top projection's texels a pixel at a one-unit repeat (enlargedShare)
 };
 
 // Cut walls keep one texture frame across their facets; zero leaves natural landforms unchanged.
 vec3 terrainWallProjection = vec3(0.0);
+// A step face without a frame of its own (a field bank's), set by the includer: its two side planes are the directions
+// a twelfth of a turn apart that its horizontal normal lies between, so a straight face reads along its own strike and
+// the material's grain runs straight down it. False: the two fixed planes.
+bool terrainFaceFrames = false;
 
 MaterialProjection materialProjection(vec3 world, vec3 face) {
     vec3 basis = dot(terrainWallProjection, terrainWallProjection) > .5 ? terrainWallProjection : face;
     MaterialProjection p;
     p.top = vec2(world.x, -world.y);
-    p.x = vec2(world.y * sign(basis.x), -world.z);
-    p.y = vec2(-world.x * sign(basis.y), -world.z);
+    vec2 frameX = vec2(sign(basis.x), 0.0), frameY = vec2(0.0, sign(basis.y));
+    float turned = -1.0;
+    if (terrainFaceFrames && dot(face.xy, face.xy) > 1e-6) {
+        float turn = atan(face.y, face.x) / .5235988, first = floor(turn);
+        frameX = vec2(cos(first * .5235988), sin(first * .5235988));
+        frameY = vec2(cos((first + 1.0) * .5235988), sin((first + 1.0) * .5235988));
+        turned = turn - first;
+    }
+    p.frames = vec4(frameX, frameY);
+    vec2 strikeX = vec2(-frameX.y, frameX.x), strikeY = vec2(-frameY.y, frameY.x);
+    p.x = vec2(dot(world.xy, strikeX), -world.z);
+    p.y = vec2(dot(world.xy, strikeY), -world.z);
     p.topGradient = mat2(dFdx(p.top), dFdy(p.top));
     p.topTexels = max(length(p.topGradient[0]), length(p.topGradient[1])) * float(textureSize(u_terrainLayers, 0).x);
-    p.xGradient = mat2(dFdx(p.x), dFdy(p.x));
-    p.yGradient = mat2(dFdx(p.y), dFdy(p.y));
+    // From the position's own derivatives: a face's frames turn with it, which a derivative of p.x would take in.
+    vec3 worldDx = dFdx(world), worldDy = dFdy(world);
+    p.xGradient = mat2(vec2(dot(worldDx.xy, strikeX), -worldDx.z), vec2(dot(worldDy.xy, strikeX), -worldDy.z));
+    p.yGradient = mat2(vec2(dot(worldDx.xy, strikeY), -worldDx.z), vec2(dot(worldDy.xy, strikeY), -worldDy.z));
     vec2 axes = pow(abs(basis.xy), vec2(4.0));
-    p.side = axes.x / max(axes.x + axes.y, .00001);
+    p.side = turned >= 0.0 ? 1.0 - turned : axes.x / max(axes.x + axes.y, .00001);
     p.lying = smoothstep(.25, .87, basis.z);
     p.facing = sign(basis.xy);
     return p;

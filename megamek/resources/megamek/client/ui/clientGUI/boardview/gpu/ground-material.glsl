@@ -58,6 +58,7 @@ struct GroundPixel {
     float topTexels;         // the top projection's texels a pixel at a one-metre repeat (MaterialProjection)
     float side;              // the share of the x side's projection (MaterialProjection.side)
     vec2 facing;             // the side projections' signs along X and Y
+    vec4 frames;             // the sides' horizontal normals, x's then y's (MaterialProjection.frames)
     float aboveFoot, belowRim; // metres
     float rock;              // 0 an earth bank .. 1 a rock cliff
     float hardness;          // bed hardness (walls), .5 on ground
@@ -202,6 +203,14 @@ float groundWallHeight(vec2 uv, mat2 gradient, float layer, float variation, boo
 #endif
 }
 
+// A side's normal from its map's detail: the detail's U along the side's strike (its frame turned a quarter left), its
+// relief on the face's share along the side's own normal.
+vec3 groundSideNormal(vec3 detail, vec3 face, vec2 frame) {
+    vec2 strike = vec2(-frame.y, frame.x);
+    return normalize(vec3(detail.z * dot(face.xy, frame) * frame + (dot(face.xy, strike) + detail.x) * strike,
+          face.z - detail.y));
+}
+
 // One role's colour/height and normal/AO, cavity in data.a. Tops read the plane. Step faces read the side they face,
 // both sides only where the face turns between them, and the plane too where they lie back; between a top and a face
 // (role between 0 and 1) both. A top takes the old path's second read (topCoordinates): a second, enlarged and turned
@@ -254,7 +263,7 @@ void groundRead(GroundPixel px, float layer, float tile, float variation, bool t
             vec3 detail = d.rgb * 2.0 - 1.0;
             float w = weight * side;
             colour += c * w;
-            n += normalize(vec3(detail.z * px.face.x, detail.x * px.facing.x + px.face.y, px.face.z - detail.y)) * w;
+            n += groundSideNormal(detail, px.face, px.frames.xy) * w;
             cavity += d.a * w;
             spread += s * w * w;
         }
@@ -266,7 +275,7 @@ void groundRead(GroundPixel px, float layer, float tile, float variation, bool t
             vec3 detail = d.rgb * 2.0 - 1.0;
             float w = weight * (1.0 - side);
             colour += c * w;
-            n += normalize(vec3(-detail.x * px.facing.y + px.face.x, detail.z * px.face.y, px.face.z - detail.y)) * w;
+            n += groundSideNormal(detail, px.face, px.frames.zw) * w;
             cavity += d.a * w;
             spread += s * w * w;
         }
@@ -288,8 +297,11 @@ GroundPixel groundRelieved(GroundPixel px, float layer, float tile, float variat
     float wx = (1.0 - lying) * side, wy = (1.0 - lying) * (1.0 - side);
     vec2 top = vec2(0.0), x = vec2(0.0), y = vec2(0.0);
     if (lying > 0.0) top = planeReach(layer, tile, vec2(terrainView.x, -terrainView.y), px.topGradient);
-    if (wx > 0.0) x = planeReach(layer, tile, vec2(terrainView.y * px.facing.x, -terrainView.z), px.xGradient);
-    if (wy > 0.0) y = planeReach(layer, tile, vec2(-terrainView.x * px.facing.y, -terrainView.z), px.yGradient);
+    // The view along each side's U axis: its strike.
+    vec2 viewU = vec2(dot(terrainView.xy, vec2(-px.frames.y, px.frames.x)),
+          dot(terrainView.xy, vec2(-px.frames.w, px.frames.z)));
+    if (wx > 0.0) x = planeReach(layer, tile, vec2(viewU.x, -terrainView.z), px.xGradient);
+    if (wy > 0.0) y = planeReach(layer, tile, vec2(viewU.y, -terrainView.z), px.yGradient);
     if (dot(top, top) + dot(x, x) + dot(y, y) <= 0.0) return px;
     float height = 0.0;
     if (lying > 0.0) {
@@ -636,7 +648,8 @@ GroundPixel groundPixel(MaterialProjection projection, vec3 world, vec3 face, fl
     px.y = projection.y; px.topGradient = projection.topGradient;
     px.xGradient = projection.xGradient; px.yGradient = projection.yGradient;
     px.topTexels = projection.topTexels;
-    px.side = projection.side; px.facing = projection.facing; px.aboveFoot = foot; px.belowRim = rim;
+    px.side = projection.side; px.facing = projection.facing; px.frames = projection.frames;
+    px.aboveFoot = foot; px.belowRim = rim;
     px.rock = rock; px.hardness = bed; px.sediment = sediment; px.shallowSediment = shallowSediment;
     px.riverBank = riverBank; px.role = rocky ? 1.0 : 0.0; px.covered = terrainCovered;
     px.levelMetres = u_levelHeight / u_metre; px.pixelMetres = pixelMetres; px.normalMaps = u_normalMaps > .5;
