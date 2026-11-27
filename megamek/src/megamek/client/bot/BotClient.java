@@ -38,16 +38,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.Vector;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
@@ -78,6 +69,7 @@ import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;
 import megamek.common.enums.GamePhase;
+import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.AmmoType.AmmoTypeEnum;
 import megamek.common.equipment.AmmoType.Munitions;
@@ -97,6 +89,7 @@ import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.game.Game;
 import megamek.common.game.InitiativeRoll;
 import megamek.common.moves.MovePath;
+import megamek.common.moves.MoveStep;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
 import megamek.common.pathfinder.BoardClusterTracker;
@@ -221,7 +214,68 @@ public abstract class BotClient extends Client {
     public void moveEntity(int id, MovePath md) {
         lastMovedEntityId = id;
         lastMovedTurnIndex = game.getTurnIndex();
+        recordWalkOnDeployment(id, md);
         super.moveEntity(id, md);
+    }
+
+    /**
+     * Records a move that deploys its unit, the same as a deployment sent in the deployment phase, so a walk-on the
+     * server refuses is tried again on another hex. A move without a {@code DEPLOY} step is not recorded.
+     *
+     * @param entityId the ID of the unit being moved
+     * @param movePath the path about to be sent; may be {@code null}
+     */
+    private void recordWalkOnDeployment(int entityId, @Nullable MovePath movePath) {
+        if (movePath == null) {
+            return;
+        }
+        for (MoveStep step : movePath.getStepVector()) {
+            if ((step.getType() == MoveStepType.DEPLOY) && (step.getPosition() != null)) {
+                refusedDeploymentTracker.recordSentDeployment(entityId, step.getPosition(), step.getBoardId(),
+                      game.getTurnIndex());
+                return;
+            }
+        }
+    }
+
+    /** The deployment this bot last sent and the hexes the server has refused this phase. */
+    private final RefusedDeploymentTracker refusedDeploymentTracker = new RefusedDeploymentTracker();
+
+    @Override
+    public void deploy(int id, Coords coords, int boardId, int nFacing, int elevation, List<Entity> loadedUnits,
+          boolean assaultDrop) {
+        refusedDeploymentTracker.recordSentDeployment(id, coords, boardId, game.getTurnIndex());
+        super.deploy(id, coords, boardId, nFacing, elevation, loadedUnits, assaultDrop);
+    }
+
+    /**
+     * Whether a turn-change event is the server handing back a turn because it refused this bot's deployment. The
+     * server resends the same turn index, naming this bot as the previous player. A unit the server did deploy is
+     * never a refusal, whatever the event looks like.
+     *
+     * @param turnIndex         the turn index of the event
+     * @param previousPlayerId  the previous player id the event carries
+     * @param simultaneousPhase whether the current phase is simultaneous, where duplicate events are normal
+     *
+     * @return {@code true} when the bot should deploy the refused unit again on another hex
+     */
+    boolean isRefusedDeploymentRestart(int turnIndex, int previousPlayerId, boolean simultaneousPhase) {
+        boolean isSameTurnHandedBack = (turnIndex == lastCalculatedTurnIndex)
+              && !simultaneousPhase
+              && (previousPlayerId == localPlayerNumber);
+        if (!isSameTurnHandedBack || !refusedDeploymentTracker.isRetryableRefusal(turnIndex)) {
+            return false;
+        }
+        Entity sentUnit = game.getEntity(refusedDeploymentTracker.getLastSentEntityId());
+        return (sentUnit != null) && !sentUnit.isDeployed();
+    }
+
+    /**
+     * Rules out the refused hex and clears the turn dedupe, so the next spawn check calculates this turn again.
+     */
+    void startRefusedDeploymentOver() {
+        refusedDeploymentTracker.markLastDeploymentRefused(getName());
+        lastCalculatedTurnIndex = -1;
     }
 
     // Let bots remember whether they've rerolled an initiative roll this round
@@ -300,9 +354,14 @@ public abstract class BotClient extends Client {
                 // verbatim by this very log line ("myTurn true ... -> skipping") after ~50 corrupted
                 // benchmark games. A turn the server says is ours is ours.
                 boolean myTurn = isMyTurn();
-                // The one exception: the server refused our move and handed the same turn back
-                if (myTurn && isRefusedTurnRestart(game.getTurnIndex(), e.getPreviousPlayerId(),
-                      getGame().getPhase().isSimultaneous(getGame()))) {
+                // The one exception: the server refused our move and handed the same turn back. A walk-on is both a
+                // move and a deployment; it is tried on other hexes first and only left out once those run out
+                boolean isSimultaneous = getGame().getPhase().isSimultaneous(getGame());
+                if (myTurn && isRefusedDeploymentRestart(game.getTurnIndex(), e.getPreviousPlayerId(),
+                      isSimultaneous)) {
+                    startRefusedDeploymentOver();
+                } else if (myTurn && isRefusedTurnRestart(game.getTurnIndex(), e.getPreviousPlayerId(),
+                      isSimultaneous)) {
                     startRefusedTurnOver();
                 }
                 boolean alreadySpawnedForThisTurn = (game.getTurnIndex() == lastCalculatedTurnIndex);
@@ -347,6 +406,7 @@ public abstract class BotClient extends Client {
                 refusedEntityIds.clear();
                 lastMovedEntityId = Entity.NONE;
                 lastMovedTurnIndex = -1;
+                refusedDeploymentTracker.reset();
                 rerolledInitiative = false;
                 if (!getGame().getPhase().isLounge()) {
                     requestedTrains.clear();
@@ -999,6 +1059,10 @@ public abstract class BotClient extends Client {
                     }
                 }
                 onMovePathChosen(mp);
+                if ((mp == null) && lastAttempt && (moverId == -1) && isMyTurn()) {
+                    // The bot found no unit to move, but the server is waiting on one; spend the turn on that one
+                    moverId = game.getFirstEntityNum(getMyTurn());
+                }
                 // MP can be null due to various factors in pathing.  Avoid derailing the bot if so.
                 if (mp != null) {
                     moveEntity(mp.getEntity().getId(), mp);
@@ -1064,6 +1128,19 @@ public abstract class BotClient extends Client {
      *       those flying above it.
      */
     public double getMassOfAllInBuilding(final Game game, final Coords coords, int boardId) {
+        return getMassOfAllInBuilding(game, coords, boardId, null);
+    }
+
+    /**
+     * @param countedUnit a unit the caller has already weighed, such as the unit moving, so its weight is not added a
+     *                    second time; {@code null} counts everyone
+     *
+     * @return The total weight of all units other than {@code countedUnit} in or on the building or bridge (but not
+     *       fuel tank) at the given map location. If the given position doesn't exist, returns 0. Only units weighing
+     *       on the building count, not those flying above it.
+     */
+    public double getMassOfAllInBuilding(final Game game, final Coords coords, int boardId,
+          @Nullable Entity countedUnit) {
         double mass = 0;
 
         // Add the mass of anyone else standing in/on this building.
@@ -1072,6 +1149,9 @@ public abstract class BotClient extends Client {
             int buildingElevation = hex.terrainLevel(Terrains.BLDG_ELEV);
             int bridgeElevation = hex.terrainLevel(Terrains.BRIDGE_ELEV);
             for (Entity unit : game.getEntitiesVector(coords, boardId)) {
+                if ((countedUnit != null) && (unit.getId() == countedUnit.getId())) {
+                    continue;
+                }
                 //FIXME: This looks like a unit standing under a bridge would be inlcuded in the weight
                 if (buildingElevation >= unit.getElevation() || bridgeElevation >= unit.getElevation()) {
                     mass += unit.getWeight();
@@ -1089,16 +1169,13 @@ public abstract class BotClient extends Client {
     protected @Nullable Coords getFirstValidCoords(Entity deployedUnit, List<Coords> possibleDeployCoords) {
         // Check all of the hexes in order.
         for (Coords dest : possibleDeployCoords) {
-            Entity violation = Compute.stackingViolation(game,
-                  deployedUnit,
-                  dest,
-                  deployedUnit.getElevation(),
-                  dest,
-                  null,
-                  deployedUnit.climbMode(),
-                  true);
             // Ignore coords that could cause a stacking violation
-            if (violation != null) {
+            if (isBlockedByKnownUnit(deployedUnit, dest)) {
+                continue;
+            }
+
+            // Ignore coords the server already refused this phase, such as a hex holding an enemy we cannot see
+            if (refusedDeploymentTracker.isRefusedLocation(dest, deployedUnit.getBoardId())) {
                 continue;
             }
 
@@ -1116,6 +1193,39 @@ public abstract class BotClient extends Client {
 
         // If NONE of them are acceptable, then just return null.
         return null;
+    }
+
+    /**
+     * Whether a unit this bot knows about stops the given unit deploying to a hex. The bot's own hidden units and
+     * those of its allies count, as the server refuses to stack on them. A hidden enemy does not: the bot has not
+     * found it, so it must not steer around it.
+     *
+     * @param deployedUnit the unit being deployed
+     * @param dest         the hex to check
+     *
+     * @return {@code true} if deploying there would break stacking with a unit the bot is allowed to know about
+     */
+    boolean isBlockedByKnownUnit(Entity deployedUnit, Coords dest) {
+        Entity blocker = findDeploymentStackingViolation(deployedUnit, dest, false);
+        if (blocker == null) {
+            return false;
+        }
+        boolean isUndiscoveredEnemy = blocker.isHidden() && blocker.isEnemyOf(deployedUnit);
+        if (isUndiscoveredEnemy) {
+            return findDeploymentStackingViolation(deployedUnit, dest, true) != null;
+        }
+        return true;
+    }
+
+    private @Nullable Entity findDeploymentStackingViolation(Entity deployedUnit, Coords dest, boolean ignoreHidden) {
+        return Compute.stackingViolation(game,
+              deployedUnit,
+              dest,
+              deployedUnit.getElevation(),
+              dest,
+              null,
+              deployedUnit.climbMode(),
+              ignoreHidden);
     }
 
     /**

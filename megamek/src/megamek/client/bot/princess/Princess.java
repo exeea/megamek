@@ -95,6 +95,7 @@ import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.event.GameCFREvent;
 import megamek.common.event.player.GamePlayerChatEvent;
 import megamek.common.game.BotHonorReport;
+import megamek.common.game.BotStatus;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.game.IGame;
@@ -1421,6 +1422,10 @@ public class Princess extends BotClient {
             if (!validCoords.isEmpty()) {
                 return validCoords.getFirst();
             }
+            // Core Rules p.137: an emplacement Asset needs no building
+            if (Game.rulesManager.getRulesGame().deploysEmplacementsAsAssets()) {
+                return rankDeploymentCoords(deployedUnit, possibleDeployCoords);
+            }
 
             return null;
         } else if (EmplacementDeployment.isGunEmplacementBuilding(deployedUnit)) {
@@ -1458,8 +1463,8 @@ public class Princess extends BotClient {
     }
 
     /**
-     * Picks the hex for a TO:AR gun emplacement: dry ground, spaced from the other emplacements, with the widest field
-     * of fire. See {@link EmplacementDeployment}.
+     * Picks the hex for a TO:AR gun emplacement: clear ground beside the streets, where its guns are worth the most
+     * and interlock with the other emplacements'. See {@link EmplacementDeployment}.
      *
      * @param deployedUnit         The emplacement being deployed
      * @param possibleDeployCoords The coordinates being considered for deployment
@@ -1472,14 +1477,12 @@ public class Princess extends BotClient {
         final List<Coords> legalCoords = possibleDeployCoords.stream()
               .filter(c -> super.getFirstValidCoords(deployedUnit, List.of(c)) != null)
               .toList();
-        final List<Coords> otherEmplacements = getEntitiesOwned().stream()
+        final List<Entity> otherEmplacements = getEntitiesOwned().stream()
               .filter(e -> (e != deployedUnit) && e.isDeployed() && (e.getPosition() != null)
                     && (e.getBoardId() == board.getBoardId()) && EmplacementDeployment.isGunEmplacementBuilding(e))
-              .map(Entity::getPosition)
               .toList();
         final Coords enemyCentre = getEnemyDeploymentCenter(board).orElse(null);
-        return EmplacementDeployment.choose(deployedUnit, legalCoords, board, otherEmplacements,
-              c -> EmplacementDeployment.fieldOfFire(game, board, c, deployedUnit, enemyCentre));
+        return EmplacementDeployment.site(game, board, deployedUnit, legalCoords, otherEmplacements, enemyCentre);
     }
 
     /**
@@ -3145,9 +3148,9 @@ public class Princess extends BotClient {
      * This unit should have already moved due to the isImmobilized check. via the
      * {@link #calculateMoveIndex(Entity, StringBuilder)} method.  The highest index value is moved first.
      *
-     * @return The entity that should be moved next.
+     * @return The entity that should be moved next, or {@code null} if no unit can take this turn.
      */
-    Entity getEntityToMove() {
+    @Nullable Entity getEntityToMove() {
         final Game currentGame = getGame();
 
         if ((currentGame != null) && (currentGame.getPhase() == GamePhase.MOVEMENT)) {
@@ -3165,16 +3168,19 @@ public class Princess extends BotClient {
                         return deployEntity;
                     }
                 }
-            }
 
-            for (final Entity entity : getEntitiesOwned()) {
-                // A carried unit enters with its transport; the server refuses a move for it
-                if (entity.isDone() || entity.isOffBoard() || entity.isTransported() || isRefusedThisPhase(entity)) {
-                    continue;
-                }
-                if (((entity.getPosition() == null) || !entity.isDeployed()) && canWalkOnThisRound(entity)) {
-                    LOGGER.info("Choosing {} to deploy during the movement phase.", entity.getDisplayName());
-                    return entity;
+                // The first deployable unit is out of the running, so look at the others. Not at getEntitiesOwned():
+                // that leaves out every unit without a position, which is every unit still waiting to walk on.
+                for (final Entity entity : currentGame.inGameTWEntities()) {
+                    // A carried unit enters with its transport; the server refuses a move for it
+                    if (entity.isDone() || entity.isOffBoard() || entity.isTransported()
+                          || isRefusedThisPhase(entity) || !turn.isValidEntity(entity, currentGame)) {
+                        continue;
+                    }
+                    if (!entity.isDeployed() && canWalkOnThisRound(entity)) {
+                        LOGGER.info("Choosing {} to deploy during the movement phase.", entity.getDisplayName());
+                        return entity;
+                    }
                 }
             }
         }
@@ -3260,14 +3266,19 @@ public class Princess extends BotClient {
     @Override
     protected @Nullable MovePath calculateMoveTurn() {
         try {
-            MovePath path = continueMovementFor(getEntityToMove());
+            final Entity entity = getEntityToMove();
+            if (entity == null) {
+                LOGGER.warn("{}: no unit can take this movement turn", getName());
+                return null;
+            }
+            MovePath path = continueMovementFor(entity);
             // Update the friendly heat map with movement of ground units
             if (path != null && path.getEntity().isGround()) {
                 getMemory().getFriendlyHeatMap().updateTrackers(path);
             }
             return path;
-        } catch (Exception ignored) {
-            LOGGER.error("Error while calculating movement");
+        } catch (Exception exception) {
+            LOGGER.error(exception, "Error while calculating movement");
             return null;
         }
     }
@@ -3495,11 +3506,7 @@ public class Princess extends BotClient {
         int recurring = mover.getEngineCritHeat();
 
         if (!leavingThisHex && isStandingInFire(mover)) {
-            int fireHeat = FIRE_HEAT_PER_TURN;
-            if ((mover instanceof Mek mek) && mek.hasIntactHeatDissipatingArmor()) {
-                fireHeat /= 2;
-            }
-            recurring += fireHeat;
+            recurring += Game.rulesManager.getRulesArmor().reduceNonLocationHeat(mover, FIRE_HEAT_PER_TURN);
         }
 
         return recurring;
@@ -3659,7 +3666,7 @@ public class Princess extends BotClient {
         return null;
     }
 
-    private @Nullable MovePath calculateDeploymentPathForMovementPhase(final Entity entity) {
+    @Nullable MovePath calculateDeploymentPathForMovementPhase(final Entity entity) {
         // Only isDeployed() decides this. The position below is set on the bot's local copy before the path is
         // sent, so after a rejected attempt the unit is still undeployed but already has a position.
         if ((entity == null) || entity.isDeployed()) {
@@ -3832,7 +3839,14 @@ public class Princess extends BotClient {
         Objects.requireNonNull(entity, "Entity is null.");
 
         if (!entity.isDeployed() || (entity.getPosition() == null)) {
-            final MovePath deploymentMovePath = calculateDeploymentPathForMovementPhase(entity);
+            final MovePath deploymentMovePath;
+            try {
+                deploymentMovePath = calculateDeploymentPathForMovementPhase(entity);
+            } finally {
+                // The walk-on path pauses Precognition to rebuild its paths. Left paused, it never handles the next
+                // movement phase's events, so the next move picks a stale path that still deploys (issue #9601)
+                getPrecognition().unPause();
+            }
             if (deploymentMovePath != null) {
                 return deploymentMovePath;
             }
@@ -4041,6 +4055,10 @@ public class Princess extends BotClient {
             }
             // -----------------------------------------------------------------------
 
+            // A turret can die between the start of movement and now (fire, for one), so recheck the buildings
+            // picked up for their turrets before anyone shoots at them.
+            dropEmptyTurretBuildingTargets();
+
             // Pick up on any infantry/BA in buildings post-movement and shoot
             // their buildings, similar to the turret check
             // pre-movement(infantry can move so we only set target buildings
@@ -4233,7 +4251,11 @@ public class Princess extends BotClient {
         }
     }
 
-    private void checkForDishonoredEnemies() {
+    /**
+     * Marks dishonored every player who attacked one of my units in a way the honor rules forbid this turn.
+     * Package-visible for testing.
+     */
+    void checkForDishonoredEnemies() {
         final StringBuilder msg = new StringBuilder("Checking for dishonored enemies.");
 
         try {
@@ -4251,8 +4273,14 @@ public class Princess extends BotClient {
                     continue;
                 }
 
-                // Was my unit withdrawing under forced withdrawal when this turn began?
-                final boolean fleeing = getMemory().isCrippled(mine.getId());
+                // Was my unit withdrawing under forced withdrawal when this turn began, and still protected? A unit
+                // that fired while withdrawing chose to fight, so shooting it is no dishonor (issue #9595).
+                final boolean fleeing = getForcedWithdrawalTracker().isProtected(mine.getId());
+                if (!fleeing && getMemory().isCrippled(mine.getId())) {
+                    msg.append("\n\t")
+                          .append(mine.getDisplayName())
+                          .append(" was attacked, but it gave up its protection by firing while withdrawing.");
+                }
 
                 for (final int id : attackedBy) {
                     final Entity entity = getGame().getEntity(id);
@@ -4418,35 +4446,6 @@ public class Princess extends BotClient {
             initFriendlyHeatMap();
             initEnemyHeatMaps();
             initExperimentalFeatures();
-
-            // Pick up any turrets and add their buildings to the strategic targets list.
-            for (Board board : game.getBoards().values()) {
-                final Enumeration<IBuilding> buildings = board.getBuildings();
-                while (buildings.hasMoreElements()) {
-                    final IBuilding bldg = buildings.nextElement();
-                    final Enumeration<Coords> bldgCoords = bldg.getCoords();
-                    while (bldgCoords.hasMoreElements()) {
-                        final Coords coords = bldgCoords.nextElement();
-                        for (final Entity entity : game.getEntitiesVector(coords, board.getBoardId(), true)) {
-                            if (isEnemyGunEmplacement(entity, coords)) {
-                                getStrategicBuildingTargets().add(coords);
-
-                                sendChat("Building in Hex " +
-                                      coords.toFriendlyString() +
-                                      " designated target due to Gun Emplacement.", Level.INFO);
-                            }
-
-
-                            if (isEnemyBuildingEntity(entity, coords)) {
-                                getStrategicBuildingTargets().add(coords);
-                                sendChat("Building in Hex " +
-                                      coords.toFriendlyString() +
-                                      " designated target due to Building Entity.", Level.INFO);
-                            }
-                        }
-                    }
-                }
-            }
 
             initialized = true;
             BotGeometry.debugSelfTest(this);
@@ -4762,8 +4761,53 @@ public class Princess extends BotClient {
         getForcedWithdrawalTracker().refreshWithdrawingUnits();
     }
 
+    /**
+     * Drops the buildings that were made targets because of a gun emplacement or building entity when that unit is no
+     * longer there to shoot at. Targets are picked before movement, and a turret can die before the firing phase:
+     * fire damage is rolled at the end of movement. Hexes the player named as strategic targets are always kept.
+     */
+    void dropEmptyTurretBuildingTargets() {
+        final FireControlState state = getFireControlState();
+        final List<Targetable> keptTargets = new ArrayList<>();
+        for (final Targetable target : state.getAdditionalTargets()) {
+            if (isEmptyTurretBuilding(target)) {
+                LOGGER.info("[TurretBuildings] Dropping building in hex {} as a target: no live enemy turret in it",
+                      target.getPosition().toFriendlyString());
+            } else {
+                LOGGER.info("[TurretBuildings] Keeping {} in hex {} as a target",
+                      target.getDisplayName(), target.getPosition().toFriendlyString());
+                keptTargets.add(target);
+            }
+        }
+        state.setAdditionalTargets(keptTargets);
+    }
+
+    /**
+     * @param target one of the bot's additional targets
+     *
+     * @return {@code true} if this is a building that is not a strategic target and holds no live enemy gun
+     *       emplacement or building entity
+     */
+    private boolean isEmptyTurretBuilding(final Targetable target) {
+        if (!(target instanceof BuildingTarget) || (target.getPosition() == null)) {
+            return false;
+        }
+        final Coords coords = target.getPosition();
+        if (getStrategicBuildingTargets().contains(coords)) {
+            return false;
+        }
+        for (final Entity entity : getGame().getEntitiesVector(coords, target.getBoardId(), true)) {
+            if (isEnemyGunEmplacement(entity, coords) || isEnemyBuildingEntity(entity, coords)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean isEnemyGunEmplacement(final Entity entity, final Coords coords) {
         return entity.hasETypeFlag(Entity.ETYPE_GUN_EMPLACEMENT) &&
+              !entity.isDestroyed() &&
+              !entity.isDoomed() &&
               !getBehaviorSettings().getIgnoredUnitTargets().contains(entity.getId()) &&
               entity.getOwner().isEnemyOf(getLocalPlayer()) &&
               !getStrategicBuildingTargets().contains(coords) &&
@@ -4772,6 +4816,8 @@ public class Princess extends BotClient {
 
     private boolean isEnemyBuildingEntity(final Entity entity, final Coords coords) {
         return entity.hasETypeFlag(Entity.ETYPE_BUILDING_ENTITY) &&
+              !entity.isDestroyed() &&
+              !entity.isDoomed() &&
               !getBehaviorSettings().getIgnoredUnitTargets().contains(entity.getId()) &&
               entity.getOwner().isEnemyOf(getLocalPlayer()) &&
               !getStrategicBuildingTargets().contains(coords) &&
@@ -4895,6 +4941,10 @@ public class Princess extends BotClient {
         final Set<Integer> unitsWithdrawingAtStartOfTurn = getMemory().crippledUnitIds();
         checkForDishonoredEnemies();
         checkForBrokenEnemies();
+        // After checkForDishonoredEnemies: attacks are declared at the same time, so an enemy shooting a unit in the
+        // same turn it first fires while withdrawing still shot a protected unit. Before sendDishonoredData, so
+        // clients stop tagging and warning about a unit that has given up its protection.
+        getForcedWithdrawalTracker().updateForfeitedProtection(unitsWithdrawingAtStartOfTurn);
         // refreshCrippledUnits should happen after checkForDishonoredEnemies, since checkForDishonoredEnemies
         // wants to examine the units that were considered crippled at the *beginning* of the turn and were attacked.
         refreshCrippledUnits();
@@ -4990,6 +5040,70 @@ public class Princess extends BotClient {
     }
 
     /**
+     * Reports the standing orders this bot follows outside its behavior settings - hold position, TAG targets and
+     * strategic hexes - so allied players can see them.
+     */
+    public void sendStatus() {
+        send(new Packet(PacketCommand.PRINCESS_STATUS, buildStatus()));
+    }
+
+    /** @return this bot's standing orders, as {@link #sendStatus()} reports them. Package-visible for testing. */
+    BotStatus buildStatus() {
+        return new BotStatus(getHoldPosition(), new HashSet<>(getDesignatedTagTargets()),
+              new HashSet<>(getStrategicBuildingTargets()));
+    }
+
+    /**
+     * Reports everything a command may have changed: settings, standing orders and honor. Called after a player's
+     * command, typed or sent from a UI.
+     */
+    public void reportCommandedState() {
+        sendPrincessSettings();
+        sendStatus();
+    }
+
+    @Override
+    protected void receiveBehaviorChanges(List<BehaviorChange> changes) {
+        applyBehaviorChanges(changes);
+        reportCommandedState();
+    }
+
+    @Override
+    protected void receiveBotOrder(BotOrder order) {
+        LOGGER.info("{}: received order {}", getName(), order);
+        order.apply(this);
+        if (order instanceof BotOrder.BloodFeud) {
+            sendDishonoredData();
+        }
+        sendStatus();
+    }
+
+    /** Applies the changes in order. Package-visible for testing. */
+    void applyBehaviorChanges(List<BehaviorChange> changes) {
+        for (BehaviorChange change : changes) {
+            LOGGER.info("{}: applying behavior change {}", getName(), change);
+            change.apply(this);
+        }
+    }
+
+    /**
+     * Takes a personality's behavior values, as {@link BehaviorSettings#takeStyleFrom} describes, and refreshes what
+     * depends on them, as {@link #setBehaviorSettings} does.
+     *
+     * @param preset the personality's preset
+     */
+    void takeStyle(BehaviorSettings preset) {
+        behaviorSettings.takeStyleFrom(preset);
+        if (behaviorSettings.iAmAPirate() && honorUtil instanceof HonorUtil honorUtilCast) {
+            honorUtilCast.setIAmAPirate(true);
+        }
+        spinUpThreshold = null;
+        if (initialized) {
+            initializePathRankers();
+        }
+    }
+
+    /**
      * Reports to the server which players this bot currently considers dishonored, whether it follows Forced
      * Withdrawal, and which of its units are withdrawing. Clients use it to tag withdrawing units and to warn a human
      * player before committing an action that would newly dishonor them. The dishonored set is fully resolved - it
@@ -5030,6 +5144,7 @@ public class Princess extends BotClient {
     @Override
     protected void sendBotSettingsToServer() {
         sendPrincessSettings();
+        sendStatus();
     }
 
     @Override
@@ -5782,8 +5897,9 @@ public class Princess extends BotClient {
      */
     void announceSpotting(final EntityAction spotAction, final Entity spotter) {
         if ((spotAction instanceof SpotAction spot) && !spotter.isHidden()) {
-            Entity target = getGame().getEntity(spot.getTargetId());
-            String targetName = (target != null) ? target.getShortName() : Integer.toString(spot.getTargetId());
+            Targetable target = spot.getTarget(getGame());
+            String targetName = (target instanceof Entity unit) ? unit.getShortName()
+                  : (target == null) ? Integer.toString(spot.getTargetId()) : target.getDisplayName();
             sendChat(Messages.getString("Princess.spotting", spotter.getShortName(), targetName), Level.INFO);
         }
     }

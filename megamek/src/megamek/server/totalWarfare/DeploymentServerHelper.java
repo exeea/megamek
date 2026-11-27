@@ -44,9 +44,19 @@ import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
+import megamek.common.enums.MoveStepType;
 import megamek.common.game.Game;
+import megamek.common.moves.MovePath;
 import megamek.common.planetaryConditions.Atmosphere;
-import megamek.common.units.*;
+import megamek.common.units.AbstractBuildingEntity;
+import megamek.common.units.Entity;
+import megamek.common.units.IAero;
+import megamek.common.units.IBuilding;
+import megamek.common.units.Infantry;
+import megamek.common.units.Tank;
+import megamek.common.units.Terrains;
+import megamek.common.units.TrainLayout;
+import megamek.common.units.VTOL;
 import megamek.logging.MMLogger;
 
 /**
@@ -255,6 +265,20 @@ public class DeploymentServerHelper {
     }
 
     /**
+     * Checks whether a movement path tries to deploy a unit that is already on the board. Only an undeployed unit may
+     * walk on; a {@code DEPLOY} step for a deployed one comes from a stale or bad path, and running it would move the
+     * unit back to the step's hex (issue #9601).
+     *
+     * @param entity   the moving unit, as the server knows it
+     * @param movePath the path the client sent
+     *
+     * @return {@code true} if the unit is already deployed and the path contains a {@code DEPLOY} step
+     */
+    static boolean deploysAlreadyDeployedUnit(Entity entity, MovePath movePath) {
+        return entity.isDeployed() && movePath.contains(MoveStepType.DEPLOY);
+    }
+
+    /**
      * An airborne unit cannot be hidden; only one grounded at the start of the scenario can (TW errata v12.0, p.260,
      * Airborne Units). The lobby lets a VTOL or WiGE be set hidden because it may still deploy landed, so the check
      * can only be made here, once its deployment elevation is known. A hidden unit that deploys in the air deploys
@@ -458,10 +482,11 @@ public class DeploymentServerHelper {
     }
 
     /**
-     * Refuses a deployment that breaks stacking. The player is told why, and the unit in the way is sent to them so
-     * their own deployment check rules the hex out. Without that, a bot that cannot see the unit under double blind
-     * would pick the same hex again and never finish deploying. The refused unit is resent too, as the client already
-     * marked it deployed.
+     * Refuses a deployment that breaks stacking. A player who can see the unit in the way is told which unit it is,
+     * and is sent that unit so their own deployment check rules the hex out. A player who cannot see it, because it
+     * is a hidden enemy or out of sight under double blind, is only told the hex is not available, so the refusal
+     * gives nothing else away (issue 9580). The refused unit and its trailers are resent too, as the client already
+     * marked them deployed.
      *
      * @param connId    the connection of the player whose deployment is refused
      * @param entity    the unit whose deployment is refused
@@ -470,13 +495,77 @@ public class DeploymentServerHelper {
      * @param turnOwner the player whose turn it is, or {@link Player#PLAYER_NONE} if unknown
      */
     void refuseStackedDeployment(int connId, Entity entity, Entity blocker, Coords coords, int turnOwner) {
-        gameManager.send(connId, gameManager.createEntityPacket(blocker.getId(), null));
-        gameManager.send(connId, gameManager.createEntityPacket(entity.getId(), null));
-        gameManager.sendServerChat(connId, Messages.getString("DeploymentDisplay.stackingRefused",
-              entity.getShortName(), coords.getBoardNum(), blocker.getShortName()));
+        if (isVisibleToPlayer(blocker, gameManager.getGame().getPlayer(connId))) {
+            gameManager.send(connId, gameManager.createEntityPacket(blocker.getId(), null));
+            gameManager.sendServerChat(connId, Messages.getString("DeploymentDisplay.stackingRefused",
+                  entity.getShortName(), coords.getBoardNum(), blocker.getShortName()));
+        } else {
+            LOGGER.info("[Deploy] {} at {}: the refused player cannot see {}, so it is not named or sent to them",
+                  entity.getDisplayName(), coords.getBoardNum(), blocker.getDisplayName());
+            gameManager.sendServerChat(connId, Messages.getString("DeploymentDisplay.stackingRefusedUnseen",
+                  entity.getShortName(), coords.getBoardNum()));
+        }
+        resendRefusedUnit(connId, entity);
         gameManager.send(connId, gameManager.getPacketHelper().createTurnListPacket());
         if (turnOwner != Player.PLAYER_NONE) {
             gameManager.send(connId, gameManager.getPacketHelper().createTurnIndexPacket(turnOwner));
         }
+    }
+
+    /**
+     * Refuses a walk-on into a hex that is not a legal deployment hex for the unit, or for the train it tows. The
+     * player is told, sent the unit and its trailers as the client already marked them deployed, and handed the turn
+     * back.
+     *
+     * @param connId    the connection of the player whose deployment is refused
+     * @param entity    the unit whose deployment is refused
+     * @param coords    the refused deployment hex; may be {@code null} if the path gave none
+     * @param turnOwner the player whose turn it is
+     */
+    void refuseIllegalDeployment(int connId, Entity entity, @Nullable Coords coords, int turnOwner) {
+        LOGGER.error("[Deploy] Refused an illegal deployment of {} at {} from connection {}", entity.getDisplayName(),
+              (coords == null) ? "?" : coords.getBoardNum(), connId);
+        gameManager.sendServerChat(connId, Messages.getString("DeploymentDisplay.cantDeployInto",
+              entity.getShortName(), (coords == null) ? "?" : coords.getBoardNum()));
+        resendRefusedUnit(connId, entity);
+        gameManager.send(connId, gameManager.getPacketHelper().createTurnListPacket());
+        gameManager.send(connId, gameManager.getPacketHelper().createTurnIndexPacket(turnOwner));
+    }
+
+    /**
+     * Sends a player the server's copy of a unit whose deployment was refused, along with every trailer it tows. The
+     * client places the whole train while the player picks a hex, so resending only the tractor would leave its
+     * trailers standing on the board.
+     *
+     * @param connId the connection of the player whose deployment is refused
+     * @param entity the unit whose deployment is refused
+     */
+    void resendRefusedUnit(int connId, Entity entity) {
+        gameManager.send(connId, gameManager.createEntityPacket(entity.getId(), null));
+        for (int trailerId : entity.getAllTowedUnits()) {
+            if (gameManager.getGame().getEntity(trailerId) != null) {
+                gameManager.send(connId, gameManager.createEntityPacket(trailerId, null));
+            }
+        }
+    }
+
+    /**
+     * Whether a player already knows a unit is on the board. Without double blind every client holds every unit, and
+     * only an enemy's hidden unit is kept from view. Under double blind it is whatever the player's side can see.
+     *
+     * @param unit   the unit to check
+     * @param player the player who may or may not see it; may be {@code null} if the connection has no player
+     *
+     * @return {@code true} if the player can see the unit
+     */
+    boolean isVisibleToPlayer(Entity unit, @Nullable Player player) {
+        if (player == null) {
+            return false;
+        }
+        if (gameManager.doBlind()) {
+            return gameManager.whoCanSee(unit).contains(player);
+        }
+        boolean isHiddenEnemy = unit.isHidden() && unit.getOwner().isEnemyOf(player);
+        return !isHiddenEnemy;
     }
 }

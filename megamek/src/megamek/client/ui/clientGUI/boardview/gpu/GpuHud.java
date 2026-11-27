@@ -29,6 +29,7 @@ import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiModal;
+import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -222,6 +223,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> helpSlot;
     private final Container<Actor> menuSlot;
     private final Container<Actor> playersSlot;
+    private final Container<Actor> botSlot;
     private final Container<Actor> toastSlot;
     private final Container<Actor> modalSlot;
     /** The Tactical View's north mark: part of the board drawing, under the board labels. */
@@ -291,7 +293,8 @@ final class GpuHud implements GpuBoardHud {
         contextMenu = new GpuContextMenu(kit, source, state, this::select);
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         deployHeight = new GpuDeployHeight(source);
-        GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, state, nameplates, deployHeight);
+        GpuDeployConfirm deployConfirm = new GpuDeployConfirm(kit, source, state, nameplates, deployHeight);
+        GpuMoveConfirm moveConfirm = new GpuMoveConfirm(kit, source, state, camera, nameplates, deployHeight);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
         losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         phaseHeader = new GpuPhaseHeader(kit);
@@ -326,6 +329,7 @@ final class GpuHud implements GpuBoardHud {
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
         menu = new GpuMenuPanel(kit, source, state);
         GpuPlayersPanel players = new GpuPlayersPanel(kit, source, state);
+        GpuBotSheet bots = new GpuBotSheet(kit, source, state);
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
@@ -333,12 +337,13 @@ final class GpuHud implements GpuBoardHud {
         incomingCues = new GpuIncomingCues(kit, source, state);
         damageNumbers = new GpuDamageNumbers(kit);
         GpuAimDialog aim = new GpuAimDialog(kit, source, state, paperdolls);
-        List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, boardLabels, targetCards, losPanel,
+        List<Component> parts = new ArrayList<>(List.of(nameplates, deployConfirm, moveConfirm, boardLabels,
+              targetCards, losPanel,
               phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities,
               hint,
               minimap, overlays,
-              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, aim,
+              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, bots, contextMenu, hexTip, aim,
               toasts, modal, arrivalCues, incomingCues, damageNumbers));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
@@ -348,8 +353,10 @@ final class GpuHud implements GpuBoardHud {
         // menu, which opens over them.
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, damageNumbers.actor()),
               slot(labels, boardLabels.fx()),
+              // The edges' incoming marks lie on the board, under every unit's label and the move and deploy controls.
+              slot(labels, incomingCues.boardActor()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
-              slot(labels, deployConfirm.actor()),
+              slot(labels, deployConfirm.actor()), slot(labels, moveConfirm.actor()),
               slot(popover, hexTip.actor()), slot(popover, incomingCues.actor()), slot(popover, arrivalCues.actor()),
               slot(popover, unitCard.overlay()),
               slot(popover, otherUnitCard.overlay()),
@@ -392,6 +399,8 @@ final class GpuHud implements GpuBoardHud {
 
         // The aimed shot dialog's window-sized scrim over the panels and menus, under the toasts and the native modal.
         spanning.add(slot(dialogs, aim.actor()));
+        // The bot sheet stands at the window's right over the panels and the chat, and leaves the board playable.
+        botSlot = panel(dialogs, bots.actor()).fill();
 
         // The developer tuning utility leads the utility bar; its panel places itself.
         // Before release, delete this block, the tuningModel parameter, GpuHudState.Dialog.TUNING and GpuTuningPanel.
@@ -643,7 +652,8 @@ final class GpuHud implements GpuBoardHud {
     /**
      * Whether a left press on {@code coords} starts the turning drag of a placement or a move: in the local deployment
      * turn, on the hex where the acting unit was just placed; in the local movement turn, on the end of the planned
-     * route, or on the unit while it has none (a walk-on unit on its entry hex included). A release without a drag
+     * route, or on the unit while it has none (a walk-on unit on its entry hex included). Outside the planner (a
+     * flight, a landed aerospace unit, another gear) it turns while MegaMek's Turn is enabled. A release without a drag
      * stays a click.
      */
     boolean facesFrom(Coords coords) {
@@ -657,7 +667,8 @@ final class GpuHud implements GpuBoardHud {
         int actorId = status.actorId();
         if (status.phase().isMovement()) {
             GpuMovePlan.Snapshot plan = inputs.frame().panels().move();
-            if (!plan.active() || !plan.planner() || !plan.facingMatters()) {
+            if (!plan.active() || !plan.facingMatters()
+                  || !(plan.planner() || plan.setsUpEntry() || turnEnabled(inputs.frame().scene()))) {
                 return false;
             }
             if (plan.destination() != null) {
@@ -668,8 +679,24 @@ final class GpuHud implements GpuBoardHud {
             return false;
         }
         GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, actorId);
-        return actor != null && coords.equals(actor.position())
+        return actor != null && coords.equals(actor.position()) && (!status.phase().isDeployment() || actor.turns())
               && actor.boardId() == inputs.frame().scene().boardId();
+    }
+
+    /** Whether MegaMek's Turn command is enabled now, which turns a unit the planner leaves to MegaMek. */
+    private static boolean turnEnabled(BoardScene scene) {
+        String turn = MoveCommand.MOVE_TURN.getCmd();
+        return scene.commands().stream().anyMatch(command -> command.id().equals(turn) && command.enabled());
+    }
+
+    /** Whether deployment turns the unit it places: a press-drag aims it, and the hints say so. */
+    boolean deployTurns() {
+        if (inputs == null) {
+            return true;
+        }
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, status.actorId());
+        return actor == null || actor.turns();
     }
 
     /**
@@ -701,15 +728,20 @@ final class GpuHud implements GpuBoardHud {
         source.unpinDeploymentPreview();
     }
 
-    /** Ctrl+wheel: steps the placed unit's height by {@code amountY} notches; false while it has no height choice. */
+    /**
+     * Ctrl+wheel: steps the placed unit's height by {@code amountY} notches, the deploying unit's or the walk-on unit's
+     * setting up its entry; false while it has no height choice.
+     */
     boolean wheelHeight(float amountY) {
         if (inputs == null) {
             return false;
         }
         GpuBattleStatus.Snapshot status = inputs.frame().status();
-        boolean deploying = status.myTurn() && status.phase().isDeployment() && !state.turnLocked(status)
-              && inputs.dialog() == null && !state.overview;
-        return deployHeight.wheel(deploying ? status.actorId() : -1, amountY);
+        boolean free = status.myTurn() && !state.turnLocked(status) && inputs.dialog() == null && !state.overview;
+        int unitId = !free ? -1 : status.phase().isDeployment() ? status.actorId()
+              : status.phase().isMovement() ? inputs.frame().panels().move().entityId() : -1;
+        // The movement plan's choice exists only while the unit sets up its entry (MovementDisplay.entryHeights).
+        return deployHeight.wheel(unitId, amountY);
     }
 
     /** Only the highest modal owns focus, including file pickers above a pending game prompt. */
@@ -1044,7 +1076,7 @@ final class GpuHud implements GpuBoardHud {
         } else if (binds.contains(KeyCommandBind.KEY_BINDS)) {
             state.toggle(GpuHudState.Dialog.HELP);
         } else if (binds.contains(KeyCommandBind.BOT_COMMANDS)) {
-            state.toggle(GpuHudState.Dialog.PLAYERS);
+            state.botCommandsKey(inputs.frame().panels().bots());
         } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
             // View > Ruler / LOS Tool opens the native measurement panel.
             BoardScene.Command ruler = GpuBoardActions.menuItem(inputs.frame().globalCommands(),
@@ -1087,6 +1119,10 @@ final class GpuHud implements GpuBoardHud {
             source.moves().setMode(mode);
         } else if (moving && (binds.contains(KeyCommandBind.TURN_LEFT) || binds.contains(KeyCommandBind.TURN_RIGHT))) {
             source.moves().turn(binds.contains(KeyCommandBind.TURN_LEFT) ? -1 : 1);
+        } else if (status.myTurn() && phase.isDeployment() && !locked && deployTurns()
+              && (binds.contains(KeyCommandBind.TURN_LEFT) || binds.contains(KeyCommandBind.TURN_RIGHT))) {
+            // The placed unit turns as its arrows turn it; MegaMek ignores a unit not placed yet.
+            source.turnPlaced(status.actorId(), binds.contains(KeyCommandBind.TURN_LEFT) ? -1 : 1);
         } else if (firing
               && (binds.contains(KeyCommandBind.TWIST_LEFT) || binds.contains(KeyCommandBind.TWIST_RIGHT))) {
             dock.twist(binds.contains(KeyCommandBind.TWIST_LEFT) ? -1 : 1);
@@ -1337,6 +1373,9 @@ final class GpuHud implements GpuBoardHud {
             state.pick(unitId);
             return;
         }
+        if (GpuDeployment.unpickable(status, unit)) {
+            return;
+        }
         boolean ready = acts(status, unit);
         // Only a selection ends a cleared one; an inspected unit leaves it cleared. With the selection cleared the
         // presented status has no actor, so MegaMek selects even its current unit again, afresh.
@@ -1432,6 +1471,7 @@ final class GpuHud implements GpuBoardHud {
         helpSlot.setVisible(state.dialog == GpuHudState.Dialog.HELP);
         menuSlot.setVisible(state.dialog == GpuHudState.Dialog.MENU);
         playersSlot.setVisible(state.dialog == GpuHudState.Dialog.PLAYERS);
+        botSlot.setVisible(state.dialog == GpuHudState.Dialog.BOTS);
         centeredDialogs.setBounds(0, 0, width, height);
         centeredDialogs.open(centeredDialogOpen());
         modalSlot.setVisible(inputs.dialog() != null);
@@ -1508,10 +1548,14 @@ final class GpuHud implements GpuBoardHud {
         place(solutionSlot, width - gap - m.right(), height - rightReserve - solutionHeight, m.right(),
               solutionHeight);
 
+        // The bot sheet: a small dialog's width at the window's right, from under the utility bar to the bottom edge.
+        float botWidth = Math.min(DesignTokens.shipped().size().get("dialog.sm"), width - 2 * gap);
+        place(botSlot, width - gap - botWidth, rightStart, botWidth, Math.max(0, height - rightStart - gap));
+
         // Middle band between the columns: the dock along the bottom edge (battle HUD layout, zone 2), centred in the
         // window and clear of whatever reaches its height at either side: the unit card, or the forces list and the
-        // open unit sheet without one; the other unit's card or a right-column panel. The hint line and a pick's chip
-        // stand above it.
+        // open unit sheet without one; the other unit's card, a right-column panel or the bot sheet. The hint line and
+        // a pick's chip stand above it.
         float bandLeft = gap + Math.max(sheet ? m.grid() : forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockHeight = height(dockSlot);
@@ -1523,7 +1567,8 @@ final class GpuHud implements GpuBoardHud {
             }
         }
         float dockRight = width - gap;
-        for (Container<Actor> side : List.of(otherUnitSlot, contactsSlot, weaponsSlot, logSlot, solutionSlot)) {
+        for (Container<Actor> side : List.of(otherUnitSlot, contactsSlot, weaponsSlot, logSlot, solutionSlot,
+              botSlot)) {
             if (shown(side) && side.getHeight() > 0 && side.getY() < gap + dockHeight) {
                 dockRight = Math.min(dockRight, side.getX() - gap);
             }
@@ -1547,7 +1592,8 @@ final class GpuHud implements GpuBoardHud {
         // The More panel, sized to its commands: right of the dock, up to the window edge, or up to the right column
         // while one of its panels reaches down beside the dock. It takes the columns that room holds, no more than the
         // dock's height needs, and grows upward from the dock's bottom when they need more rows. Without room for one
-        // column there, it lies above the dock, at most the dock's width, and grows upward over the hint line.
+        // column there, it lies above the dock, at most the dock's width and right-aligned under More, only as tall as
+        // its rows, and grows upward over the hint line.
         GpuMoreDrawer drawer = dock.drawer();
         drawerSlot.setVisible(shown(dockSlot));
         if (!drawerSlot.isVisible() || isModal()) {
@@ -1557,26 +1603,27 @@ final class GpuHud implements GpuBoardHud {
               || shown(otherUnitSlot);
         float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
         float drawerRight = rightColumn ? bandRight + gap : width - gap;
-        int besideColumns = Math.min(GpuMoreDrawer.columnsIn(drawerRight - drawerX), drawer.columnsAt(dockHeight));
+        int besideColumns = Math.min(drawer.columnsFor(drawerRight - drawerX), drawer.columnsAt(dockHeight));
         // A short drawer can fit below the minimap, but a taller one must fit to its left or above the dock.
         if (besideColumns > 0 && shown(minimapSlot)
-              && overlapsHorizontally(minimapSlot, drawerX, GpuMoreDrawer.width(besideColumns))
+              && overlapsHorizontally(minimapSlot, drawerX, drawer.widthFor(besideColumns))
               && gap + Math.max(dockHeight, drawer.height(besideColumns)) + STACK > minimapSlot.getY()) {
             besideColumns = Math.min(besideColumns,
-                  GpuMoreDrawer.columnsIn(minimapSlot.getX() - drawerX - STACK));
+                  drawer.columnsFor(minimapSlot.getX() - drawerX - STACK));
         }
         drawer.above(besideColumns == 0);
         if (besideColumns > 0) {
             float drawerHeight = Math.min(Math.max(dockHeight, drawer.height(besideColumns)), dockTop + dockHeight - gap);
-            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, GpuMoreDrawer.width(besideColumns),
+            place(drawerSlot, drawerX, dockTop + dockHeight - drawerHeight, drawer.widthFor(besideColumns),
                   drawerHeight);
         } else {
             float room = Math.max(0, dockTop - STACK - gap);
-            int columns = Math.max(1, Math.min(GpuMoreDrawer.columnsIn(dockWidth),
+            int columns = Math.max(1, Math.min(drawer.columnsFor(dockWidth),
                   drawer.columnsAt(Math.min(dockHeight, room))));
-            float aboveHeight = Math.min(Math.max(dockHeight, drawer.height(columns)), room);
-            place(drawerSlot, dockSlot.getX(), dockTop - STACK - aboveHeight, GpuMoreDrawer.width(columns),
-                  aboveHeight);
+            float aboveHeight = Math.min(drawer.height(columns), room);
+            float aboveWidth = drawer.widthFor(columns);
+            place(drawerSlot, dockSlot.getX() + dockSlot.getWidth() - aboveWidth, dockTop - STACK - aboveHeight,
+                  aboveWidth, aboveHeight);
         }
 
         // Top row: the conditions card beside the left column (the sheet's width while it is open), below the phase

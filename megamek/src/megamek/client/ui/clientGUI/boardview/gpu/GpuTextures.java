@@ -409,6 +409,9 @@ final class GpuTextures<K> implements Disposable {
         return entries.get(key).region;
     }
 
+    /** Whether the atlas holds every one of these keys. */
+    boolean holds(Set<K> keys) { return atlas != null && entries.keySet().containsAll(keys); }
+
     @Override
     public void dispose() {
         publishedColor = null;

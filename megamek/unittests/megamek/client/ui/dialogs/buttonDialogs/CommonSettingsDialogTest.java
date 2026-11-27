@@ -1491,8 +1491,8 @@ class CommonSettingsDialogTest {
 
     @Test
     void prefersMegaMekUserFilesHelpDocument(@TempDir Path docsDirectory) throws IOException {
-        Path megaMekDocument = createHelpDocument(docsDirectory, "UserDir");
-        createHelpDocument(docsDirectory, "MekHQ");
+        Path megaMekDocument = createHelpDocument(docsDirectory, "Customization/UserDir");
+        createHelpDocument(docsDirectory, "mekhq/customization");
         JButton button = new JButton();
         AtomicReference<URL> openedDocument = new AtomicReference<>();
 
@@ -1505,7 +1505,7 @@ class CommonSettingsDialogTest {
 
     @Test
     void fallsBackToMekHqUserFilesHelpDocument(@TempDir Path docsDirectory) throws IOException {
-        Path mekHqDocument = createHelpDocument(docsDirectory, "MekHQ");
+        Path mekHqDocument = createHelpDocument(docsDirectory, "mekhq/customization");
         JButton button = new JButton();
         AtomicReference<URL> openedDocument = new AtomicReference<>();
 
@@ -1528,8 +1528,8 @@ class CommonSettingsDialogTest {
         assertEquals(unavailableMessage, button.getAccessibleContext().getAccessibleDescription());
     }
 
-    private static Path createHelpDocument(Path docsDirectory, String suiteDirectory) throws IOException {
-        Path document = docsDirectory.resolve(Path.of("Customization", suiteDirectory, "UserDirHelp.html"));
+    private static Path createHelpDocument(Path docsDirectory, String documentDirectory) throws IOException {
+        Path document = docsDirectory.resolve(Path.of(documentDirectory, "UserDirHelp.html"));
         Files.createDirectories(document.getParent());
         return Files.createFile(document);
     }

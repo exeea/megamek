@@ -15,8 +15,11 @@ import megamek.common.units.Entity;
  * shows lives in the component that shows it.
  */
 final class GpuHudState {
-    /** The centred panels; opening one closes the others (Help closes Menu, Players and Tuning). */
-    enum Dialog { NONE, HELP, MENU, PLAYERS, TUNING }
+    /**
+     * The centred panels and the bot sheet; opening one closes the others (Help closes Menu, Players and Tuning). The
+     * bot sheet stands at the right and leaves the board playable.
+     */
+    enum Dialog { NONE, HELP, MENU, PLAYERS, TUNING, BOTS }
 
     /** Deployment's overlay; OFF shows none. */
     enum DeployOverlay { DAMAGE, OFF }
@@ -48,6 +51,8 @@ final class GpuHudState {
     /** The weapon and unit of the open aimed shot dialog (H36, R4), null while it is closed. */
     GpuFireOrders.AimTarget aiming;
     Dialog dialog = Dialog.NONE;
+    /** The player id of the bot the bot sheet shows, or -1 for the first commandable bot. */
+    int botSheetId = -1;
     boolean overview;
     /** Deployment's overlay, which the Overlays popover's Expected damage chose last; null until it does. */
     DeployOverlay deployOverlay;
@@ -121,6 +126,40 @@ final class GpuHudState {
         dialog = dialog == panel ? Dialog.NONE : panel;
     }
 
+    /** Opens the bot sheet on the bot with {@code botId}, or closes it when it already shows that bot. */
+    void toggleBot(int botId) {
+        if (dialog == Dialog.BOTS && botSheetId == botId) {
+            dialog = Dialog.NONE;
+        } else {
+            botSheetId = botId;
+            dialog = Dialog.BOTS;
+        }
+    }
+
+    /**
+     * The bot utility: closes the bot sheet, or opens it on the bot it showed last while the local player may still
+     * command that bot, else on the first of {@code bots}. Nothing opens without a commandable bot.
+     */
+    void toggleBots(GpuBots.Snapshot bots) {
+        if (dialog == Dialog.BOTS) {
+            dialog = Dialog.NONE;
+        } else if (!bots.bots().isEmpty()) {
+            toggleBot(bots.bot(botSheetId) != null ? botSheetId : -1);
+        }
+    }
+
+    /**
+     * BOT_COMMANDS: the bot sheet when the local player commands a single bot (or the sheet is open), else the players
+     * panel, which lists every bot with its orders row and the Pause/Continue command.
+     */
+    void botCommandsKey(GpuBots.Snapshot bots) {
+        if (dialog == Dialog.BOTS || bots.bots().size() == 1) {
+            toggleBots(bots);
+        } else {
+            toggle(Dialog.PLAYERS);
+        }
+    }
+
     boolean logOpen() {
         return logOpen;
     }
@@ -184,6 +223,11 @@ final class GpuHudState {
         ownInspection = Entity.NONE;
     }
 
+    /** The board plays live events, or reviews or replays them: unit commands wait ({@link #turnLocked}). */
+    boolean playbackBusy() {
+        return playbackBusy;
+    }
+
     /** Unit commands wait for playback, or for the player to restore a cleared local selection. */
     boolean turnLocked(GpuBattleStatus.Snapshot status) {
         return playbackBusy || selectionCleared && status.myTurn();
@@ -207,7 +251,7 @@ final class GpuHudState {
             GpuHudData shown = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
                   GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, presentedRecord,
                   selectionCleared || concealedDuringPlayback ? GpuFirePreview.Snapshot.NONE : held.preview(), latest.chat(), latest.toasts(),
-                  latest.los(), latest.players(), presentedOwnRecord);
+                  latest.los(), latest.players(), presentedOwnRecord, latest.bots());
             BoardScene scene = frame.scene() == null ? null : frame.scene().withPlaybackSelection(
                   selectionCleared ? Entity.NONE : focus);
             return new GpuBoardSource.Frame(scene, frame.timeline(), null, frame.globalCommands(), frame.tooltip(),
@@ -226,13 +270,13 @@ final class GpuHudState {
             presentedStatus = new GpuBattleStatus.Snapshot(status.round(), status.phase(), true,
                   status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
                   status.initiative(), status.turnOrderHidden(), List.of(), GpuBattleStatus.Arc.NONE,
-                  status.incoming());
+                  status.incoming(), status.emplacementsOnly());
         }
         GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
               locked ? GpuPhysicalOptions.Snapshot.EMPTY : panels.physical(), panels.record(),
               GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players(),
-              panels.ownRecord());
+              panels.ownRecord(), panels.bots());
         BoardScene.Context context = frame.context();
         return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
               locked && context != null && !context.selectionCleared() ? null : context,
@@ -366,7 +410,8 @@ final class GpuHudState {
                       held.actorId() == hidden.entityId() ? Entity.NONE : held.actorId(), held.turns(), held.turnIndex(),
                       presentedUnits, held.initiative(), held.turnOrderHidden(),
                       held.links().stream().filter(link -> link.fromId() != hidden.entityId()
-                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming());
+                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE, held.incoming(),
+                      held.emplacementsOnly());
             }
         }
         return select;

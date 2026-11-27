@@ -279,6 +279,13 @@ public final class Game extends AbstractGame implements Serializable,
     private transient ForcedWithdrawalReports forcedWithdrawalReports = new ForcedWithdrawalReports();
 
     /**
+     * Each bot's last reported standing orders (keyed by player ID), relayed through
+     * {@link megamek.common.net.enums.PacketCommand#PRINCESS_STATUS}. Transient, ephemeral battle state; concurrent
+     * because it is written on the packet-handling thread and read on the UI threads.
+     */
+    private transient Map<Integer, BotStatus> botStatuses = new ConcurrentHashMap<>();
+
+    /**
      * Constructor
      */
     public Game() {
@@ -1617,25 +1624,35 @@ public final class Game extends AbstractGame implements Serializable,
     }
 
     /**
-     * Returns every hex the position lookup must drop a unit from when the unit is replaced by a newer copy: where
-     * the old copy stands, and also wherever the lookup itself still lists it. The two can differ. A bot shares its
+     * Returns every hex the position lookup must drop a unit from when the unit is replaced by a newer copy. That is
+     * wherever the lookup itself lists the unit, which can differ from where the old copy stands. A bot shares its
      * unit objects with its planner's game, so when the bot moves a unit while choosing a hex, only the planner's
-     * lookup hears about it; this game can be left listing the unit on a hex it was merely tried on (see
-     * {@code SharedEntityPositionLookupTest}). Trusting the old copy alone would keep such an entry forever.
+     * lookup hears about it. Trusting the old copy instead goes wrong in two ways (see
+     * {@code SharedEntityPositionLookupTest}):
+     * <ul>
+     *     <li>a unit listed on a hex it was merely tried on would keep that entry forever;</li>
+     *     <li>a unit that ends its move on the hex the bot already put it on would look unmoved, and would never be
+     *     listed at all. Other units could then be sent to deploy on top of it.</li>
+     * </ul>
+     *
+     * <p>An empty lookup has not been built yet. It is built from every unit when it is first read, so the old copy's
+     * position is used, which leaves the lookup empty for a unit that has not moved.</p>
      *
      * @param oldEntity the copy of the unit being replaced
      *
      * @return the hexes to remove the unit from in the position lookup
      */
     private HashSet<Coords> getPositionsToReplace(Entity oldEntity) {
-        HashSet<Coords> positionsToReplace = oldEntity.getOccupiedCoords();
-        HashSet<Coords> listedPositions = getEntityPositions(oldEntity);
-        if (!positionsToReplace.containsAll(listedPositions)) {
-            logger.debug("[PositionLookup] {}: dropping stale listed hexes {}, the unit stood on {}",
-                  oldEntity.getDisplayName(), listedPositions, positionsToReplace);
-            positionsToReplace.addAll(listedPositions);
+        HashSet<Coords> oldPositions = oldEntity.getOccupiedCoords();
+        if (entityPosLookup.isEmpty()) {
+            return oldPositions;
         }
-        return positionsToReplace;
+        HashSet<Coords> listedPositions = getEntityPositions(oldEntity);
+        if (!oldPositions.equals(listedPositions)) {
+            logger.debug("[PositionLookup] {}: listed on {}, but the unit stood on {}",
+                  oldEntity.getDisplayName(), listedPositions, oldPositions);
+        }
+        return listedPositions;
     }
 
     @Override
@@ -4115,6 +4132,41 @@ public final class Game extends AbstractGame implements Serializable,
 
     public void setBotSettings(Map<String, BehaviorSettings> botSettings) {
         this.botSettings = botSettings;
+    }
+
+    /**
+     * @param botPlayerId the bot's player ID
+     *
+     * @return the standing orders that bot last reported, {@link BotStatus#NONE} when it has not reported
+     */
+    public BotStatus getBotStatus(int botPlayerId) {
+        return ensureBotStatuses().getOrDefault(botPlayerId, BotStatus.NONE);
+    }
+
+    /**
+     * @return every bot's last reported standing orders, keyed by player ID, as a copy
+     */
+    public Map<Integer, BotStatus> getBotStatuses() {
+        return new HashMap<>(ensureBotStatuses());
+    }
+
+    /**
+     * Records the standing orders a bot reported through
+     * {@link megamek.common.net.enums.PacketCommand#PRINCESS_STATUS}.
+     *
+     * @param botPlayerId the reporting bot's player ID
+     * @param status      its report
+     */
+    public void setBotStatus(int botPlayerId, BotStatus status) {
+        ensureBotStatuses().put(botPlayerId, status);
+    }
+
+    private Map<Integer, BotStatus> ensureBotStatuses() {
+        if (botStatuses == null) {
+            // Transient field is null after deserialization of a savegame.
+            botStatuses = new ConcurrentHashMap<>();
+        }
+        return botStatuses;
     }
 
     /**

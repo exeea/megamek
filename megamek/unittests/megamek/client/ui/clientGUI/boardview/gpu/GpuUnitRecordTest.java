@@ -206,7 +206,7 @@ class GpuUnitRecordTest {
                 atlas.setCrew(new Crew(CrewType.COMMAND_CONSOLE));
             });
             assertEquals(List.of(Messages.getString("MekDisplay.ActivateHidden.StopActivating"),
-                  "Movement", "Ranged Attack", "Physical"),
+                  GamePhase.MOVEMENT.localizedName(), GamePhase.FIRING.localizedName(), GamePhase.PHYSICAL.localizedName()),
                   system(session.record(), GpuUnitRecord.HIDDEN).choices());
             session.source.record().setSystem(id, GpuUnitRecord.HIDDEN, 2);
             session.source.record().setSystem(id, GpuUnitRecord.CONSOLE_ROLES, 1);

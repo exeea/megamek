@@ -96,6 +96,7 @@ import megamek.common.KeyBindParser;
 import megamek.common.Player;
 import megamek.common.compute.Compute;
 import megamek.common.equipment.SensorChoiceHandler;
+import megamek.common.game.Game;
 import megamek.common.game.GameType;
 import megamek.common.game.IGame;
 import megamek.common.jacksonAdapters.BotParser;

@@ -133,6 +133,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
         GamePhase phase = status.phase();
         String key = switch (phase) {
             case INITIATIVE, INITIATIVE_REPORT -> status.round() > 0 ? "initiative" : "deploymentOrder";
+            case DEPLOYMENT -> status.emplacementsOnly() ? "deploymentEmplacements" : null;
             case MOVEMENT -> "movement";
             case FIRING -> "firing";
             case FIRING_REPORT -> "firingReport";
