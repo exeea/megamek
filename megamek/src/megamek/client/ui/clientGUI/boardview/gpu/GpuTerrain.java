@@ -4901,7 +4901,10 @@ final class GpuTerrain implements Disposable {
             topography.put(surface.tile.coords(), BoardTacticalGeometry.Surface.of(surface, scene, floor));
             ChunkField.Block block = field == null ? null : field.block(tile.coords());
             if (block != null) {
-                BoardScene.Tile water = tile.liquid().present() ? tile : FieldWater.beside(scene, fieldBoard, tile.coords());
+                // Molten rock wets no ground: its own hex's and its banks' stay dry rock (today's draw in the bank's
+                // material, without the water's tint).
+                BoardScene.Tile water = tile.liquid().molten() ? null
+                      : tile.liquid().present() ? tile : FieldWater.beside(scene, fieldBoard, tile.coords());
                 BoardScene.Tile[] untaken = FieldWater.untakenWater(scene, fieldBoard, tile.coords());
                 fieldMeshes.put(tile.coords(), ChunkMesh.of(block, water, fieldBoard.shore, palettes.get(tile.coords()), untaken));
                 ChunkField.Block far = farField == null ? null : farField.block(tile.coords());

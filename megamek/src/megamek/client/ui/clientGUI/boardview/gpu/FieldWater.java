@@ -272,7 +272,7 @@ final class FieldWater {
 
     /**
      * The field water hex beside land hex {@code h} whose plane reaches over it (WaterLayer#bank) and whose surface stands
-     * highest, or null: what its low ground lies under.
+     * highest, or null: what its low ground lies under. Molten rock is none: it wets no ground.
      */
     static BoardScene.Tile beside(BoardScene scene, FieldBoard board, Coords h) {
         BoardScene.Tile best = null;
@@ -280,6 +280,7 @@ final class FieldWater {
             Coords next = h.translated(d);
             if (!WaterLayer.water(board, next) || !WaterLayer.bank(board, next, h)) { continue; }
             BoardScene.Tile tile = scene.tile(next);
+            if (tile.liquid().molten()) { continue; }
             if (best == null || BoardGeometry.waterZ(tile) > BoardGeometry.waterZ(best)) { best = tile; }
         }
         return best;
