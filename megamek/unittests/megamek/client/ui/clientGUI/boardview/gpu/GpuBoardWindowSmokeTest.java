@@ -1121,7 +1121,11 @@ class GpuBoardWindowSmokeTest {
                     onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) GpuHost.sceneListener();
                         assertTrue(settled.epsilonEquals(battle.boardCamera.focus, .001f),
-                              "A second request must retain the same framing, not snap to the unit's hex");
+                              "A second request must retain the same framing, not snap to the unit's hex: "
+                                    + settled + " then " + battle.boardCamera.focus + " at " + size[0] + " wide, zoom "
+                                    + battle.boardCamera.camera.zoom + ", viewport "
+                                    + battle.boardCamera.camera.viewportWidth + "x"
+                                    + battle.boardCamera.camera.viewportHeight);
                         return null;
                     });
                 }
