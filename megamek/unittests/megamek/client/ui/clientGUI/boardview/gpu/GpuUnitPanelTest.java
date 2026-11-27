@@ -699,6 +699,34 @@ class GpuUnitPanelTest {
         verify(records, times(1)).setAmmo(anyInt(), anyInt(), any());
     }
 
+    @Test
+    void aBayOfSeveralWeaponTypesLoadsEachTypesBinThroughItsOwnSelect() throws Exception {
+        GpuUnitRecord.Snapshot record = fixture.frame(ATLAS).panels().record();
+        GpuUnitRecord.RecordWeapon lrm = record.weapons().stream().filter(weapon -> weapon.name().equals("LRM 20"))
+              .findFirst().orElseThrow();
+        // The LRM 20 as a bay of two types, each with the LRM's two bins
+        List<GpuUnitRecord.BayLoad> loads = List.of(new GpuUnitRecord.BayLoad(70, "LRM 20 x2", lrm.ammoChoices(), 0),
+              new GpuUnitRecord.BayLoad(71, "LRM 15", lrm.ammoChoices(), 1));
+        GpuUnitRecord.RecordWeapon bay = new GpuUnitRecord.RecordWeapon(lrm.eqNum(), lrm.name(), lrm.row(),
+              lrm.ranges(), lrm.destroyed(), lrm.jammed(), lrm.crippled(), lrm.fired(), lrm.stats(), lrm.quirks(),
+              lrm.ammoChoices(), lrm.loadedAmmo(), loads);
+        GpuUnitRecord.Snapshot changed = withWeapons(record, record.weapons().stream()
+              .map(weapon -> weapon == lrm ? bay : weapon).toList());
+        hud.state.expandedWeapon = lrm.name();
+        hud.state.expandedOrdinal = 0;
+        show(ATLAS, SheetTab.WEAPONS, true, GamePhase.FIRING);
+        GpuBoardSource.Frame frame = with(fixture.frame(ATLAS), changed, null, List.of());
+        update(frame, GamePhase.FIRING);
+        assertNull(hud.stage.getRoot().findActor("record-weapon-ammo"), "A bay of several types has a select per type");
+        assertEquals(lrm.ammoChoices().get(0).label(), ((UiButton) find("record-bay-ammo-0")).getText().toString());
+        UiButton second = find("record-bay-ammo-1");
+        assertEquals(lrm.ammoChoices().get(1).label(), second.getText().toString());
+        click(second);
+        update(frame, GamePhase.FIRING);
+        click(menuItems().get(0));
+        verify(records).setAmmo(ATLAS, lrm.eqNum(), 71, lrm.ammoChoices().get(0));
+    }
+
     /**
      * P1 H9: MegaMek names the LRM's normal mode "" (the Unit Display lists a blank entry). The mode select and its
      * list read "Standard" there, and the entry still switches to MegaMek's own mode, by its index.
@@ -893,6 +921,17 @@ class GpuUnitPanelTest {
               || bin.eqNum() == second.eqNum() ? new GpuUnitRecord.AmmoBin(bin.eqNum(), bin.name(), bin.location(),
               bin.shots(), bin.fullShots(), false, false, false, false, true, "") : bin).toList();
         return withSlot(record, "RA", dual, ammo);
+    }
+
+    /** The record with other weapons. */
+    private static GpuUnitRecord.Snapshot withWeapons(GpuUnitRecord.Snapshot record,
+          List<GpuUnitRecord.RecordWeapon> weapons) {
+        return new GpuUnitRecord.Snapshot(record.unitId(), record.own(), record.removed(), record.paperdoll(),
+              record.damageLevel(), record.locations(), record.vitals(), record.hitTracks(), record.shields(),
+              record.heatTicks(), record.heatTickEffects(), record.heatScale(), record.heatBuildup(), weapons,
+              record.equipment(), record.systems(), record.crew(), record.abilities(), record.ammo(),
+              record.conditions(), record.carried(), record.unused(), record.lastTarget(), record.info(),
+              record.readoutRows(), record.readout(), record.damage());
     }
 
     /** The record with one slot of a location replaced and other ammunition bins. */

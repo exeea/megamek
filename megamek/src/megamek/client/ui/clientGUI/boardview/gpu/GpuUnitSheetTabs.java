@@ -1518,11 +1518,20 @@ final class GpuUnitSheetTabs implements Disposable {
     private Table weaponControls(GpuUnitRecord.RecordWeapon weapon, Inputs inputs, boolean narrow) {
         boolean loads = !weapon.ammoChoices().isEmpty();
         boolean field = inputs.fieldOfFire() != null && record.own() && !record.removed();
-        if (!loads && !field) {
+        if (!loads && !field && weapon.bayLoads().isEmpty()) {
             return null;
         }
         Table row = new Table();
         row.left();
+        if (weapon.bayLoads().size() > 1 || (!loads && !weapon.bayLoads().isEmpty())) {
+            // A bay of several weapon types: each type loads its own bin
+            for (GpuUnitRecord.BayLoad load : weapon.bayLoads()) {
+                int index = weapon.bayLoads().indexOf(load);
+                row.add(bayLoadRow(weapon, load, index, index == 0 && loads && inputs.firingActor())).left()
+                      .colspan(3).padBottom(4).row();
+            }
+            loads = false;
+        }
         if (loads) {
             int unit = record.unitId();
             List<String> labels = weapon.ammoChoices().stream().map(GpuUnitRecord.AmmoChoice::label).toList();
@@ -1548,6 +1557,32 @@ final class GpuUnitSheetTabs implements Disposable {
             row.add(fieldOfFireButton(weapon, inputs)).padLeft(8);
         }
         return row;
+    }
+
+    /**
+     * One weapon type of a bay with the bin its weapons load. The local firing actor's first type goes through the
+     * fire orders, as a single weapon's bin does; any other through the unit record.
+     */
+    private Table bayLoadRow(GpuUnitRecord.RecordWeapon weapon, GpuUnitRecord.BayLoad load, int index,
+          boolean throughOrders) {
+        int unit = record.unitId();
+        List<String> labels = load.ammoChoices().stream().map(GpuUnitRecord.AmmoChoice::label).toList();
+        int loaded = load.loadedAmmo();
+        UiButton select = ui.select(loaded >= 0 && loaded < labels.size() ? labels.get(loaded) : "—", false);
+        select.setName("record-bay-ammo-" + index);
+        onChange(select, () -> menu.list(select, labels, loaded, choice -> {
+            GpuUnitRecord.AmmoChoice bin = load.ammoChoices().get(choice);
+            if (throughOrders) {
+                source.fire().setAmmo(weapon.eqNum(), bin);
+            } else {
+                source.record().setAmmo(unit, weapon.eqNum(), load.memberEqNum(), bin);
+            }
+        }));
+        Table line = new Table();
+        line.left();
+        line.add(ui.label(load.name(), "hud-body", 12, UiTheme.MUTED)).padRight(8);
+        line.add(select).prefWidth(150).minWidth(60);
+        return line;
     }
 
     /**

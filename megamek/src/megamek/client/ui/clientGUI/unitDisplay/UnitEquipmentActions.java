@@ -126,6 +126,23 @@ public final class UnitEquipmentActions {
         }
     }
 
+    /**
+     * The unit's bridge equipment as the equipment list words it: an infantry bridge kit with the bridges it can still
+     * build, a bridge layer with the state of its bridge. Empty for a unit without either.
+     */
+    public static List<String> bridgeEquipment(Entity en) {
+        List<String> lines = new ArrayList<>();
+        for (Mounted<?> mounted : en.getEquipment()) {
+            StringBuilder state = new StringBuilder();
+            appendBridgeKitBudget(en, state, mounted);
+            appendBridgeLayerState(state, mounted);
+            if (!state.isEmpty()) {
+                lines.add(getMountedDisplay(en, mounted, null));
+            }
+        }
+        return lines;
+    }
+
     public static String getMountedDisplay(Entity en, Mounted<?> m, @Nullable CriticalSlot cs) {
         String hotLoaded = Messages.getString("MekDisplay.isHotLoaded");
         StringBuilder sb = new StringBuilder();
