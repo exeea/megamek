@@ -4306,8 +4306,9 @@ final class BoardRelief {
         float x = lerp(row[i][0], row[i + 1][0], f), y = lerp(row[i][1], row[i + 1][1], f);
         float ground = topHeight(destination, x, y);
         if (Float.isFinite(ground) && ground > z) {
-            // The talus falls off within the transition's width of the row: halve toward where it reaches z.
-            float near = 0, far = metres(TRANSITION);
+            // The talus falls off within twice the transition's width of the row (FieldBoard#height's apron): halve
+            // toward where it reaches z.
+            float near = 0, far = 2 * metres(TRANSITION);
             for (int k = 0; k < 10; k++) {
                 float s = (near + far) / 2, g = topHeight(destination, x + edge.nx * s, y + edge.ny * s);
                 if (Float.isFinite(g) && g > z) { near = s; } else { far = s; }
