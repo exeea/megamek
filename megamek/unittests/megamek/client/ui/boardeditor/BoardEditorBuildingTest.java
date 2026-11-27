@@ -82,7 +82,9 @@ class BoardEditorBuildingTest {
                         Hex hex = new Hex(0, "building:" + weight + ":" + connections + ";bldg_class:" + buildingClass
                               + ";bldg_elev:" + height + ";bldg_cf:90;bldg_basement_type:1", "");
                         String model = TilesetScenery.structureModels(hex).get(Terrains.BUILDING);
-                        assertTrue(TilesetScenery.generatedKit(model), model);
+                        // A gun emplacement is a modelled kit; the other classes are generated ones.
+                        assertEquals(buildingClass != megamek.common.units.IBuilding.GUN_EMPLACEMENT,
+                              TilesetScenery.generatedKit(model), model);
                         assertTrue(TilesetScenery.customBuildingFile(model).isFile(), model);
                         if (expected == null) { expected = model; } else { assertEquals(expected, model); }
                     }
