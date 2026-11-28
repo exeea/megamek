@@ -84,10 +84,28 @@ The dock treats it as a right-column panel and stays clear of it (rule 3).
 - **Entry points:** the bots utility (shown only while the player commands a bot), the *Orders and behavior* row under
   each commandable bot in the Players panel, and the bot commands key (Ctrl+Shift+G), which opens the sheet when the
   player commands exactly one bot and the Players panel otherwise.
-- **Scope:** the sheet's header says what its options change; today every option applies to the whole bot. Lances
-  and artillery are tabs for later.
+- **Scope:** the sheet's header says what its options change; today every option applies to the whole bot. Its
+  pages are Behavior and Targets; lance and artillery pages come when they have content.
 - **No chat:** each change goes to the bot as a typed command, never as a chat message. The sheet shows what was asked
   until the bot reports it back.
+- **Strategic hexes:** *Pick on board* starts a board pick with the sheet still open. Board clicks pick or unpick
+  hexes; the Targets page shows the picked hexes in place of the button, with Done and Cancel (the hint line's chip
+  shows them too). Done adds the hexes, Cancel adds none, and Esc cancels the pick before it closes the sheet.
+
+Allied bots' forces and orders are shown, read-only, in zones 6 and 1:
+
+- **Units list:** each allied bot gets a header row: its name, then its personality ("Balanced"). Its posture follows
+  only when the player set one (Attack or Defend); Auto, the default, decides each round. The AI (Princess or CASPAR)
+  is not shown. Its lances and units follow. Enemy bots are not listed.
+- **Selection:** a click on a CASPAR lance header selects the whole lance. The lower-left card then shows the lance
+  form, with a LANCE scope chip, a units table (armor, heat, state) and the lance's Orders band. The lance's units show
+  their nameplates on the board. Princess gives orders per unit, so its lances can't be selected; the player picks
+  single units.
+- **Allied bot unit:** an allied bot's unit opens in the left card, not the right one. Its card has a UNIT scope chip,
+  a subtitle naming the bot and the lance, and an Orders band ("Orders · follows Fire lance"). Princess reports its
+  waypoints to allies, so the band shows its route.
+- **Ending it:** a unit row in the lance form inspects that unit. The card's ✕, Esc and a new own selection end the
+  lance selection.
 
 ## Known issues from the tester screenshots
 

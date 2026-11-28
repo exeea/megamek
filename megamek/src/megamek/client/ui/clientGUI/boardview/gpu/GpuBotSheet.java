@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -27,6 +26,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.TimeUtils;
 import megamek.client.bot.princess.BehaviorChange.Trait;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.CardinalEdge;
@@ -45,13 +45,11 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiCollapsible;
 import megamek.client.ui.gdx.UiFilterChip;
-import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTabs;
-import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
 
@@ -59,16 +57,15 @@ import megamek.common.board.Coords;
  * The bot sheet (bot sheet plan, artboard 3): a side sheet at the window's right that gives a bot the local player may
  * command its behavior and standing orders. Every control applies at once as a typed command ({@link GpuBotOrders})
  * and then shows what the bot reported; until the report arrives the footer says the change is on its way. Its scope
- * is always the whole bot, which its banner says; lance and artillery orders come later, so their tabs stand
- * disabled. It leaves the board playable beside it, and Esc or its close button closes it.
+ * is always the whole bot, which its banner says. Strategic hexes are picked on the board with the sheet open: its
+ * Targets page shows the pick with Done and Cancel. It leaves the board playable beside it, and Esc or its close
+ * button closes it.
  * <p>
  * GL thread.
  */
 final class GpuBotSheet implements GpuHud.Component {
     private static final int BEHAVIOR = 0;
     private static final int TARGETS = 1;
-    private static final int LANCES = 2;
-    private static final int ARTILLERY = 3;
     /** The retreat choices the sheet offers: fight on, or leave right away by an edge. */
     private static final String[] RETREATS = { "fight", "leave" };
     /** A player's stance in the Players select. */
@@ -77,6 +74,8 @@ final class GpuBotSheet implements GpuHud.Component {
     private static final int IGNORE = 2;
     /** The tactic chips draw no disabled face of their own, so they dim while the bot waits. */
     private static final float WAITING_ALPHA = .45f;
+    /** How long the sheet waits for its board pick to start before it offers Pick on board again. */
+    private static final long PICK_START_MILLIS = 2000;
 
     private final GpuHudKit kit;
     private final GpuBoardSource source;
@@ -116,9 +115,10 @@ final class GpuBotSheet implements GpuHud.Component {
 
     private final Table priorityList = new Table();
     private final Table hexList = new Table();
-    private final UiTextField hexInput;
-    private final UiFormField hexField;
-    private final UiButton addHex;
+    private final UiButton pickHexes;
+    private final Table picking = new Table();
+    private final Label pickStatus;
+    private final Container<Actor> pickSlot = new Container<>();
     private final Table ignoreList = new Table();
     private final UiButton ignoreTurrets;
     private final UiButton clearIgnored;
@@ -137,6 +137,13 @@ final class GpuBotSheet implements GpuHud.Component {
     private List<Object> ignoreShown;
     private List<Object> playersShown;
     private List<Object> tagShown;
+    /** The bot whose strategic hexes the board pick adds, or -1. */
+    private int pickingFor = -1;
+    /** Whether that pick showed on the board yet, and when the sheet asked for it. */
+    private boolean pickSeen;
+    private long pickAsked;
+    /** What the pick area last showed, so it only changes when the pick does. */
+    private List<Object> pickShown;
 
     GpuBotSheet(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         this.kit = kit;
@@ -170,17 +177,12 @@ final class GpuBotSheet implements GpuHud.Component {
         banner.add(scope).growX().minWidth(0).padLeft(space("sm"));
         root.add(banner).growX().padTop(space("md")).row();
 
-        tabs = ui.tokenTabs(true, text("GpuBoard.hud.bots.tab.behavior"), text("GpuBoard.hud.bots.tab.targets"),
-              text("GpuBoard.hud.bots.tab.lances"), text("GpuBoard.hud.bots.tab.artillery"));
+        tabs = ui.tokenTabs(true, text("GpuBoard.hud.bots.tab.behavior"), text("GpuBoard.hud.bots.tab.targets"));
         tabs.setName("bot-sheet-tabs");
-        String[] tabNames = { "behavior", "targets", "lances", "artillery" };
+        String[] tabNames = { "behavior", "targets" };
         for (int index = 0; index < tabNames.length; index++) {
             tabs.option(index).setName("bot-sheet-tab-" + tabNames[index]);
         }
-        tabs.option(LANCES).setDisabled(true);
-        tabs.option(ARTILLERY).setDisabled(true);
-        GpuBotControls.tip(ui, tabs.option(LANCES), text("GpuBoard.hud.bots.tab.lances.tip"));
-        GpuBotControls.tip(ui, tabs.option(ARTILLERY), text("GpuBoard.hud.bots.tab.artillery.tip"));
         UiKit.onChange(tabs, this::showPage);
         root.add(tabs).left().padTop(space("md")).row();
 
@@ -309,21 +311,27 @@ final class GpuBotSheet implements GpuHud.Component {
         targetsPage.add(ui.caption(text("GpuBoard.hud.bots.hexes"), true)).padTop(space("xl")).row();
         hexList.top().left().defaults().left().growX();
         targetsPage.add(hexList).padTop(space("sm")).row();
-        hexInput = ui.input("", true);
-        hexInput.setName("bot-hex-coords");
-        hexInput.setTextFieldFilter((field, typed) -> Character.isDigit(typed) || typed == ',' || typed == ' ');
-        hexField = ui.formField(Messages.getString("Lobby.bot.hexCoords"), hexInput);
-        GpuBotControls.tip(ui, hexInput, Messages.getString("BotConfigDialog.hexCoordsTip"));
-        UiKit.onChange(hexInput, () -> hexField.error(null));
-        addHex = ui.button("button-secondary-compact", "add", Messages.getString("Lobby.bot.add"), null);
-        addHex.setName("bot-hex-add");
-        UiKit.onChange(addHex, this::addHex);
-        Table typed = new Table();
-        typed.left().bottom();
-        typed.add(hexField).width(160).bottom();
-        typed.add(addHex).bottom().padLeft(space("sm"));
-        typed.add().growX();
-        targetsPage.add(typed).padTop(space("sm")).row();
+        pickHexes = ui.button("button-secondary-compact", "hex", text("GpuBoard.hud.bots.hexes.pick"), null);
+        pickHexes.setName("bot-hex-pick");
+        UiKit.onChange(pickHexes, this::pickHexes);
+        pickStatus = hint(ui, "");
+        pickStatus.setName("bot-hex-pick-status");
+        UiButton pickDone = ui.button("button-primary" + UiTheme.COMPACT, "check",
+              text("BotCommandPanel.HexPicker.done"), null);
+        pickDone.setName("bot-hex-pick-done");
+        UiKit.onChange(pickDone, () -> source.players().endPick(true));
+        UiButton pickCancel = ui.button("button-quiet-compact", null, text("BotCommandPanel.HexPicker.cancel"), null);
+        pickCancel.setName("bot-hex-pick-cancel");
+        UiKit.onChange(pickCancel, () -> source.players().endPick(false));
+        picking.setName("bot-hex-picking");
+        picking.left();
+        picking.add(pickStatus).colspan(3).growX().minWidth(0).left().row();
+        picking.add(pickDone).left().padTop(space("sm"));
+        picking.add(pickCancel).left().padTop(space("sm")).padLeft(space("sm"));
+        picking.add().growX();
+        pickSlot.left().fillX();
+        pickSlot.setActor(pickHexes);
+        targetsPage.add(pickSlot).padTop(space("sm")).row();
 
         targetsPage.add(ui.caption(text("GpuBoard.hud.bots.ignore"), true)).padTop(space("xl")).row();
         ignoreList.top().left().defaults().left().growX();
@@ -364,6 +372,8 @@ final class GpuBotSheet implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
+        GpuPlayers.Pick pick = inputs.frame().panels().players().pick();
+        followPick(pick);
         boolean shownNow = state.dialog == Dialog.BOTS;
         if (shownNow != open) {
             open = shownNow;
@@ -397,6 +407,7 @@ final class GpuBotSheet implements GpuHud.Component {
         if (snapshot != shownSnapshot || row != shown) {
             show(snapshot, row);
         }
+        showPick(pick);
     }
 
     private GpuBotOrders orders() {
@@ -599,8 +610,6 @@ final class GpuBotSheet implements GpuHud.Component {
         List<Coords> hexes = new ArrayList<>(row.status().strategicHexes());
         hexes.sort(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
         List<Object> key = Arrays.asList(ready, hexes);
-        hexInput.setDisabled(!ready);
-        addHex.setDisabled(!ready);
         if (key.equals(hexesShown)) {
             return;
         }
@@ -624,15 +633,55 @@ final class GpuBotSheet implements GpuHud.Component {
         }
     }
 
-    private void addHex() {
-        Optional<Coords> hex = BotSetupForm.parseHex(hexInput.getText());
-        if (hex.isEmpty()) {
-            hexField.error(Messages.getString("Lobby.bot.hexUnreadable"));
+    /**
+     * Starts a pick of strategic hexes on the board, with the sheet open: board clicks pick and unpick hexes, the
+     * pick area's Done (or the Done key) adds them and its Cancel (or Esc) adds none.
+     */
+    private void pickHexes() {
+        if (!commandable) {
             return;
         }
-        hexInput.setText("");
-        hexField.error(null);
-        send(() -> orders().hex(id(), hex.get(), true));
+        pickingFor = id();
+        pickSeen = false;
+        pickAsked = TimeUtils.millis();
+        orders().pickHexes(id(), text("GpuBoard.hud.bots.hexes.order", title.getText().toString()));
+    }
+
+    /** Ends the sheet's pick once it ends on the board, or when it never started (no board to pick on). */
+    private void followPick(GpuPlayers.Pick pick) {
+        if (pickingFor < 0) {
+            return;
+        }
+        if (pick != null) {
+            pickSeen = true;
+        } else if (pickSeen || TimeUtils.timeSinceMillis(pickAsked) >= PICK_START_MILLIS) {
+            pickingFor = -1;
+            pickSeen = false;
+        }
+    }
+
+    /**
+     * The pick area under the strategic hexes: Pick on board, or while the shown bot's pick runs, the hexes it has
+     * picked with Done and Cancel. Pick on board waits while another pick runs.
+     */
+    private void showPick(GpuPlayers.Pick pick) {
+        boolean ours = pickingFor >= 0 && pickingFor == id();
+        List<Object> key = Arrays.asList(ours, ours && pick != null ? pick.status() : null, commandable,
+              pick != null);
+        if (key.equals(pickShown)) {
+            return;
+        }
+        pickShown = key;
+        if (ours) {
+            String status = pick == null ? "" : pick.status();
+            pickStatus.setText(status.isEmpty() ? text("GpuBoard.hud.bots.hexes.picking") : status);
+            pickSlot.setActor(picking);
+            pickSlot.fill(1, 0);
+        } else {
+            pickHexes.setDisabled(!commandable || pick != null);
+            pickSlot.setActor(pickHexes);
+            pickSlot.fill(0, 0);
+        }
     }
 
     private void showIgnored(BotRow row) {
